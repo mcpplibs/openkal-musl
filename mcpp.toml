@@ -1,25 +1,132 @@
 [package]
 namespace   = "mcpplibs"
-name        = "openkal-libc"
-version     = "0.2.0"
-description = "A C library above openkal rather than above a kernel. Porting it once causes the software above it to run on every openkal implementation, which is the claim the specification makes and this package tests."
+name        = "openkal-musl"
+version     = "0.1.0"
+description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 authors     = ["mcpplibs"]
-repo        = "https://github.com/mcpplibs/openkal-libc"
+repo        = "https://github.com/mcpplibs/openkal-musl"
 
 [dependencies]
-openkal = "0.4.0"
+openkal = "0.5.0"
 
-# The library declares against the interface and links against no
-# implementation: a consumer of it chooses one. Its own tests run, and running
-# requires definitions, so an implementation is a development dependency and is
-# selected by the platform the tests run upon.
+# A C library is not an ordinary consumer of openkal, and this is the one place
+# where that shows in a manifest.
 #
-# Its absence is why every test in this package failed to link while the package
-# itself built: the diagnostic named the undefined operations, which is what
-# clause 4.2 of the specification describes.
-[target.'cfg(os = "linux")'.dev-dependencies]
-openkal-linux = "0.4.0"
+# An ordinary consumer declares the specification and leaves the choice of
+# implementation to whoever builds the program, which is what the specification
+# recommends and what openkal's own example demonstrates. This package cannot:
+# it *is* the C library, so it must be linked with an implementation that
+# supplies what a C library's first object ordinarily supplies --- the program
+# entry, the thread pointer, and execution contexts created without a C library
+# to create them. That is what the `freestanding' feature selects, and a
+# program above this package would otherwise have to know to ask for it.
+#
+# The consequence for a program is that it names this package and nothing else.
+[target.'cfg(os = "linux")'.dependencies]
+openkal-linux = { version = "0.5.0", features = ["freestanding"] }
 
-[target.'cfg(os = "macos")'.dev-dependencies]
-openkal-macos = "0.2.0"
+[target.'cfg(os = "macos")'.dependencies]
+openkal-macos = { version = "0.3.0", features = ["freestanding"] }
+
+[target.'cfg(windows)'.dependencies]
+openkal-windows = { version = "0.1.0", features = ["freestanding"] }
+
+# The feature macros musl's own build establishes.
+#
+# musl's <features.h> turns on the POSIX and BSD declarations when a program
+# names no feature macro and is not compiled in strict ISO mode. A program
+# built by this tool *is* compiled in strict ISO mode --- `-std=c11' rather than
+# `-std=gnu11' --- so the macros are stated instead of inferred. They are
+# declared as a feature rather than as build flags because a feature's defines
+# are the one thing a package can contribute to the translation units of a
+# program above it, and a program above a C library needs the same view of that
+# library's headers that the library was built with.
+#
+# _BSD_SOURCE is deliberately absent, and the reason is worth recording because
+# it looks like an omission: musl's own build does not define it either, and a
+# build that does fails --- <strings.h> then declares `index', and one of musl's
+# own sources has a static variable of that name. The macro musl's features.h
+# would have inferred is therefore not the macro musl is built with.
+[features]
+default = ["posix"]
+posix = { defines = ["_XOPEN_SOURCE=700"] }
+
+[build]
+c_standard = "c99"
+
+# musl's own source selection rule, written as globs. The base set is one level
+# under src/ plus the selected allocator; a directory named after an
+# architecture holds overrides for that architecture, and this port takes none
+# of them --- the four names for which musl ships no C are supplied by
+# port/src/okm_setjmp.S, in one file that assembles for every object format.
+#
+# The five exclusions are the whole of what this port replaces in musl, and
+# each is replaced because it reads the shape of one environment directly:
+# the auxiliary vector, the program's own ELF headers, the instruction that
+# installs a thread pointer, the system call that creates a thread, and the
+# duplication of the calling image.
+sources = [
+  "musl/src/*/*.c",
+  "musl/src/malloc/mallocng/*.c",
+  "!musl/src/env/__libc_start_main.c",
+  "!musl/src/env/__init_tls.c",
+  "!musl/src/thread/__set_thread_area.c",
+  "!musl/src/thread/clone.c",
+  "!musl/src/process/posix_spawn.c",
+  "port/src/*.c",
+  "port/src/*.S",
+]
+
+# The order is musl's own, and it is load-bearing twice. port/include holds the
+# two headers that replace an architecture's copies, so it precedes the
+# architecture's directory; and an architecture's bits precede the generic ones,
+# six of which exist in both places.
+#
+# These directories reach a program above this package as well, which is how a
+# program's <stdio.h> becomes musl's. That includes musl's own internal
+# headers: this package is built from the same include path it publishes, and
+# the alternative --- two paths --- is a second place where the set of headers
+# is configured.
+include_dirs = [
+  "port/include",
+  "musl/src/include",
+  "musl/src/internal",
+  "musl-generated/internal",
+  "musl/include",
+]
+
+cflags = [
+  # musl is written to C99 and to nothing else. -nostdinc is not an
+  # optimisation: a C library that included the headers of another C library
+  # would be describing that library's types rather than its own.
+  "-ffreestanding",
+  "-nostdinc",
+  "-fno-stack-protector",
+  "-fno-strict-aliasing",
+  "-frounding-math",
+  "-w",
+  # A C library is a set of facilities a program chooses from, and every
+  # facility it did not choose would otherwise be linked into it: this package
+  # contributes objects rather than an archive, so a program that calls printf
+  # would also carry the complex-arithmetic routines. Placing each function and
+  # each object in a section of its own lets the linker discard what nothing
+  # reaches, which restores the property an archive would have given.
+  "-ffunction-sections",
+  "-fdata-sections",
+]
+
+# What a program above this package links with. -nostdlib is the statement that
+# there is one C library in the program and that it is this one; without it the
+# driver would add the host's, and the two would define the same names.
+# -lgcc supplies the routines a compiler emits calls to and no C library
+# defines: integer division on some architectures, and the complex-arithmetic
+# helpers musl's own <complex.h> implementation calls. With -nostdlib the driver
+# adds nothing, so what is needed is named.
+ldflags = ["-nostdlib", "-static", "-Wl,--gc-sections", "-lgcc"]
+
+[target.'cfg(arch = "x86_64")'.build]
+include_dirs = ["musl-generated/x86_64", "musl/arch/x86_64", "musl/arch/generic"]
+
+[target.'cfg(arch = "aarch64")'.build]
+include_dirs = ["musl-generated/aarch64", "musl/arch/aarch64", "musl/arch/generic"]

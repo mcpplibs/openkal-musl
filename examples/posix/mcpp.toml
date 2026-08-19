@@ -1,0 +1,10 @@
+[package]
+name    = "posix"
+version = "0.1.0"
+
+[dependencies]
+openkal-musl = { path = "../.." }
+
+[targets.posix]
+kind = "bin"
+main = "src/main.c"

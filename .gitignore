@@ -1,4 +1,6 @@
-target/
-.mcpp/
 compile_commands.json
+.mcpp/
 mcpp.lock
+sample.txt
+target/
+*.tmp

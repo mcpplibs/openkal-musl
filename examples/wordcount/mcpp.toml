@@ -1,12 +1,14 @@
+# A program above openkal-musl names one package. It does not name openkal, it
+# does not name an implementation, and it does not say anything about the
+# platform: the C library declares the implementation it needs for the target
+# being built, because it is the only party that knows it needs one.
 [package]
 name    = "wordcount"
-version = "0.1.0"
+version = "0.2.0"
 
 [dependencies]
-openkal-libc = { path = "../.." }
+openkal-musl = { path = "../.." }
 
-[target.'cfg(os = "linux")'.dependencies]
-openkal-linux = "0.4.0"
-
-[target.'cfg(os = "macos")'.dependencies]
-openkal-macos = "0.2.0"
+[targets.wordcount]
+kind = "bin"
+main = "src/main.c"
