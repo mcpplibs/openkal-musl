@@ -1,0 +1,12 @@
+[package]
+name    = "wordcount"
+version = "0.1.0"
+
+[dependencies]
+openkal-libc = { path = "../.." }
+
+[target.'cfg(os = "linux")'.dependencies]
+openkal-linux = "0.3.0"
+
+[target.'cfg(os = "macos")'.dependencies]
+openkal-macos = "0.1.0"

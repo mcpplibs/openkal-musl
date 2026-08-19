@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: conformance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # A version verified to build this package, not a measured minimum. The
+      # package uses modules, exported extern "C" declarations and ordinary
+      # dependencies, none of which is recent; the pin exists for reproducibility
+      # rather than because an older mcpp is known to fail.
+      MCPP_VERSION: 2026.8.19.4
+      XLINGS_VERSION: v2026.8.17.2
+      XLINGS_NON_INTERACTIVE: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xlings
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/openxlings/xlings/main/tools/other/quick_install.sh \
+            | bash -s "$XLINGS_VERSION"
+          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+
+      - name: Install mcpp
+        run: |
+          xlings update
+          xlings install "mcpp@$MCPP_VERSION" -y -g
+          mcpp --version
+          mcpp self config --mirror GLOBAL
+
+      - name: Tests
+        run: |
+          mcpp test 2>&1 | tee tests.log
+          # A suite that discovered nothing reports success, so each case is
+          # asserted to have run.
+          grep -q 'paths ... ok'  tests.log
+          grep -q 'files ... ok'  tests.log
+          grep -q 'mutex ... ok'  tests.log
+
+      - name: An ordinary program runs above the library
+        working-directory: examples/hello
+        run: |
+          mcpp run 2>&1 | tee run.log
+          grep -q 'openkal: hello' run.log
+          grep -q 'openkal: allocation succeeded' run.log
+          grep -q 'openkal: vectored writes unavailable' run.log

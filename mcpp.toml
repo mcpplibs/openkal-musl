@@ -1,0 +1,11 @@
+[package]
+namespace   = "mcpplibs"
+name        = "openkal-libc"
+version     = "0.1.0"
+description = "A C library above openkal rather than above a kernel. Porting it once causes the software above it to run on every openkal implementation, which is the claim the specification makes and this package tests."
+license     = "Apache-2.0"
+authors     = ["mcpplibs"]
+repo        = "https://github.com/mcpplibs/openkal-libc"
+
+[dependencies]
+openkal = "0.3.0"
