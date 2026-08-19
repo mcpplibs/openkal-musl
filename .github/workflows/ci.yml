@@ -38,16 +38,44 @@ jobs:
       - name: Tests
         run: |
           mcpp test 2>&1 | tee tests.log
-          # A suite that discovered nothing reports success, so each case is
-          # asserted to have run.
-          grep -q 'paths ... ok'  tests.log
-          grep -q 'files ... ok'  tests.log
-          grep -q 'mutex ... ok'  tests.log
 
+          # A suite that discovered nothing reports success, so every suite is
+          # asserted to have run. The list is derived from the files present
+          # rather than written out here: a hand-written list names the suites
+          # that existed when it was written, and one added afterwards escapes
+          # the assertion silently.
+          missing=0
+          for f in tests/*.cpp; do
+            name="$(basename "$f" .cpp)"
+            if ! grep -q "^$name \.\.\. ok" tests.log; then
+              echo "suite did not run, or did not pass: $name" >&2
+              missing=1
+            fi
+          done
+          test "$missing" -eq 0
+
+      # The claim this package makes is that a program above it reads a file by
+      # global path, consults a variable, measures an interval and starts
+      # another program without containing any of that. The program is compared
+      # against the system's own counter, so the assertion is that it produced
+      # the right answer rather than that it produced an answer.
+      #
+      # The previous form of this step asserted three lines from a different
+      # example, in a directory this repository does not contain. It had never
+      # run: the step before it failed first, and a step that never runs asserts
+      # nothing while appearing to.
       - name: An ordinary program runs above the library
-        working-directory: examples/hello
+        working-directory: examples/wordcount
         run: |
-          mcpp run 2>&1 | tee run.log
-          grep -q 'openkal: hello' run.log
-          grep -q 'openkal: allocation succeeded' run.log
-          grep -q 'openkal: vectored writes unavailable' run.log
+          printf 'alpha beta\ngamma\n' > sample.txt
+          expected="$(wc < sample.txt | tr -s ' ' | sed 's/^ //')"
+          WORDCOUNT_VERBOSE=1 mcpp run -- sample.txt 2>&1 | tee run.log
+
+          lines="$(sed -n 's/^lines \([0-9]*\) words \([0-9]*\) bytes \([0-9]*\)$/\1 \2 \3/p' run.log)"
+          test -n "$lines" || { echo "the program printed no count" >&2; exit 1; }
+          echo "wordcount: $lines"
+          echo "wc:        $expected"
+          test "$lines" = "$expected"
+
+          # The variable was consulted, and the interval was measured.
+          grep -q 'elapsed .* nanoseconds' run.log

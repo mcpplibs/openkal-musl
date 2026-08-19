@@ -6,7 +6,7 @@ version = "0.1.0"
 openkal-libc = { path = "../.." }
 
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = "0.3.0"
+openkal-linux = "0.4.0"
 
 [target.'cfg(os = "macos")'.dependencies]
-openkal-macos = "0.1.0"
+openkal-macos = "0.2.0"

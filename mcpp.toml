@@ -1,11 +1,25 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-libc"
-version     = "0.1.0"
+version     = "0.2.0"
 description = "A C library above openkal rather than above a kernel. Porting it once causes the software above it to run on every openkal implementation, which is the claim the specification makes and this package tests."
 license     = "Apache-2.0"
 authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-libc"
 
 [dependencies]
-openkal = "0.3.0"
+openkal = "0.4.0"
+
+# The library declares against the interface and links against no
+# implementation: a consumer of it chooses one. Its own tests run, and running
+# requires definitions, so an implementation is a development dependency and is
+# selected by the platform the tests run upon.
+#
+# Its absence is why every test in this package failed to link while the package
+# itself built: the diagnostic named the undefined operations, which is what
+# clause 4.2 of the specification describes.
+[target.'cfg(os = "linux")'.dev-dependencies]
+openkal-linux = "0.4.0"
+
+[target.'cfg(os = "macos")'.dev-dependencies]
+openkal-macos = "0.2.0"
