@@ -11,9 +11,29 @@ the claim can be checked rather than repeated.
 openkal-musl = "0.1.0"
 ```
 
-That is the whole of a program's manifest. It names no implementation and no
-platform: a C library is the one consumer that must know which implementation
-it needs, so it declares that itself.
+It names no implementation and no platform: a C library is the one consumer that
+must know which implementation it needs, so it declares that itself.
+
+One further line is required, and the reason is worth stating because it is not
+about openkal:
+
+```toml
+[build]
+cxx_runtime = "host-coupled"
+```
+
+The build tool decides whether to embed a C++ runtime into the program, and on
+one of the three systems its answer is to embed one and to run that runtime's
+initialiser **first** --- before anything else in the image, including the entry
+point. A program above this package carries no other runtime, so the C library
+has not started at that moment; the embedded initialiser reaches it through a
+guarded static and a mutex and finds nothing there, and the report names the
+dereference rather than the ordering. `host-coupled' says that the build tool
+embeds nothing: the system's own C++ runtime is named instead, and its
+initialisers run inside it, on the facilities it was built against.
+
+The decision belongs to the program because the build tool reads it from the
+program. A dependency that declared it would be declaring it for itself.
 
 ## What was changed, and what was not
 

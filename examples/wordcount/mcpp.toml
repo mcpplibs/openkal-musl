@@ -12,3 +12,21 @@ openkal-musl = { path = "../.." }
 [targets.wordcount]
 kind = "bin"
 main = "src/main.c"
+
+# What a program above this package must say, and why it is one line.
+#
+# The build tool decides whether to embed a C++ runtime into the program, and
+# on one of the three systems its answer is to embed one and to run that
+# runtime's initialiser first --- before anything else in the image, including
+# the entry point. A program above this package carries no other runtime: the C
+# library has not started at that moment, and the embedded initialiser reaches
+# it through a guarded static and a mutex and finds nothing there.
+#
+# `host-coupled' says that the build tool embeds nothing. The system's own C++
+# runtime is named instead, and its initialisers run inside it, on the
+# facilities it was built against rather than on this library's.
+#
+# The decision belongs to the program because the build tool reads it from the
+# program: a dependency that declared it would be declaring it for itself.
+[build]
+cxx_runtime = "host-coupled"
