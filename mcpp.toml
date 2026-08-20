@@ -10,27 +10,26 @@ repo        = "https://github.com/mcpplibs/openkal-musl"
 [dependencies]
 openkal = "0.5.0"
 
-# A C library is not an ordinary consumer of openkal, and this is the one place
-# where that shows in a manifest.
+# An ordinary consumer of openkal declares the specification and leaves the
+# choice of implementation to whoever builds the program, which is what the
+# specification recommends and what openkal's own example demonstrates.
 #
-# An ordinary consumer declares the specification and leaves the choice of
-# implementation to whoever builds the program, which is what the specification
-# recommends and what openkal's own example demonstrates. This package cannot:
-# it *is* the C library, so it must be linked with an implementation that
-# supplies what a C library's first object ordinarily supplies --- the program
-# entry, the thread pointer, and execution contexts created without a C library
-# to create them. That is what the `freestanding' feature selects, and a
-# program above this package would otherwise have to know to ask for it.
+# This package declares the implementation itself, and the reason is a property
+# of this package rather than a property of openkal. A program built above this
+# package carries no other runtime: this one supplies everything the program
+# calls. The implementation must therefore be the whole of the program's
+# environment, which is a thing only the party that knows there is no other
+# runtime can state --- and that party is this package, not the program.
 #
 # The consequence for a program is that it names this package and nothing else.
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = { version = "0.5.0", features = ["freestanding"] }
+openkal-linux = { path = "../openkal-linux", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
-openkal-macos = { version = "0.3.0", features = ["freestanding"] }
+openkal-macos = { path = "../openkal-macos", features = ["standalone"] }
 
 [target.'cfg(windows)'.dependencies]
-openkal-windows = { version = "0.1.0", features = ["freestanding"] }
+openkal-windows = { path = "../openkal-windows", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #
@@ -116,14 +115,29 @@ cflags = [
   "-fdata-sections",
 ]
 
-# What a program above this package links with. -nostdlib is the statement that
-# there is one C library in the program and that it is this one; without it the
-# driver would add the host's, and the two would define the same names.
+# A program above this package carries no other runtime, and the link line is
+# where that is stated.
+#
+# The C++ runtime is not embedded. This package is C, and the implementation
+# beneath it is C++ only because the specification's declarations are modules;
+# neither throws, neither uses run-time type information, and neither reaches a
+# standard library. Left to itself the driver would attach one, and on a link
+# that has removed the C library the attached runtime's own references to it
+# would be resolved by this package --- which is the collision this arrangement
+# exists to avoid.
+cxx_runtime = "host-coupled"
+
+# -nostdlib is the statement that the program carries one C library and that it
+# is this one; without it the driver adds the host's, and the two define the
+# same names. --no-dynamic-linker removes the interpreter the driver records
+# even for a static link: a program that names a loader it does not use is a
+# program the loader refuses to start, and clang records one where gcc does not.
 # -lgcc supplies the routines a compiler emits calls to and no C library
-# defines: integer division on some architectures, and the complex-arithmetic
-# helpers musl's own <complex.h> implementation calls. With -nostdlib the driver
-# adds nothing, so what is needed is named.
-ldflags = ["-nostdlib", "-static", "-Wl,--gc-sections", "-lgcc"]
+# defines --- integer division on some architectures, and the complex
+# arithmetic musl's own <complex.h> calls.
+[target.'cfg(os = "linux")'.build]
+ldflags = ["-nostdlib", "-static", "-Wl,--no-dynamic-linker",
+           "-Wl,--gc-sections", "-lgcc"]
 
 [target.'cfg(arch = "x86_64")'.build]
 include_dirs = ["musl-generated/x86_64", "musl/arch/x86_64", "musl/arch/generic"]
