@@ -160,3 +160,36 @@ thrd_detach, thrd_equal, tss_get, utmpname, utmpxname
 The response is one flag on the link line rather than fifteen exceptions in a
 macro: the link names that system's own linker, which is the one its object
 format was designed alongside and which resolves an indirect symbol.
+
+## What the architecture does not decide alone
+
+`long double`.
+
+musl files `<bits/float.h>` under `arch/<arch>/`, and for every system musl was
+written for the architecture does decide it. One of the three systems this port
+builds for disagrees: on its aarch64 a long double is a double, where the
+architecture's own procedure call standard says quadruple.
+
+Measured on all four combinations this port is built for:
+
+| target | `__LDBL_MANT_DIG__` | `arch/<arch>/bits/float.h` |
+| --- | --- | --- |
+| aarch64, Apple | **53** | **113** |
+| x86_64, Apple | 64 | 64 |
+| x86_64, Linux | 64 | 64 |
+| aarch64, Linux | 113 | 113 |
+
+Every routine that takes a long double then reads sixteen bytes out of eight.
+The first one a program reaches is the one that formats a floating-point number:
+`printf("%.3f", 1.5)` stops in `frexpl` with the value read as infinity, and the
+report names the arithmetic rather than the header.
+
+`port/include/bits/float.h` states the compiler's own answer on that
+combination, through the macros the compiler defines, so the file cannot drift
+from what is being compiled. `port/src/okm_float_assert.c` asserts the agreement
+for every target: a fourth combination that disagrees is a failed build naming
+the field rather than a program that formats a number wrongly.
+
+musl already supports a 53-bit long double --- it is what its own arm and
+riscv64 configurations use, and every conditional in `src/math` and `src/stdio`
+is written for it. Nothing beyond the one header is involved.
