@@ -168,7 +168,23 @@ ldflags = ["-nostdlib", "-static", "-Wl,--no-dynamic-linker",
 # is loaded. This format has no such headers, and the operation it names is one
 # openkal does not offer in any case.
 sources = ["!musl/src/ldso/dl_iterate_phdr.c"]
-ldflags = ["-nostdlib", "-lSystem", "-Wl,-e,_okm_start", "-Wl,-dead_strip"]
+#
+# --ld-path names this system's own linker rather than the one the toolchain
+# brings. The reason is one construct and fifteen uses of it. A second name for
+# a definition is made here with the assembler's own directive; where the
+# definition is in the same translation unit that produces an ordinary symbol,
+# and where it is not --- fifteen names in musl, every one of them a function
+# declared in a header and defined elsewhere --- it produces an indirect symbol,
+# which is what that directive is for. The toolchain's linker refuses an
+# indirect symbol, in as many words: "TODO: support aliasing to symbols of kind
+# 1". This system's own linker is the one the format was designed alongside and
+# resolves them.
+#
+# The measurement: 1154 of musl's translation units compiled for this system
+# produce fifteen indirect symbols between them, and they are listed in
+# musl/PATCHES.md.
+ldflags = ["-nostdlib", "-lSystem", "--ld-path=/usr/bin/ld",
+           "-Wl,-e,_okm_start", "-Wl,-dead_strip"]
 
 # The generated headers, per architecture and per data model.
 #

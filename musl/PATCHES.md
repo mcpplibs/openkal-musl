@@ -138,3 +138,25 @@ not know that a program is a kind of file.
 `fork` is absent and stays absent. Duplicating a running image is not something
 every environment can produce. `posix_spawn`, and therefore `system` and
 `popen`, are supplied, because musl builds them on starting a program.
+
+### The fifteen indirect symbols
+
+Where the definition a second name is made for is in the same translation unit,
+the assembler's directive produces an ordinary symbol at that address. Where it
+is not, it produces an *indirect* symbol, which is the other thing that
+directive is for and which one linker refuses in as many words: `TODO: support
+aliasing to symbols of kind 1`.
+
+The measurement: 1154 of musl's translation units compiled for that system
+produce fifteen such symbols between them, and every one is a function declared
+in a header and defined in another unit.
+
+```
+dladdr, dlopen, __dlsym, __dl_invalid_handle, __libc_exit_fini, malloc,
+pthread_detach, pthread_equal, pthread_getspecific, pthread_tryjoin_np,
+thrd_detach, thrd_equal, tss_get, utmpname, utmpxname
+```
+
+The response is one flag on the link line rather than fifteen exceptions in a
+macro: the link names that system's own linker, which is the one its object
+format was designed alongside and which resolves an indirect symbol.
