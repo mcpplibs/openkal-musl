@@ -38,9 +38,10 @@ fetch() {
     git clone --quiet "https://github.com/mcpplibs/$repo.git" "$at"
     if git -C "$at" rev-parse --verify --quiet "origin/$branch" > /dev/null; then
         git -C "$at" checkout --quiet "origin/$branch"
-        echo "$repo is at $branch"
+        echo "$repo is at $branch $(git -C "$at" rev-parse --short HEAD)"
     else
-        echo "$repo has no $branch; its default branch is used"
+        echo "$repo has no $branch; its default branch is used" \
+             "($(git -C "$at" rev-parse --short HEAD))"
     fi
 }
 

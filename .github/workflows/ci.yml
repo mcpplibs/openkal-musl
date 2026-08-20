@@ -103,7 +103,9 @@ jobs:
           if ! "$binary" > run.log 2>&1; then
             cat run.log
             if command -v lldb > /dev/null 2>&1; then
-              lldb --batch -o run -o 'bt all' -o 'register read' -- "$binary" 2>&1 | tail -60 || true
+              lldb --batch -o run -o 'thread list' -o 'thread backtrace all' \
+                   -- "$binary" > crash.log 2>&1 || true
+              cat crash.log
             elif command -v gdb > /dev/null 2>&1; then
               gdb -batch -ex run -ex 'bt' --args "$binary" 2>&1 | tail -40 || true
             fi
