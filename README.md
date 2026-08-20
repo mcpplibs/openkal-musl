@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.3.0"
+openkal-musl = "0.3.1"
 ```
 
 It names no implementation and no platform: a C library is the one consumer that
