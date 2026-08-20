@@ -96,7 +96,20 @@ jobs:
           extra=''
           [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
           mcpp build $extra
-          "$(find target -type f \( -name 'posix' -o -name 'posix.exe' \) | head -1)" 2>&1 | tee run.log
+          binary="$(find target -type f \( -name 'posix' -o -name 'posix.exe' \) | head -1)"
+          # A program that stops without printing has told the reader nothing.
+          # Where the system has a debugger, it is asked where the program was,
+          # because "exit code 139" names a signal and not a place.
+          if ! "$binary" > run.log 2>&1; then
+            cat run.log
+            if command -v lldb > /dev/null 2>&1; then
+              lldb --batch -o run -o 'bt all' -o 'register read' -- "$binary" 2>&1 | tail -60 || true
+            elif command -v gdb > /dev/null 2>&1; then
+              gdb -batch -ex run -ex 'bt' --args "$binary" 2>&1 | tail -40 || true
+            fi
+            exit 1
+          fi
+          cat run.log
           # Both directions: that the program reported, and that nothing it
           # observed failed to hold. Asserting only the first would pass for a
           # program that printed its failures.
