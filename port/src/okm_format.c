@@ -29,13 +29,26 @@
  * differ in the directive that names a section and in whether a C name carries
  * a leading underscore, and in nothing else. */
 #if defined(__APPLE__)
+/* The word after the four labels is not padding.
+ *
+ * This format's linker divides a section into atoms and an atom is what a
+ * symbol names; a section with no content has no atom, and the four names go
+ * with it. The link then reports them as undefined while the object that
+ * defines them is sitting in front of it. One word of content gives the four
+ * names something to name, and the four still share one address, which is what
+ * makes the loops that walk between them run zero times. */
 __asm__(
 	".section __DATA,__const\n"
 	".p2align 3\n"
-	".globl ___init_array_start\n___init_array_start:\n"
-	".globl ___init_array_end\n___init_array_end:\n"
-	".globl ___fini_array_start\n___fini_array_start:\n"
-	".globl ___fini_array_end\n___fini_array_end:\n"
+	".globl ___init_array_start\n"
+	".globl ___init_array_end\n"
+	".globl ___fini_array_start\n"
+	".globl ___fini_array_end\n"
+	"___init_array_start:\n"
+	"___init_array_end:\n"
+	"___fini_array_start:\n"
+	"___fini_array_end:\n"
+	".quad 0\n"
 	".text\n");
 #else
 __asm__(
