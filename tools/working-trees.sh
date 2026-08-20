@@ -69,4 +69,17 @@ point() {
 point "$here/mcpp.toml"
 point "$beside/$implementation/mcpp.toml"
 
+# And this package's own reference to the implementation. It names a version,
+# because a published package must: a path names a directory that exists in the
+# working tree it was written in and nowhere else, and a consumer resolving from
+# the index would be handed a manifest pointing at nothing. The feature travels
+# with the version, because a program above this library carries no other
+# runtime and that is what the feature states.
+impl_path="$(native "$beside/$implementation")"
+sed "s|^$implementation = .*$|$implementation = { path = \"$impl_path\", features = [\"standalone\"] }|" \
+    "$here/mcpp.toml" > "$here/mcpp.toml.next"
+mv "$here/mcpp.toml.next" "$here/mcpp.toml"
+echo "pointed this package at $implementation's working tree"
+sed -n '/^\[target/,/^$/p' "$here/mcpp.toml"
+
 echo "$implementation"

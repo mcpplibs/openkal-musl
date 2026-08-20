@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.3.0"
+version     = "0.3.1"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 authors     = ["mcpplibs"]
@@ -23,13 +23,13 @@ openkal = "0.5.1"
 #
 # The consequence for a program is that it names this package and nothing else.
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = { path = "../openkal-linux", features = ["standalone"] }
+openkal-linux = { version = "0.5.1", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
-openkal-macos = { path = "../openkal-macos", features = ["standalone"] }
+openkal-macos = { version = "0.3.1", features = ["standalone"] }
 
 [target.'cfg(windows)'.dependencies]
-openkal-windows = { path = "../openkal-windows", features = ["standalone"] }
+openkal-windows = { version = "0.1.1", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #
