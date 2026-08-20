@@ -3,7 +3,7 @@
 # package, and points every manifest at the working trees rather than at
 # published versions.
 #
-#   working-trees.sh [<branch>]
+#   working-trees.sh [<branch>] [<target-triple>]
 #
 # Why this exists rather than a version in the manifest: a run asserts that this
 # package as written here and the specification and implementation as written
@@ -19,15 +19,23 @@
 set -euo pipefail
 
 branch="${1:-main}"
+target="${2:-}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 beside="$(cd "$here/.." && pwd)"
 
-case "$(uname -s)" in
-    Linux)   implementation=openkal-linux   ;;
-    Darwin)  implementation=openkal-macos   ;;
-    MINGW*|MSYS*|CYGWIN*) implementation=openkal-windows ;;
-    *) echo "no openkal implementation is known for $(uname -s)" >&2; exit 2 ;;
+# The implementation is chosen by what is being built for, not by what is
+# building. A cross build asks the host which implementation it needs and is
+# told the host's, and what then happens is that the implementation the build
+# actually uses comes from the index while everything around it has been pointed
+# at a working tree --- reported as one package requested as a path and as a
+# version at once, which names neither the host nor the target.
+case "${target:-$(uname -s)}" in
+    *windows*|MINGW*|MSYS*|CYGWIN*) implementation=openkal-windows ;;
+    *macos*|*darwin*|Darwin)        implementation=openkal-macos   ;;
+    *linux*|Linux)                  implementation=openkal-linux   ;;
+    *) echo "no openkal implementation is known for ${target:-$(uname -s)}" >&2; exit 2 ;;
 esac
+echo "building for ${target:-$(uname -s)}, so the implementation is $implementation"
 
 fetch() {
     local repo="$1" at="$beside/$1"
