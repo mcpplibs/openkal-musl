@@ -99,41 +99,52 @@ jobs:
           binary="$(find target -type f \( -name 'posix' -o -name 'posix.exe' \) | head -1)"
 
           # A watchdog, because a program that does not return is as much a
-          # failure as one that returns wrongly and the job would otherwise
+          # failure as one that returns wrongly, and the job would otherwise
           # spend its whole timeout finding that out. Written out rather than
           # taken from `timeout', which two of the three systems have and one
           # does not.
-          run_with_watchdog() {
-            "$binary" > run.log 2>&1 &
-            local pid=$!
-            ( sleep 120; kill -9 "$pid" 2> /dev/null ) &
-            local guard=$!
+          watch() {   # watch <seconds> <command>...
+            local seconds="$1"; shift
+            "$@" & local pid=$!
+            ( sleep "$seconds"; kill -9 "$pid" 2> /dev/null ) & local guard=$!
             wait "$pid"; local status=$?
             kill "$guard" 2> /dev/null || true
             return $status
           }
 
-          # A program that stops without printing has told the reader nothing.
-          # Where the system has a debugger, it is asked where the program was,
-          # because "exit code 139" names a signal and not a place.
-          if ! run_with_watchdog; then
-            echo "--- what the program printed before it stopped ---"
+          if watch 120 sh -c "\"$binary\" > run.log 2>&1"; then
             cat run.log
-            if command -v lldb > /dev/null 2>&1; then
-              # -k runs when the program stops on a signal, which -o does not:
-              # a batch that lists its commands after `run' gets as far as the
-              # stop and then quits, which is how the first attempt at this
-              # printed a frame and no backtrace.
-              lldb --batch -o run \
+          else
+            status=$?
+            echo "--- what the program printed before it stopped (status $status) ---"
+            cat run.log
+
+            # A program that stopped and a program that did not return need
+            # different questions asked of them, and "exit code 139" and "the
+            # job timed out" answer neither. The debugger is for the first; a
+            # stack sample of a program that is still running is for the second,
+            # and a debugger asked to run a program that hangs hangs with it.
+            if [ "$status" -eq 137 ]; then
+              echo "--- it did not return; where it was ---"
+              "$binary" > /dev/null 2>&1 & hung=$!
+              sleep 5
+              if command -v sample > /dev/null 2>&1; then
+                sample "$hung" 3 -mayDie 2>&1 | head -80 || true
+              elif command -v eu-stack > /dev/null 2>&1; then
+                eu-stack -p "$hung" 2>&1 | head -60 || true
+              fi
+              kill -9 "$hung" 2> /dev/null || true
+            elif command -v lldb > /dev/null 2>&1; then
+              watch 90 lldb --batch -o run \
                    -k 'thread backtrace all' -k 'register read' -k quit \
                    -- "$binary" > crash.log 2>&1 || true
               cat crash.log
             elif command -v gdb > /dev/null 2>&1; then
-              gdb -batch -ex run -ex 'bt' --args "$binary" 2>&1 | tail -40 || true
+              watch 90 gdb -batch -ex run -ex 'bt' --args "$binary" > crash.log 2>&1 || true
+              cat crash.log
             fi
             exit 1
           fi
-          cat run.log
           # Both directions: that the program reported, and that nothing it
           # observed failed to hold. Asserting only the first would pass for a
           # program that printed its failures.
