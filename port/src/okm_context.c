@@ -41,7 +41,7 @@
 #define OKM_CONTEXTS 512
 
 struct okm_slot {
-	volatile kal_uintptr key;    /* 0 free, ~0 retired, else kal_task_current() */
+	volatile kal_uintptr key;    /* 0 free, ~0 retired, else key_of(the identity) */
 	uintptr_t            tp;     /* what musl's __get_tp() answers */
 	void*                self;   /* what this port's own thread record is */
 };
@@ -49,6 +49,22 @@ struct okm_slot {
 static struct okm_slot g_slots[OKM_CONTEXTS];
 
 #define OKM_RETIRED ((kal_uintptr)-1)
+
+/* Zero is this table's word for "this entry is free", so an implementation
+ * that answered zero for a context would have that context's entry read as
+ * absent however many times it was written. The specification requires the
+ * identity to be distinct per context and says nothing about zero, so the value
+ * is moved out of the way here rather than assumed away.
+ *
+ * It is not a hypothetical: one implementation answered zero for every context
+ * it started, and what a reader saw was a C library reading its own per-context
+ * state through a null pointer, four layers from the answer. */
+#define OKM_ZERO ((kal_uintptr)-2)
+
+static kal_uintptr key_of(kal_uintptr identity)
+{
+	return identity ? identity : OKM_ZERO;
+}
 
 static unsigned start_at(kal_uintptr key)
 {
@@ -88,13 +104,13 @@ static struct okm_slot* find(kal_uintptr me, int create)
 
 uintptr_t __okm_get_tp(void)
 {
-	struct okm_slot* s = find(kal_task_current(), 0);
+	struct okm_slot* s = find(key_of(kal_task_current()), 0);
 	return s ? s->tp : 0;
 }
 
 void __okm_set_tp(uintptr_t value)
 {
-	struct okm_slot* s = find(kal_task_current(), 1);
+	struct okm_slot* s = find(key_of(kal_task_current()), 1);
 	if (!s) {
 		static const char m[] =
 			"openkal-musl: more execution contexts than this port can record\n";
@@ -105,13 +121,13 @@ void __okm_set_tp(uintptr_t value)
 
 void* __okm_get_self(void)
 {
-	struct okm_slot* s = find(kal_task_current(), 0);
+	struct okm_slot* s = find(key_of(kal_task_current()), 0);
 	return s ? s->self : 0;
 }
 
 void __okm_set_self(void* value)
 {
-	struct okm_slot* s = find(kal_task_current(), 1);
+	struct okm_slot* s = find(key_of(kal_task_current()), 1);
 	if (s) s->self = value;
 }
 
@@ -120,7 +136,7 @@ void __okm_set_self(void* value)
  * past it to reach one placed beyond it by an earlier collision. */
 void __okm_release_context(void)
 {
-	struct okm_slot* s = find(kal_task_current(), 0);
+	struct okm_slot* s = find(key_of(kal_task_current()), 0);
 	if (!s) return;
 	s->tp = 0;
 	s->self = 0;
