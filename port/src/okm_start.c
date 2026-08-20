@@ -28,8 +28,7 @@
 #include "libc.h"
 #include "pthread_impl.h"
 
-/* The slot musl's per-context state is reached through. Clause 7.10. */
-__thread uintptr_t __okm_tp;
+void __okm_set_tp(uintptr_t value);
 
 volatile int __thread_list_lock;
 
@@ -39,7 +38,7 @@ volatile int __thread_list_lock;
  * environment can support more than one execution context. */
 int __set_thread_area(void* p)
 {
-	__okm_tp = (uintptr_t)p;
+	__okm_set_tp((uintptr_t)p);
 	return 0;
 }
 
@@ -158,18 +157,28 @@ int    __okm_argc(void) { return g_argc; }
 
 /* --- the hand-over ----------------------------------------------------------- */
 
+#if !defined(_WIN32)
 static void dummy(void) { }
 weak_alias(dummy, _init);
 weak_alias(dummy, _fini);
+#else
+void _init(void);
+void _fini(void);
+#endif
 
 extern weak hidden void (*const __init_array_start)(void), (*const __init_array_end)(void);
 
 static void libc_start_init(void)
 {
+	/* On this object format _init runs the list the linker built, which is
+	 * where this format puts what ELF puts in an array. Elsewhere the array is
+	 * walked here and _init does nothing. The order is each format's own. */
 	_init();
+#if !defined(_WIN32)
 	uintptr_t a = (uintptr_t)&__init_array_start;
 	for (; a < (uintptr_t)&__init_array_end; a += sizeof(void (*)()))
 		(*(void (**)(void))a)();
+#endif
 }
 
 weak_alias(libc_start_init, __libc_start_init);

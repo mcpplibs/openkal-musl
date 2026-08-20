@@ -258,26 +258,59 @@ static int normalise(const char* in, char* out, size_t cap)
 	return 0;
 }
 
+/* Where an absolute name begins.
+ *
+ * openkal does not say how an environment spells a global name, only that a
+ * supplied directory has one and that the names are distinct. Two spellings
+ * occur among the environments this library is built for: one writes a
+ * separator first, and one writes a volume first. Both are recognised here and
+ * neither is assumed --- a resolver that knew which would be a resolver for one
+ * of them.
+ *
+ * The length returned is the part that is not a component and must survive
+ * normalisation. Zero means the name is relative.
+ */
+static size_t root_length(const char* name)
+{
+	if (!name || !*name) return 0;
+	if (name[0] == '/') return 1;
+	if (name[1] == ':' && (name[2] == '/' || name[2] == '\\')
+	    && ((name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= 'a' && name[0] <= 'z')))
+		return 3;
+	return 0;
+}
+
 static int is_prefix_at_boundary(const char* name, size_t len, const char* abs)
 {
-	if (len == 1 && name[0] == '/') return 1;      /* the root matches every path */
+	if (len == 0) return 0;
 	for (size_t i = 0; i < len; i++) if (abs[i] != name[i]) return 0;
+	/* A supplied directory whose own name ends in a separator --- a root, on
+	 * either spelling --- matches without requiring another. */
+	if (name[len - 1] == '/') return 1;
 	return abs[len] == 0 || abs[len] == '/';
 }
 
-/* Builds `/<normalised>' from an absolute prefix and a relative remainder. */
+/* Builds an absolute name from a base and a remainder, keeping whatever root
+ * the one that has a root had. */
 static int join(const char* prefix, const char* rel, char* out, size_t cap)
 {
 	char tmp[OKM_MAX_PATH];
 	size_t o = 0;
-	for (const char* p = prefix; *p && o + 1 < sizeof tmp; p++) tmp[o++] = *p;
-	if (o == 0 || tmp[o - 1] != '/') { if (o + 1 < sizeof tmp) tmp[o++] = '/'; }
-	for (const char* p = rel; *p && o + 1 < sizeof tmp; p++) tmp[o++] = *p;
+	const size_t rroot = root_length(rel);
+	const size_t proot = rroot ? 0 : root_length(prefix);
+	const char*  base  = rroot ? "" : prefix + proot;
+
+	for (const char* p = base; *p && o + 1 < sizeof tmp; p++) tmp[o++] = *p;
+	if (o && tmp[o - 1] != '/') { if (o + 1 < sizeof tmp) tmp[o++] = '/'; }
+	for (const char* p = rel + rroot; *p && o + 1 < sizeof tmp; p++) tmp[o++] = *p;
 	if (o + 1 >= sizeof tmp) return -ENAMETOOLONG;
 	tmp[o] = 0;
-	const int r = normalise(tmp, out + 1, cap - 1);
-	out[0] = '/';
-	return r;
+
+	const size_t keep = rroot ? rroot : proot;
+	const char*  from = rroot ? rel : prefix;
+	if (keep + 1 >= cap) return -ENAMETOOLONG;
+	for (size_t i = 0; i < keep; i++) out[i] = from[i] == '\\' ? '/' : from[i];
+	return normalise(tmp, out + keep, cap - keep);
 }
 
 int okm_resolve(int dirfd, const char* path, struct okm_at* at, int empty_ok)
@@ -288,8 +321,8 @@ int okm_resolve(int dirfd, const char* path, struct okm_at* at, int empty_ok)
 	char abs[OKM_MAX_PATH];
 	int have_abs = 0;
 
-	if (path[0] == '/') {
-		const int r = join("/", path, abs, sizeof abs);
+	if (root_length(path)) {
+		const int r = join("", path, abs, sizeof abs);
 		if (r) return r;
 		have_abs = 1;
 	} else if (dirfd == AT_FDCWD) {
@@ -336,7 +369,7 @@ int okm_resolve(int dirfd, const char* path, struct okm_at* at, int empty_ok)
 	}
 	if (best < 0) return -ENOENT;
 
-	const char* rest = abs + (best_len == 1 && g_pre[best].name[0] == '/' ? 1 : best_len);
+	const char* rest = abs + best_len;
 	while (*rest == '/') rest++;
 	at->base = g_pre[best].dir;
 	if (!*rest) copy_str(at->rel, ".", 1, sizeof at->rel);
@@ -366,8 +399,8 @@ int okm_chdir(int dirfd, const char* path)
 		if (r) return r;
 		const int e = kal_fs_open_dir(at.base, at.rel, __builtin_strlen(at.rel), &target);
 		if (e != kal_ok) return -okm_errno(e);
-		if (path[0] == '/') { if (join("/", path, abs, sizeof abs)) return -ENAMETOOLONG; }
-		else                { if (join(g_cwd, path, abs, sizeof abs)) return -ENAMETOOLONG; }
+		if (root_length(path)) { if (join("", path, abs, sizeof abs)) return -ENAMETOOLONG; }
+		else                   { if (join(g_cwd, path, abs, sizeof abs)) return -ENAMETOOLONG; }
 	} else {
 		struct okm_desc* d = okm_desc_of(dirfd);
 		if (!d || d->kind != OKM_DIR) return -ENOTDIR;
@@ -392,7 +425,7 @@ int okm_chdir(int dirfd, const char* path)
 int okm_absolute(int dirfd, const char* path, char* out, size_t cap)
 {
 	if (!path) return -EFAULT;
-	if (path[0] == '/') return join("/", path, out, cap);
+	if (root_length(path)) return join("", path, out, cap);
 	if (dirfd == AT_FDCWD) return join(g_cwd, path, out, cap);
 	struct okm_desc* d = okm_desc_of(dirfd);
 	if (!d || d->kind != OKM_DIR) return -ENOTDIR;

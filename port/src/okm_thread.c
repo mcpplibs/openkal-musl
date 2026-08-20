@@ -30,7 +30,10 @@
 #include <time.h>
 #include "futex.h"
 
-extern __thread uintptr_t __okm_tp;
+void      __okm_set_tp(uintptr_t value);
+void*     __okm_get_self(void);
+void      __okm_set_self(void* value);
+void      __okm_release_context(void);
 
 struct okm_thread {
 	int  (*fn)(void*);
@@ -45,8 +48,8 @@ struct okm_thread {
 };
 
 /* The context this one is, when it is not the first. The first context has no
- * such record, and the difference is what SYS_exit consults. */
-static __thread struct okm_thread* okm_self;
+ * such record, and the difference is what SYS_exit consults. It is kept beside
+ * the thread pointer, in the same table and for the same reason. */
 
 /* Contexts that have finished and whose openkal handle has not yet been
  * released. openkal requires that a context be waited for at most once and
@@ -77,8 +80,8 @@ static void reap(void)
 static void entry(void* p)
 {
 	struct okm_thread* t = p;
-	__okm_tp = (uintptr_t)t->tls;
-	okm_self = t;
+	__okm_set_tp((uintptr_t)t->tls);
+	__okm_set_self(t);
 
 	/* musl ends a thread by issuing SYS_exit, which does not return. There is
 	 * no openkal operation that ends a context from within, and there does not
@@ -95,6 +98,10 @@ static void entry(void* p)
 		kal_task_wake((const __UINT32_TYPE__*)t->ctid, 1, &woken);
 	}
 	__atomic_store_n(&t->finished, 1, __ATOMIC_RELEASE);
+
+	/* The identity this context was known by may now be given to another, so
+	 * what was recorded against it is withdrawn before it can be. */
+	__okm_release_context();
 }
 
 int __clone(int (*fn)(void*), void* stack, int flags, void* arg, ...)
@@ -135,9 +142,10 @@ int __clone(int (*fn)(void*), void* stack, int flags, void* arg, ...)
 	return t->tid;
 }
 
-long __okm_task_exit(int code)
+syscall_arg_t __okm_task_exit(int code)
 {
-	if (okm_self) longjmp(okm_self->back, 1);
+	struct okm_thread* self = (struct okm_thread*)__okm_get_self();
+	if (self) longjmp(self->back, 1);
 	/* The first context. Ending it ends the program, which is what the caller
 	 * asked for and what Linux would have done. */
 	kal_exit(code);
@@ -146,7 +154,7 @@ long __okm_task_exit(int code)
 
 /* --- the suspension primitive ------------------------------------------------ */
 
-long __okm_futex(const int* addr, int op, int val, const struct timespec* t)
+syscall_arg_t __okm_futex(const int* addr, int op, int val, const struct timespec* t)
 {
 	op &= ~(FUTEX_PRIVATE | 256 /* FUTEX_CLOCK_REALTIME */);
 	switch (op) {
@@ -179,14 +187,15 @@ long __okm_futex(const int* addr, int op, int val, const struct timespec* t)
  * ever delivered and the comparison never happens; what remains of the
  * mechanism is the part that works without one, which is the check a
  * cancellation point makes before it blocks. */
-hidden long __cancel(void);
+hidden syscall_arg_t __cancel(void);
 
 __attribute__((__visibility__("hidden"))) const char __cp_begin[1]  = { 0 };
 __attribute__((__visibility__("hidden"))) const char __cp_end[1]    = { 0 };
 __attribute__((__visibility__("hidden"))) const char __cp_cancel[1] = { 0 };
 
-long __syscall_cp_asm(volatile void* cancel, long nr,
-                      long a, long b, long c, long d, long e, long f)
+syscall_arg_t __syscall_cp_asm(volatile void* cancel, syscall_arg_t nr,
+                              syscall_arg_t a, syscall_arg_t b, syscall_arg_t c,
+                              syscall_arg_t d, syscall_arg_t e, syscall_arg_t f)
 {
 	if (*(volatile int*)cancel) return __cancel();
 	return __okm_syscall(nr, a, b, c, d, e, f);

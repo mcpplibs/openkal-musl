@@ -26,6 +26,11 @@ static void *worker(void *p) {
 }
 
 int main(int argc, char **argv, char **envp) {
+	/* The copy this program starts, so that openkal.process is observed by its
+	 * effect rather than by its return value. */
+	for (int i = 1; i < argc; i++)
+		if (strcmp(argv[i], "--child") == 0) return 41;
+
 	printf("-- openkal-musl probe --\n");
 
 	/* stdio, formatting */
@@ -40,7 +45,12 @@ int main(int argc, char **argv, char **envp) {
 
 	/* working directory */
 	char cwd[4096];
-	check(getcwd(cwd, sizeof cwd) != NULL && cwd[0] == '/', "the working directory is an absolute name");
+	/* Absolute, in whichever way this system spells absolute. A program that
+	 * required a leading separator would be requiring one system's spelling,
+	 * and the point of this one is that it was not rewritten for the others. */
+	const int rooted = getcwd(cwd, sizeof cwd) != NULL
+	                && (cwd[0] == '/' || (cwd[1] == ':' && (cwd[2] == '/' || cwd[2] == '\\')));
+	check(rooted, "the working directory is an absolute name");
 	printf("   cwd=%s\n", cwd);
 
 	/* files: create, write, seek, read, stat, remove */
@@ -127,16 +137,22 @@ int main(int argc, char **argv, char **envp) {
 	check(p != NULL && (unsigned char)p[big - 1] == 0xab, "reallocation preserves the contents");
 	free(p);
 
-	/* starting another program */
+	/* Starting another program. The program started is this one, with an
+	 * argument that tells it to report a status and stop: a program that named
+	 * one of the system's own would be naming a system, and every system has a
+	 * different set. */
 	pid_t pid;
-	char *sargv[] = { "true", NULL };
+	char *sargv[] = { argv[0], "--child", NULL };
 	extern char **environ;
-	if (posix_spawn(&pid, "/bin/true", NULL, NULL, sargv, environ) == 0) {
+	const int rc = posix_spawn(&pid, argv[0], NULL, NULL, sargv, environ);
+	if (rc == 0) {
 		int status = 0;
 		check(waitpid(pid, &status, 0) == pid, "the started program is awaited");
-		check(WIFEXITED(status) && WEXITSTATUS(status) == 0, "it reported success");
+		check(WIFEXITED(status) && WEXITSTATUS(status) == 41,
+		      "it reported the status it was written to report");
 	} else {
-		check(0, "a program is started");
+		printf("FAIL: a program is started (posix_spawn returned %d)\n", rc);
+		failures += 2;
 	}
 
 	printf("-- failures: %d --\n", failures);

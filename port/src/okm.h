@@ -122,9 +122,10 @@ int okm_errno(int kal_error_value);
 int okm_preopen_count(void);
 int okm_preopen(int index, struct kal_dir* dir, const char** name, size_t* len);
 
-/* The seam itself, declared here for the port sources that call it directly
- * rather than through musl's inline wrappers. */
-long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6);
+/* The seam itself, for the port sources that call it directly rather than
+ * through musl's inline wrappers. Its declaration lives with the seam, so that
+ * the width of an argument is stated in one place. */
+#include "syscall_arch.h"
 
 /* Startup, in the order it happens. */
 void __okm_init_env(void);

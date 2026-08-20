@@ -1,9 +1,9 @@
 #include "pthread_impl.h"
 #include "syscall.h"
 
-hidden long __syscall_cp_c();
+hidden syscall_arg_t __syscall_cp_c();  /* openkal-musl: see PATCHES.md */
 
-static long sccp(syscall_arg_t nr,
+static syscall_arg_t sccp(syscall_arg_t nr,
                  syscall_arg_t u, syscall_arg_t v, syscall_arg_t w,
                  syscall_arg_t x, syscall_arg_t y, syscall_arg_t z)
 {
@@ -12,7 +12,7 @@ static long sccp(syscall_arg_t nr,
 
 weak_alias(sccp, __syscall_cp_c);
 
-long (__syscall_cp)(syscall_arg_t nr,
+syscall_arg_t (__syscall_cp)(syscall_arg_t nr,
                     syscall_arg_t u, syscall_arg_t v, syscall_arg_t w,
                     syscall_arg_t x, syscall_arg_t y, syscall_arg_t z)
 {

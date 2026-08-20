@@ -47,7 +47,7 @@ static size_t slen(const char* s) { size_t n = 0; while (s && s[n]) n++; return 
 
 /* --- reading and writing --------------------------------------------------- */
 
-static long stream_of(int fd, kal_uintptr* out)
+static syscall_arg_t stream_of(int fd, kal_uintptr* out)
 {
 	struct okm_desc* d = okm_desc_of(fd);
 	if (!d) return -EBADF;
@@ -55,10 +55,10 @@ static long stream_of(int fd, kal_uintptr* out)
 	return -EISDIR;
 }
 
-static long do_write(int fd, const void* buf, size_t len)
+static syscall_arg_t do_write(int fd, const void* buf, size_t len)
 {
 	kal_uintptr s;
-	const long r = stream_of(fd, &s);
+	const syscall_arg_t r = stream_of(fd, &s);
 	if (r) return r;
 	if (len == 0) return 0;
 	struct kal_stream st; st.h = s;
@@ -67,29 +67,29 @@ static long do_write(int fd, const void* buf, size_t len)
 	 * short write cannot be reported as success here and is not. Clause 7.4
 	 * places the loop in the implementation, and this is where the caller's
 	 * copy of that loop would otherwise be. */
-	if (io.e != kal_ok) return io.n ? (long)io.n : -okm_errno(io.e);
-	return (long)io.n;
+	if (io.e != kal_ok) return io.n ? (syscall_arg_t)io.n : -okm_errno(io.e);
+	return (syscall_arg_t)io.n;
 }
 
-static long do_read(int fd, void* buf, size_t len)
+static syscall_arg_t do_read(int fd, void* buf, size_t len)
 {
 	kal_uintptr s;
-	const long r = stream_of(fd, &s);
+	const syscall_arg_t r = stream_of(fd, &s);
 	if (r) return r;
 	if (len == 0) return 0;
 	struct kal_stream st; st.h = s;
 	const struct kal_io_result io = kal_stream_read(st, buf, len);
 	if (io.e != kal_ok) return -okm_errno(io.e);
-	return (long)io.n;
+	return (syscall_arg_t)io.n;
 }
 
 /* --- opening --------------------------------------------------------------- */
 
-static long do_openat(int dirfd, const char* path, int flags, int mode)
+static syscall_arg_t do_openat(int dirfd, const char* path, int flags, int mode)
 {
 	(void)mode;   /* openkal has no permission bits; see the README */
 	struct okm_at at;
-	long r = okm_resolve(dirfd, path, &at, 0);
+	syscall_arg_t r = okm_resolve(dirfd, path, &at, 0);
 	if (r) return r;
 	const size_t n = slen(at.rel);
 
@@ -167,8 +167,8 @@ static void fill_kstat(const struct kal_node_info* in, struct kstat* out)
 	if (in->writable) mode |= 0222u;
 	if (in->kind == kal_node_directory) mode |= 0111u;
 	out->st_mode = mode;
-	out->st_mtime_sec  = (long)(in->modified_ns / 1000000000u);
-	out->st_mtime_nsec = (long)(in->modified_ns % 1000000000u);
+	out->st_mtime_sec  = (__INT64_TYPE__)(in->modified_ns / 1000000000u);
+	out->st_mtime_nsec = (__INT64_TYPE__)(in->modified_ns % 1000000000u);
 	out->st_atime_sec  = out->st_mtime_sec;
 	out->st_atime_nsec = out->st_mtime_nsec;
 	out->st_ctime_sec  = out->st_mtime_sec;
@@ -177,7 +177,7 @@ static void fill_kstat(const struct kal_node_info* in, struct kstat* out)
 	out->st_ino = 0; out->st_dev = 1;
 }
 
-static long do_fstat(int fd, struct kstat* st)
+static syscall_arg_t do_fstat(int fd, struct kstat* st)
 {
 	struct okm_desc* d = okm_desc_of(fd);
 	if (!d) return -EBADF;
@@ -206,11 +206,11 @@ static long do_fstat(int fd, struct kstat* st)
 	return 0;
 }
 
-static long do_fstatat(int dirfd, const char* path, struct kstat* st, int flag)
+static syscall_arg_t do_fstatat(int dirfd, const char* path, struct kstat* st, int flag)
 {
 	if ((flag & AT_EMPTY_PATH) && path && !*path) return do_fstat(dirfd, st);
 	struct okm_at at;
-	const long r = okm_resolve(dirfd, path, &at, 0);
+	const syscall_arg_t r = okm_resolve(dirfd, path, &at, 0);
 	if (r) return r;
 	struct kal_node_info info;
 	const int e = kal_fs_info(at.base, at.rel, slen(at.rel), &info);
@@ -230,7 +230,7 @@ struct linux_dirent64 {
 	char     d_name[];
 };
 
-static long do_getdents(int fd, void* buf, size_t cap)
+static syscall_arg_t do_getdents(int fd, void* buf, size_t cap)
 {
 	struct okm_desc* d = okm_desc_of(fd);
 	if (!d) return -EBADF;
@@ -253,7 +253,7 @@ static long do_getdents(int fd, void* buf, size_t cap)
 			len = slen(d->pending_name);
 		} else {
 			const int e = kal_fs_list_next(d->dir, &d->iter, &name, &len, &kind);
-			if (e != kal_ok) return used ? (long)used : -okm_errno(e);
+			if (e != kal_ok) return used ? (syscall_arg_t)used : -okm_errno(e);
 			if (!name) { d->iter = 0; break; }      /* the iterator is spent */
 			if (len >= sizeof held) continue;       /* a name this layer cannot carry */
 			for (kal_uintptr i = 0; i < len; i++) held[i] = name[i];
@@ -274,7 +274,7 @@ static long do_getdents(int fd, void* buf, size_t cap)
 				d->pending = 1;
 			}
 			if (used == 0) return -EINVAL;
-			return (long)used;
+			return (syscall_arg_t)used;
 		}
 		d->pending = 0;
 
@@ -289,12 +289,12 @@ static long do_getdents(int fd, void* buf, size_t cap)
 		out->d_name[len] = 0;
 		used += need;
 	}
-	return (long)used;
+	return (syscall_arg_t)used;
 }
 
 /* --- memory ---------------------------------------------------------------- */
 
-static long do_mmap(void* addr, size_t len, int prot, int flags, int fd, off_t off)
+static syscall_arg_t do_mmap(void* addr, size_t len, int prot, int flags, int fd, off_t off)
 {
 	(void)prot;
 	if (addr != 0 || fd >= 0 || off != 0) return -ENOSYS;
@@ -312,7 +312,7 @@ static long do_mmap(void* addr, size_t len, int prot, int flags, int fd, off_t o
 		unsigned char* q = p;
 		for (size_t i = 0; i < len; i++) q[i] = 0;
 	}
-	return (long)(uintptr_t)p;
+	return (syscall_arg_t)(uintptr_t)p;
 }
 
 /* --- time ------------------------------------------------------------------- */
@@ -351,7 +351,7 @@ static int child_index(int pid)
 	return -1;
 }
 
-static long do_wait4(int pid, int* status, int options, void* rusage)
+static syscall_arg_t do_wait4(int pid, int* status, int options, void* rusage)
 {
 	(void)options; (void)rusage;
 	int i = -1;
@@ -370,12 +370,14 @@ static long do_wait4(int pid, int* status, int options, void* rusage)
 
 /* --- the dispatcher --------------------------------------------------------- */
 
-long __okm_task_exit(int code);          /* okm_thread.c */
-long __okm_futex(const int* addr, int op, int val, const struct timespec* t);
+syscall_arg_t __okm_task_exit(int code);          /* okm_thread.c */
+syscall_arg_t __okm_futex(const int* addr, int op, int val, const struct timespec* t);
 
 static unsigned g_umask = 022;
 
-long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
+syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
+                            syscall_arg_t a3, syscall_arg_t a4, syscall_arg_t a5,
+                            syscall_arg_t a6)
 {
 	(void)a5; (void)a6;
 	switch (n) {
@@ -386,10 +388,10 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 
 	case SYS_writev: {
 		const struct iovec* v = (const struct iovec*)a2;
-		long total = 0;
+		syscall_arg_t total = 0;
 		for (int i = 0; i < (int)a3; i++) {
 			if (v[i].iov_len == 0) continue;
-			const long r = do_write((int)a1, v[i].iov_base, v[i].iov_len);
+			const syscall_arg_t r = do_write((int)a1, v[i].iov_base, v[i].iov_len);
 			if (r < 0) return total ? total : r;
 			total += r;
 			if ((size_t)r < v[i].iov_len) break;
@@ -398,10 +400,10 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 	}
 	case SYS_readv: {
 		const struct iovec* v = (const struct iovec*)a2;
-		long total = 0;
+		syscall_arg_t total = 0;
 		for (int i = 0; i < (int)a3; i++) {
 			if (v[i].iov_len == 0) continue;
-			const long r = do_read((int)a1, v[i].iov_base, v[i].iov_len);
+			const syscall_arg_t r = do_read((int)a1, v[i].iov_base, v[i].iov_len);
 			if (r < 0) return total ? total : r;
 			total += r;
 			if ((size_t)r < v[i].iov_len) break;
@@ -429,7 +431,7 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 		uint64_t at = 0;
 		const int e = kal_fs_seek(d->file, (int64_t)a2, (int)a3, &at);
 		if (e != kal_ok) return -okm_errno(e);
-		return (long)at;
+		return (syscall_arg_t)at;
 	}
 	case SYS_ftruncate: {
 		struct okm_desc* d = okm_desc_of((int)a1);
@@ -443,13 +445,50 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 #endif
 	{
 		kal_uintptr s;
-		const long r = stream_of((int)a1, &s);
+		const syscall_arg_t r = stream_of((int)a1, &s);
 		if (r) return r;
 		struct kal_stream st; st.h = s;
 		const int e = kal_stream_flush(st);
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 
+#ifdef SYS_statx
+	case SYS_statx: {
+		/* musl asks for this first wherever the record below carries a time
+		 * narrower than the library's own, which is every target whose `long'
+		 * is narrower than its pointer. Answering it is therefore not an
+		 * optimisation there: the alternative is a file's time truncated to
+		 * thirty-two bits with nothing reporting it. */
+		struct okm_statx {
+			uint32_t mask, blksize;
+			uint64_t attributes;
+			uint32_t nlink, uid, gid;
+			uint16_t mode, pad1;
+			uint64_t ino, size, blocks, attributes_mask;
+			struct { int64_t sec; uint32_t nsec; int32_t pad; } atime, btime, ctime, mtime;
+			uint32_t rdev_major, rdev_minor, dev_major, dev_minor;
+			uint64_t spare[14];
+		}* out = (void*)a5;
+		struct kstat st;
+		const syscall_arg_t r = ((int)a4 & AT_EMPTY_PATH) && a2 && !*(const char*)a2
+			? do_fstat((int)a1, &st)
+			: do_fstatat((int)a1, (const char*)a2, &st, (int)a3);
+		if (r) return r;
+		for (unsigned i = 0; i < sizeof *out; i++) ((char*)out)[i] = 0;
+		out->mask = 0x7ff;
+		out->blksize = 4096;
+		out->nlink = (uint32_t)st.st_nlink;
+		out->uid = (uint32_t)st.st_uid;
+		out->gid = (uint32_t)st.st_gid;
+		out->mode = (uint16_t)st.st_mode;
+		out->ino = (uint64_t)st.st_ino;
+		out->size = (uint64_t)st.st_size;
+		out->blocks = (uint64_t)st.st_blocks;
+		out->mtime.sec = st.st_mtime_sec; out->mtime.nsec = (uint32_t)st.st_mtime_nsec;
+		out->atime = out->ctime = out->btime = out->mtime;
+		return 0;
+	}
+#endif
 	case SYS_fstat:    return do_fstat((int)a1, (struct kstat*)a2);
 	case SYS_newfstatat: return do_fstatat((int)a1, (const char*)a2, (struct kstat*)a3, (int)a4);
 #ifdef SYS_stat
@@ -463,7 +502,7 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 
 	case SYS_mkdirat: {
 		struct okm_at at;
-		const long r = okm_resolve((int)a1, (const char*)a2, &at, 0);
+		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, &at, 0);
 		if (r) return r;
 		const int e = kal_fs_mkdir(at.base, at.rel, slen(at.rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
@@ -471,7 +510,7 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 #ifdef SYS_mkdir
 	case SYS_mkdir: {
 		struct okm_at at;
-		const long r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
+		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
 		if (r) return r;
 		const int e = kal_fs_mkdir(at.base, at.rel, slen(at.rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
@@ -479,7 +518,7 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 #endif
 	case SYS_unlinkat: {
 		struct okm_at at;
-		const long r = okm_resolve((int)a1, (const char*)a2, &at, 0);
+		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, &at, 0);
 		if (r) return r;
 		const int e = kal_fs_remove(at.base, at.rel, slen(at.rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
@@ -487,7 +526,7 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 #ifdef SYS_unlink
 	case SYS_unlink: {
 		struct okm_at at;
-		const long r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
+		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
 		if (r) return r;
 		const int e = kal_fs_remove(at.base, at.rel, slen(at.rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
@@ -496,7 +535,7 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 #ifdef SYS_rmdir
 	case SYS_rmdir: {
 		struct okm_at at;
-		const long r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
+		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
 		if (r) return r;
 		const int e = kal_fs_remove(at.base, at.rel, slen(at.rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
@@ -508,7 +547,7 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 #endif
 	{
 		struct okm_at from, to;
-		long r = okm_resolve((int)a1, (const char*)a2, &from, 0);
+		syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, &from, 0);
 		if (r) return r;
 		r = okm_resolve((int)a3, (const char*)a4, &to, 0);
 		if (r) return r;
@@ -519,7 +558,7 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 #ifdef SYS_rename
 	case SYS_rename: {
 		struct okm_at from, to;
-		long r = okm_resolve(AT_FDCWD, (const char*)a1, &from, 0);
+		syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &from, 0);
 		if (r) return r;
 		r = okm_resolve(AT_FDCWD, (const char*)a2, &to, 0);
 		if (r) return r;
@@ -534,7 +573,7 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 #endif
 	{
 		struct okm_at at;
-		const long r = okm_resolve((int)a1, (const char*)a2, &at, 0);
+		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, &at, 0);
 		if (r) return r;
 		struct kal_node_info info;
 		const int e = kal_fs_info(at.base, at.rel, slen(at.rel), &info);
@@ -546,7 +585,7 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 #ifdef SYS_access
 	case SYS_access: {
 		struct okm_at at;
-		const long r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
+		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
 		if (r) return r;
 		struct kal_node_info info;
 		const int e = kal_fs_info(at.base, at.rel, slen(at.rel), &info);
@@ -562,14 +601,14 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 		if ((size_t)a2 < n) return -ERANGE;
 		char* out = (char*)a1;
 		for (size_t i = 0; i < n; i++) out[i] = p[i];
-		return (long)n;
+		return (syscall_arg_t)n;
 	}
 	case SYS_chdir:  return okm_chdir(AT_FDCWD, (const char*)a1);
 	case SYS_fchdir: return okm_chdir((int)a1, 0);
 
 	case SYS_readlinkat: {
 		struct okm_at at;
-		const long r = okm_resolve((int)a1, (const char*)a2, &at, 0);
+		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, &at, 0);
 		if (r) return r;
 		struct kal_node_info info;
 		const int e = kal_fs_info(at.base, at.rel, slen(at.rel), &info);
@@ -585,7 +624,7 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 #ifdef SYS_readlink
 	case SYS_readlink: {
 		struct okm_at at;
-		const long r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
+		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
 		if (r) return r;
 		struct kal_node_info info;
 		const int e = kal_fs_info(at.base, at.rel, slen(at.rel), &info);
@@ -597,12 +636,12 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 
 	/* --- descriptors ------------------------------------------------------ */
 #ifdef SYS_dup2
-	case SYS_dup2: { okm_lock(); const long r = okm_fd_dup((int)a1, (int)a2, 0); okm_unlock(); return r; }
+	case SYS_dup2: { okm_lock(); const syscall_arg_t r = okm_fd_dup((int)a1, (int)a2, 0); okm_unlock(); return r; }
 #endif
-	case SYS_dup3: { okm_lock(); const long r = okm_fd_dup((int)a1, (int)a2,
+	case SYS_dup3: { okm_lock(); const syscall_arg_t r = okm_fd_dup((int)a1, (int)a2,
 	                                                       ((int)a3 & O_CLOEXEC) ? 1 : 0);
 	                 okm_unlock(); return r; }
-	case SYS_dup:  { okm_lock(); const long r = okm_fd_dup((int)a1, -1, 0); okm_unlock(); return r; }
+	case SYS_dup:  { okm_lock(); const syscall_arg_t r = okm_fd_dup((int)a1, -1, 0); okm_unlock(); return r; }
 
 	case SYS_fcntl: {
 		struct okm_desc* d = okm_desc_of((int)a1);
@@ -611,14 +650,14 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 		case F_DUPFD: {
 			okm_lock();
 			const int nfd = okm_fd_alloc((int)a3);
-			const long r = nfd < 0 ? nfd : okm_fd_dup((int)a1, nfd, 0);
+			const syscall_arg_t r = nfd < 0 ? nfd : okm_fd_dup((int)a1, nfd, 0);
 			okm_unlock();
 			return r;
 		}
 		case F_DUPFD_CLOEXEC: {
 			okm_lock();
 			const int nfd = okm_fd_alloc((int)a3);
-			const long r = nfd < 0 ? nfd : okm_fd_dup((int)a1, nfd, 1);
+			const syscall_arg_t r = nfd < 0 ? nfd : okm_fd_dup((int)a1, nfd, 1);
 			okm_unlock();
 			return r;
 		}
@@ -687,10 +726,10 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 		return 0;
 #ifdef SYS_gettimeofday
 	case SYS_gettimeofday: {
-		struct timeval { long tv_sec; long tv_usec; }* tv = (void*)a1;
+		struct okm_timeval { time_t tv_sec; long tv_usec; }* tv = (void*)a1;
 		if (tv) {
 			const kal_duration ns = kal_time_wall();
-			tv->tv_sec = (long)(ns / 1000000000u);
+			tv->tv_sec = (time_t)(ns / 1000000000u);
 			tv->tv_usec = (long)((ns % 1000000000u) / 1000u);
 		}
 		return 0;
@@ -722,9 +761,9 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 	case SYS_futex:
 		return __okm_futex((const int*)a1, (int)a2, (int)a3, (const struct timespec*)a4);
 	case SYS_sched_yield: kal_task_yield(); return 0;
-	case SYS_gettid:      return (long)kal_task_current();
+	case SYS_gettid:      return (syscall_arg_t)kal_task_current();
 	case SYS_getpid:      return 1;
-	case SYS_set_tid_address: return (long)kal_task_current();
+	case SYS_set_tid_address: return (syscall_arg_t)kal_task_current();
 	case SYS_exit:        return __okm_task_exit((int)a1);
 	case SYS_exit_group:  kal_exit((int)a1); return 0;
 
@@ -747,7 +786,7 @@ long __okm_syscall(long n, long a1, long a2, long a3, long a4, long a5, long a6)
 	 * which takes a different path when privileged takes the ordinary one. */
 	case SYS_getuid: case SYS_geteuid: case SYS_getgid: case SYS_getegid:
 		return 1000;
-	case SYS_umask: { const long old = g_umask; g_umask = (unsigned)a1 & 0777u; return old; }
+	case SYS_umask: { const syscall_arg_t old = g_umask; g_umask = (unsigned)a1 & 0777u; return old; }
 	case SYS_uname: {
 		struct utsname* u = (struct utsname*)a1;
 		static const char* const parts[] = { "openkal", "openkal", "0.5.0", "openkal", 0 };

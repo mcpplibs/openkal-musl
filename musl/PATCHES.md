@@ -1,0 +1,93 @@
+# What was changed in musl, and why
+
+musl 1.2.5 is vendored here unmodified except for the four lines below, and the
+list is exhaustive: `git log -p -- musl/` shows every one of them. Each is
+recorded with the reason, because a port that silently edits the library it
+ports is a port nobody can check.
+
+Five further sources are *excluded* rather than changed, and those are listed in
+the package manifest with the reason beside each. Excluding a source and
+supplying a replacement is visible in one place; editing a source is not, which
+is why the two are treated differently.
+
+## `src/internal/syscall.h`, one declaration
+
+```diff
+-hidden long __syscall_ret(unsigned long),
++hidden syscall_arg_t __syscall_ret(syscall_uret_t),
+```
+
+Every system call's result passes through this function. musl declares it as a
+`long` because on every architecture musl supports, a `long` holds a pointer —
+`mmap` returns one through it, and `lseek` returns a sixty-four-bit offset
+through it.
+
+Windows is LLP64: a `long` is thirty-two bits and a pointer is sixty-four. Left
+as it was, every mapping would lose the upper half of its address and every
+offset beyond two gigabytes would be truncated, and both would happen silently.
+
+`syscall_arg_t` is the type musl already provides for exactly this purpose:
+`syscall_arch.h` defines it per architecture, and two of musl's own targets
+already widen it because their arguments are wider than a `long`. On every
+target musl supports, the changed line says what the original said.
+
+## `src/stdio/vfwscanf.c`, `src/stdlib/wcstol.c`, `src/stdlib/wcstod.c`
+
+```diff
+-set = L"";
++set = (const wchar_t[]){0};
+```
+
+musl's `wchar_t` is thirty-two bits on every architecture it supports, and this
+environment's wide-character literal is sixteen. Three of musl's sources write a
+wide literal, and in each the literal is written as an array instead so that it
+has musl's type rather than the environment's.
+
+This does not make the two agree, and it is not intended to. A program above
+this library that writes `L"..."` will fail to compile on Windows, and that is
+the outcome preferred: the alternative — narrowing musl's `wchar_t` to match the
+environment — would make every code point above U+FFFF convert to the wrong
+value with nothing reporting it.
+
+## Not changed: the five excluded sources
+
+`src/env/__libc_start_main.c`, `src/env/__init_tls.c`,
+`src/thread/__set_thread_area.c`, `src/thread/clone.c`,
+`src/process/posix_spawn.c`, and on every target `src/mman/mmap.c` and
+`src/internal/syscall_ret.c`.
+
+Each reads the shape of one environment directly rather than asking a kernel for
+something, and each is replaced by a source in `port/` that asks openkal
+instead. They are excluded in the manifest, where the exclusion and its reason
+are visible together.
+
+## Two more, found by running rather than by reading
+
+### `src/thread/__syscall_cp.c` and `src/thread/pthread_cancel.c`
+
+The same widening as `syscall.h`, applied to the cancellable form of the same
+function. `__syscall_cp` carries a system call's result and was declared to
+carry it in a `long`.
+
+## The sources this port replaces, and why each
+
+Nine, and the list in the manifest carries the same reasons. Five read the shape
+of one environment directly. Two carry a machine word through a variable
+declared `long`. Two more were found only by running the result:
+
+`src/mman/mmap.c` returns a pointer through a `long`. It is replaced rather than
+patched because the replacement is also better where a `long` does hold a
+pointer: the value never becomes an integer at all.
+
+`src/unistd/getcwd.c` refuses an answer that does not begin with a separator.
+That is correct on every system musl was written for and is not correct on one
+that writes a volume first, and openkal does not say which a system does.
+
+## What has no equivalent on one object format
+
+`port/include/features.h` records a measurement rather than a patch: on PE, as
+both toolchains implement it, a weak symbol is not a definition. musl gives
+almost every public name to a definition through a weak alias, so on that format
+the aliases are made strongly, and the 46 names musl provides as placeholders
+for another source to replace are not made at all --- which is decided by the
+name of the placeholder's target and needs no change to musl.

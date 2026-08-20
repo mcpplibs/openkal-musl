@@ -8,7 +8,7 @@ authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-musl"
 
 [dependencies]
-openkal = "0.5.0"
+openkal = { path = "../openkal" }
 
 # An ordinary consumer of openkal declares the specification and leaves the
 # choice of implementation to whoever builds the program, which is what the
@@ -61,10 +61,14 @@ c_standard = "c99"
 # port/src/okm_setjmp.S, in one file that assembles for every object format.
 #
 # The five exclusions are the whole of what this port replaces in musl, and
-# each is replaced because it reads the shape of one environment directly:
-# the auxiliary vector, the program's own ELF headers, the instruction that
-# installs a thread pointer, the system call that creates a thread, and the
-# duplication of the calling image.
+# The seven exclusions are the whole of what this port replaces in musl, and
+# each is replaced for a reason recorded beside it in musl/PATCHES.md. Five read
+# the shape of one environment directly --- the auxiliary vector, the program's
+# own ELF headers, the instruction that installs a thread pointer, the system
+# call that creates a thread, and the duplication of the calling image. Two
+# carry a machine word through a variable declared `long', which is the same
+# width on every architecture musl supports and is not on every architecture
+# this port builds for.
 sources = [
   "musl/src/*/*.c",
   "musl/src/malloc/mallocng/*.c",
@@ -73,6 +77,9 @@ sources = [
   "!musl/src/thread/__set_thread_area.c",
   "!musl/src/thread/clone.c",
   "!musl/src/process/posix_spawn.c",
+  "!musl/src/mman/mmap.c",
+  "!musl/src/internal/syscall_ret.c",
+  "!musl/src/unistd/getcwd.c",
   "port/src/*.c",
   "port/src/*.S",
 ]
@@ -139,8 +146,38 @@ cxx_runtime = "host-coupled"
 ldflags = ["-nostdlib", "-static", "-Wl,--no-dynamic-linker",
            "-Wl,--gc-sections", "-lgcc"]
 
-[target.'cfg(arch = "x86_64")'.build]
+# The generated headers, per architecture and per data model.
+#
+# musl states its data model in three lines of bits/alltypes.h, and every
+# architecture it supports states LP64 or ILP32. Windows states neither: a long
+# is thirty-two bits there and a pointer is sixty-four. The generated header for
+# that target therefore differs from the one for the same architecture
+# elsewhere, and musl-generated/README.md records the three lines and how they
+# are produced.
+[target.'cfg(all(arch = "x86_64", not(windows)))'.build]
 include_dirs = ["musl-generated/x86_64", "musl/arch/x86_64", "musl/arch/generic"]
+
+[target.'cfg(all(arch = "x86_64", windows))'.build]
+include_dirs = ["musl-generated/x86_64-windows", "musl/arch/x86_64", "musl/arch/generic"]
 
 [target.'cfg(arch = "aarch64")'.build]
 include_dirs = ["musl-generated/aarch64", "musl/arch/aarch64", "musl/arch/generic"]
+
+# The link line on this environment. There is no separate loader to name and no
+# archive of compiler support routines to add: the entry point is this
+# library's, and the implementation beneath it names the libraries its own
+# interfaces live in.
+[target.'cfg(windows)'.build]
+# One source walks the program headers of an ELF image in order to report what
+# is loaded. This format has no such headers, and the operation it names is one
+# openkal does not offer in any case.
+sources = ["!musl/src/ldso/dl_iterate_phdr.c"]
+# -lgcc supplies the routines a compiler emits calls to and no C library
+# defines. -lgcc_eh supplies one more that only this format needs: this
+# toolchain reaches a thread-local variable through a helper rather than through
+# an address the processor supplies, because on this format a thread-local
+# variable cannot be reached directly from something loaded at run time. The
+# helper is in that archive and not in the other, which is a fact about the
+# toolchain rather than about this port.
+ldflags = ["-nostdlib", "-static", "-Wl,--gc-sections", "-Wl,-e,okw_start",
+           "-lgcc", "-lgcc_eh"]

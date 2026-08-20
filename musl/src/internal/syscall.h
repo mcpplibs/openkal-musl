@@ -23,7 +23,12 @@
 typedef long syscall_arg_t;
 #endif
 
-hidden long __syscall_ret(unsigned long),
+/* openkal-musl: the width is the seam's, not a long's. syscall_arch.h
+ * defines syscall_arg_t and syscall_uret_t, and on every target musl
+ * itself supports they are `long' and `unsigned long' --- so this line
+ * says what it said. On a target whose long is narrower than a pointer
+ * it says what it meant. */
+hidden syscall_arg_t __syscall_ret(syscall_uret_t),
 	__syscall_cp(syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t,
 	             syscall_arg_t, syscall_arg_t, syscall_arg_t);
 

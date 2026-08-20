@@ -214,7 +214,7 @@ int vfwscanf(FILE *restrict f, const wchar_t *restrict fmt, va_list ap)
 			if (t == 'c') {
 				if (width<1) width = 1;
 				invert = 1;
-				set = L"";
+				set = (const wchar_t[]){0};  /* openkal-musl: L"" has the environment's width */
 			} else if (t == 's') {
 				invert = 1;
 				static const wchar_t spaces[] = {

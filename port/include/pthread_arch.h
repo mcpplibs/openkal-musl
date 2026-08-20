@@ -2,33 +2,37 @@
  *
  * musl obtains the current execution context's state by reading a register the
  * architecture reserves for it. openkal declines to own that register: the
- * convention belongs to openarch, and an operation here that installed a
- * thread pointer would place a processor's calling convention in an interface
- * written to be independent of one.
+ * convention belongs to openarch, and an operation here that installed a thread
+ * pointer would place a processor's calling convention in an interface written
+ * to be independent of one.
  *
- * What openkal reports instead is whether a context started by kal_task_start
- * observes the thread-local storage of the toolchain that compiled the
- * program --- KAL_TASK_PROP_THREAD_LOCAL, clause 7.10. This port requires that
- * property and keeps musl's per-context pointer in one such variable. The
- * requirement is checked at startup rather than assumed, because an
- * implementation that lacks the property would otherwise produce a program in
- * which every context shares one library state.
+ * The substitute is not a variable declared thread_local. port/src/okm_context.c
+ * records why at length, and the short form is that on one of the toolchains
+ * this package is built by, reaching such a variable calls a helper that
+ * allocates --- and the allocator is what this library is providing, so the
+ * dependency is circular and appears only as a program that never returns.
  *
- * The variable is declared with the GNU spelling rather than C11's
- * _Thread_local because musl's sources are compiled as C99.
+ * What is used instead is a table keyed on the identity openkal already gives
+ * every context. It costs a lookup where a load would have done, and it makes
+ * this port independent of whether an implementation's contexts have
+ * thread-local storage at all.
  */
 #ifndef OKM_PTHREAD_ARCH_H
 #define OKM_PTHREAD_ARCH_H
 
-extern __thread uintptr_t __okm_tp;
+uintptr_t __okm_get_tp(void);
 
-static inline uintptr_t __get_tp(void) { return __okm_tp; }
+static inline uintptr_t __get_tp(void) { return __okm_get_tp(); }
 
 /* musl reads MC_PC only inside its cancellation signal handler. openkal has no
  * asynchronous delivery, so no such handler is installed and none runs; the
- * definition exists because the sources that mention it must still compile,
- * and it names a member that does exist so that the compiler's diagnosis of a
- * mistake elsewhere is not swallowed. */
+ * definition exists because the sources that mention it must still compile, and
+ * it names a member that does exist so that a mistake elsewhere is still
+ * diagnosed rather than swallowed by a name nothing has. */
+#if defined(__aarch64__)
+#define MC_PC pc
+#else
 #define MC_PC gregs[0]
+#endif
 
 #endif
