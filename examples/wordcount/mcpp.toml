@@ -1,12 +1,32 @@
+# A program above openkal-musl names one package. It does not name openkal, it
+# does not name an implementation, and it does not say anything about the
+# platform: the C library declares the implementation it needs for the target
+# being built, because it is the only party that knows it needs one.
 [package]
 name    = "wordcount"
-version = "0.1.0"
+version = "0.2.0"
 
 [dependencies]
-openkal-libc = { path = "../.." }
+openkal-musl = { path = "../.." }
 
-[target.'cfg(os = "linux")'.dependencies]
-openkal-linux = "0.4.0"
+[targets.wordcount]
+kind = "bin"
+main = "src/main.c"
 
-[target.'cfg(os = "macos")'.dependencies]
-openkal-macos = "0.2.0"
+# What a program above this package must say, and why it is one line.
+#
+# The build tool decides whether to embed a C++ runtime into the program, and
+# on one of the three systems its answer is to embed one and to run that
+# runtime's initialiser first --- before anything else in the image, including
+# the entry point. A program above this package carries no other runtime: the C
+# library has not started at that moment, and the embedded initialiser reaches
+# it through a guarded static and a mutex and finds nothing there.
+#
+# `host-coupled' says that the build tool embeds nothing. The system's own C++
+# runtime is named instead, and its initialisers run inside it, on the
+# facilities it was built against rather than on this library's.
+#
+# The decision belongs to the program because the build tool reads it from the
+# program: a dependency that declared it would be declaring it for itself.
+[build]
+cxx_runtime = "host-coupled"

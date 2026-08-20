@@ -1,25 +1,223 @@
 [package]
 namespace   = "mcpplibs"
-name        = "openkal-libc"
-version     = "0.2.0"
-description = "A C library above openkal rather than above a kernel. Porting it once causes the software above it to run on every openkal implementation, which is the claim the specification makes and this package tests."
+name        = "openkal-musl"
+version     = "0.1.0"
+description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 authors     = ["mcpplibs"]
-repo        = "https://github.com/mcpplibs/openkal-libc"
+repo        = "https://github.com/mcpplibs/openkal-musl"
 
 [dependencies]
-openkal = "0.4.0"
+openkal = "0.5.1"
 
-# The library declares against the interface and links against no
-# implementation: a consumer of it chooses one. Its own tests run, and running
-# requires definitions, so an implementation is a development dependency and is
-# selected by the platform the tests run upon.
+# An ordinary consumer of openkal declares the specification and leaves the
+# choice of implementation to whoever builds the program, which is what the
+# specification recommends and what openkal's own example demonstrates.
 #
-# Its absence is why every test in this package failed to link while the package
-# itself built: the diagnostic named the undefined operations, which is what
-# clause 4.2 of the specification describes.
-[target.'cfg(os = "linux")'.dev-dependencies]
-openkal-linux = "0.4.0"
+# This package declares the implementation itself, and the reason is a property
+# of this package rather than a property of openkal. A program built above this
+# package carries no other runtime: this one supplies everything the program
+# calls. The implementation must therefore be the whole of the program's
+# environment, which is a thing only the party that knows there is no other
+# runtime can state --- and that party is this package, not the program.
+#
+# The consequence for a program is that it names this package and nothing else.
+[target.'cfg(os = "linux")'.dependencies]
+openkal-linux = { path = "../openkal-linux", features = ["standalone"] }
 
-[target.'cfg(os = "macos")'.dev-dependencies]
-openkal-macos = "0.2.0"
+[target.'cfg(os = "macos")'.dependencies]
+openkal-macos = { path = "../openkal-macos", features = ["standalone"] }
+
+[target.'cfg(windows)'.dependencies]
+openkal-windows = { path = "../openkal-windows", features = ["standalone"] }
+
+# The feature macros musl's own build establishes.
+#
+# musl's <features.h> turns on the POSIX and BSD declarations when a program
+# names no feature macro and is not compiled in strict ISO mode. A program
+# built by this tool *is* compiled in strict ISO mode --- `-std=c11' rather than
+# `-std=gnu11' --- so the macros are stated instead of inferred. They are
+# declared as a feature rather than as build flags because a feature's defines
+# are the one thing a package can contribute to the translation units of a
+# program above it, and a program above a C library needs the same view of that
+# library's headers that the library was built with.
+#
+# _BSD_SOURCE is deliberately absent, and the reason is worth recording because
+# it looks like an omission: musl's own build does not define it either, and a
+# build that does fails --- <strings.h> then declares `index', and one of musl's
+# own sources has a static variable of that name. The macro musl's features.h
+# would have inferred is therefore not the macro musl is built with.
+[features]
+default = ["posix"]
+posix = { defines = ["_XOPEN_SOURCE=700"] }
+
+[build]
+c_standard = "c99"
+
+# musl's own source selection rule, written as globs. The base set is one level
+# under src/ plus the selected allocator; a directory named after an
+# architecture holds overrides for that architecture, and this port takes none
+# of them --- the four names for which musl ships no C are supplied by
+# port/src/okm_setjmp.S, in one file that assembles for every object format.
+#
+# The nine exclusions are the whole of what this port replaces in musl, and
+# each is replaced for a reason recorded beside it in musl/PATCHES.md. Five read
+# the shape of one environment directly --- the auxiliary vector, the program's
+# own ELF headers, the instruction that installs a thread pointer, the system
+# call that creates a thread, and the duplication of the calling image. Two
+# carry a machine word through a variable declared `long', which is the same
+# width on every architecture musl supports and is not on every architecture
+# this port builds for.
+sources = [
+  "musl/src/*/*.c",
+  "musl/src/malloc/mallocng/*.c",
+  "!musl/src/env/__libc_start_main.c",
+  "!musl/src/env/__init_tls.c",
+  "!musl/src/thread/__set_thread_area.c",
+  "!musl/src/thread/clone.c",
+  "!musl/src/process/posix_spawn.c",
+  "!musl/src/mman/mmap.c",
+  "!musl/src/internal/syscall_ret.c",
+  "!musl/src/unistd/getcwd.c",
+  "port/src/*.c",
+  "port/src/*.S",
+]
+
+# The order is musl's own, and it is load-bearing twice. port/include holds the
+# two headers that replace an architecture's copies, so it precedes the
+# architecture's directory; and an architecture's bits precede the generic ones,
+# six of which exist in both places.
+#
+# These directories reach a program above this package as well, which is how a
+# program's <stdio.h> becomes musl's. That includes musl's own internal
+# headers: this package is built from the same include path it publishes, and
+# the alternative --- two paths --- is a second place where the set of headers
+# is configured.
+include_dirs = [
+  "port/include",
+  "musl/src/include",
+  "musl/src/internal",
+  "musl-generated/internal",
+  "musl/include",
+]
+
+cflags = [
+  # musl is written to C99 and to nothing else. -nostdinc is not an
+  # optimisation: a C library that included the headers of another C library
+  # would be describing that library's types rather than its own.
+  "-ffreestanding",
+  "-nostdinc",
+  "-fno-stack-protector",
+  "-fno-strict-aliasing",
+  "-frounding-math",
+  "-w",
+  # A C library is a set of facilities a program chooses from, and every
+  # facility it did not choose would otherwise be linked into it: this package
+  # contributes objects rather than an archive, so a program that calls printf
+  # would also carry the complex-arithmetic routines. Placing each function and
+  # each object in a section of its own lets the linker discard what nothing
+  # reaches, which restores the property an archive would have given.
+  "-ffunction-sections",
+  "-fdata-sections",
+]
+
+# A program above this package carries no other runtime, and the link line is
+# where that is stated.
+#
+# The C++ runtime is not embedded. This package is C, and the implementation
+# beneath it is C++ only because the specification's declarations are modules;
+# neither throws, neither uses run-time type information, and neither reaches a
+# standard library. Left to itself the driver would attach one, and on a link
+# that has removed the C library the attached runtime's own references to it
+# would be resolved by this package --- which is the collision this arrangement
+# exists to avoid.
+cxx_runtime = "host-coupled"
+
+# -nostdlib is the statement that the program carries one C library and that it
+# is this one; without it the driver adds the host's, and the two define the
+# same names. --no-dynamic-linker removes the interpreter the driver records
+# even for a static link: a program that names a loader it does not use is a
+# program the loader refuses to start, and clang records one where gcc does not.
+# -lgcc supplies the routines a compiler emits calls to and no C library
+# defines --- integer division on some architectures, and the complex
+# arithmetic musl's own <complex.h> calls.
+[target.'cfg(os = "linux")'.build]
+ldflags = ["-nostdlib", "-static", "-Wl,--no-dynamic-linker",
+           "-Wl,--gc-sections", "-lgcc"]
+
+# The link line on this system.
+#
+# -nostdlib is the statement that the program carries one C library and that it
+# is this one. -lSystem follows it because two names this system's openkal
+# implementation needs live there and nowhere else, and both were chosen for the
+# property that no C library defines them.
+#
+# Naming that library alongside a C library of our own is safe here and would
+# not be on the first system, and the difference is a property of the object
+# format rather than of this port. This format binds every reference to the
+# library that defined it: a call inside that library reaches that library's own
+# definition, and a call in the program reaches the program's. So the two
+# `malloc's coexist rather than collide, which is the recursion that made the
+# first system's implementation reject its own C library.
+#
+# The entry point is named rather than found: this format records an entry in
+# the image header rather than looking for a fixed symbol. -dead_strip is this
+# linker's spelling of discarding what nothing reaches.
+[target.'cfg(os = "macos")'.build]
+# One source walks the program headers of an ELF image in order to report what
+# is loaded. This format has no such headers, and the operation it names is one
+# openkal does not offer in any case.
+sources = ["!musl/src/ldso/dl_iterate_phdr.c"]
+#
+# --ld-path names this system's own linker rather than the one the toolchain
+# brings. The reason is one construct and fifteen uses of it. A second name for
+# a definition is made here with the assembler's own directive; where the
+# definition is in the same translation unit that produces an ordinary symbol,
+# and where it is not --- fifteen names in musl, every one of them a function
+# declared in a header and defined elsewhere --- it produces an indirect symbol,
+# which is what that directive is for. The toolchain's linker refuses an
+# indirect symbol, in as many words: "TODO: support aliasing to symbols of kind
+# 1". This system's own linker is the one the format was designed alongside and
+# resolves them.
+#
+# The measurement: 1154 of musl's translation units compiled for this system
+# produce fifteen indirect symbols between them, and they are listed in
+# musl/PATCHES.md.
+ldflags = ["-nostdlib", "-lSystem", "--ld-path=/usr/bin/ld",
+           "-Wl,-e,_okm_start", "-Wl,-dead_strip"]
+
+# The generated headers, per architecture and per data model.
+#
+# musl states its data model in three lines of bits/alltypes.h, and every
+# architecture it supports states LP64 or ILP32. Windows states neither: a long
+# is thirty-two bits there and a pointer is sixty-four. The generated header for
+# that target therefore differs from the one for the same architecture
+# elsewhere, and musl-generated/README.md records the three lines and how they
+# are produced.
+[target.'cfg(all(arch = "x86_64", not(windows)))'.build]
+include_dirs = ["musl-generated/x86_64", "musl/arch/x86_64", "musl/arch/generic"]
+
+[target.'cfg(all(arch = "x86_64", windows))'.build]
+include_dirs = ["musl-generated/x86_64-windows", "musl/arch/x86_64", "musl/arch/generic"]
+
+[target.'cfg(arch = "aarch64")'.build]
+include_dirs = ["musl-generated/aarch64", "musl/arch/aarch64", "musl/arch/generic"]
+
+# The link line on this environment. There is no separate loader to name and no
+# archive of compiler support routines to add: the entry point is this
+# library's, and the implementation beneath it names the libraries its own
+# interfaces live in.
+[target.'cfg(windows)'.build]
+# One source walks the program headers of an ELF image in order to report what
+# is loaded. This format has no such headers, and the operation it names is one
+# openkal does not offer in any case.
+sources = ["!musl/src/ldso/dl_iterate_phdr.c"]
+# -lgcc supplies the routines a compiler emits calls to and no C library
+# defines. -lgcc_eh supplies one more that only this format needs: this
+# toolchain reaches a thread-local variable through a helper rather than through
+# an address the processor supplies, because on this format a thread-local
+# variable cannot be reached directly from something loaded at run time. The
+# helper is in that archive and not in the other, which is a fact about the
+# toolchain rather than about this port.
+ldflags = ["-nostdlib", "-static", "-Wl,--gc-sections", "-Wl,-e,okw_start",
+           "-lgcc", "-lgcc_eh"]
