@@ -99,8 +99,25 @@
  * and accepts the assembler's directive, where the name carries the leading
  * underscore that format gives every C name. */
 #if defined(__APPLE__)
-#  define OKM_ALIAS_0(old, new) \
-        __asm__(".globl _" #new "\n\t.set _" #new ", _" #old)
+/* The directive names the definition, and the pointer keeps it.
+ *
+ * A directive in module-level assembly is opaque to the compiler, so a
+ * definition that nothing else in the translation unit refers to is deleted
+ * before the assembler ever sees the name --- and musl has six such: a static
+ * function that exists only to be given a second name. What the compiler then
+ * emits is a second name for nothing, which the linker reports as an undefined
+ * symbol with the alias as its only reference.
+ *
+ * The pointer is a reference the compiler does understand. It is `used' so that
+ * it is emitted rather than folded away, and taking the address of the
+ * definition is what obliges the compiler to keep it.
+ *
+ * The other object format needs none of this: there the second name is made
+ * with the compiler's own construct, which is itself a use. */
+#  define OKM_ALIAS_0(old, new)                                          \
+        __asm__(".globl _" #new "\n\t.set _" #new ", _" #old);           \
+        static __typeof(old)* const OKM_KEEP_##new                       \
+            __attribute__((__used__)) = &old
 #else
 #  define OKM_ALIAS_0(old, new) extern __typeof(old) new __attribute__((__alias__(#old)))
 #endif
