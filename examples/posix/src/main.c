@@ -31,6 +31,15 @@ int main(int argc, char **argv, char **envp) {
 	for (int i = 1; i < argc; i++)
 		if (strcmp(argv[i], "--child") == 0) return 41;
 
+	/* Unbuffered, so that a run that stops says how far it got.
+	 *
+	 * A program whose output is read by another program is fully buffered by
+	 * default, which is correct and is exactly wrong here: a probe that stops
+	 * before it flushes has reported nothing, and what a reader then has is an
+	 * exit status. Every observation below is a line, and a line that was
+	 * printed is an observation that was made. */
+	setbuf(stdout, NULL);
+
 	printf("-- openkal-musl probe --\n");
 
 	/* stdio, formatting */
