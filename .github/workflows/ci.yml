@@ -103,7 +103,12 @@ jobs:
           if ! "$binary" > run.log 2>&1; then
             cat run.log
             if command -v lldb > /dev/null 2>&1; then
-              lldb --batch -o run -o 'thread list' -o 'thread backtrace all' \
+              # -k runs when the program stops on a signal, which -o does not:
+              # a batch that lists its commands after `run' gets as far as the
+              # stop and then quits, which is how the first attempt at this
+              # printed a frame and no backtrace.
+              lldb --batch -o run \
+                   -k 'thread backtrace all' -k 'register read' -k quit \
                    -- "$binary" > crash.log 2>&1 || true
               cat crash.log
             elif command -v gdb > /dev/null 2>&1; then

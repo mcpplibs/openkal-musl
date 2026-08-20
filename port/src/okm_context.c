@@ -102,10 +102,26 @@ static struct okm_slot* find(kal_uintptr me, int create)
 	return free_slot;
 }
 
+/* Whether anything has been recorded yet. Before the first context registers,
+ * an enquiry that finds nothing is the ordinary state and zero is the right
+ * answer. Afterwards it is not: a context that reaches this without having
+ * registered is a context whose C library will read its own state through a
+ * null pointer, several frames away, and the report will name the dereference
+ * rather than the absence. */
+static volatile int g_recorded;
+
 uintptr_t __okm_get_tp(void)
 {
 	struct okm_slot* s = find(key_of(kal_task_current()), 0);
-	return s ? s->tp : 0;
+	if (s) return s->tp;
+	if (__atomic_load_n(&g_recorded, __ATOMIC_ACQUIRE)) {
+		static const char m[] =
+			"openkal-musl: this execution context has no per-context state --- "
+			"the implementation's kal_task_current did not answer the same value "
+			"here as it did when the context started\n";
+		kal_abort(m, sizeof m - 1);
+	}
+	return 0;
 }
 
 void __okm_set_tp(uintptr_t value)
@@ -117,6 +133,7 @@ void __okm_set_tp(uintptr_t value)
 		kal_abort(m, sizeof m - 1);
 	}
 	s->tp = value;
+	__atomic_store_n(&g_recorded, 1, __ATOMIC_RELEASE);
 }
 
 void* __okm_get_self(void)
