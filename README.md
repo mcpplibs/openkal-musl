@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.1.0"
+openkal-musl = "0.3.0"
 ```
 
 It names no implementation and no platform: a C library is the one consumer that
@@ -208,7 +208,11 @@ present rather than by being adapted to.
 
 ## Relation to `openkal-libc`
 
-This package was `openkal-libc` up to version 0.2.0. That package was a probe of
+This package was `openkal-libc` up to version 0.2.0, and the version line
+continues rather than restarting: 0.1.0 and 0.2.0 name the earlier package in
+this repository's own tags, so a version that restarted at 0.1.0 would give one
+tag two meanings. The name changed at 0.3.0 and the numbers do not go backwards.
+ That package was a probe of
 243 lines exporting 14 names — it did the two things the specification places
 outside itself, and it was not a C library. It has no separate existence now:
 its path resolution is the resolver described above, and its mutex is musl's.
