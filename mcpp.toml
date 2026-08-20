@@ -8,7 +8,7 @@ authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-musl"
 
 [dependencies]
-openkal = "0.5.0"
+openkal = { path = "/home/speak/workspace/github/mcpplibs/openkal" }
 
 # An ordinary consumer of openkal declares the specification and leaves the
 # choice of implementation to whoever builds the program, which is what the

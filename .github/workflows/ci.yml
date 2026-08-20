@@ -97,10 +97,27 @@ jobs:
           [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
           mcpp build $extra
           binary="$(find target -type f \( -name 'posix' -o -name 'posix.exe' \) | head -1)"
+
+          # A watchdog, because a program that does not return is as much a
+          # failure as one that returns wrongly and the job would otherwise
+          # spend its whole timeout finding that out. Written out rather than
+          # taken from `timeout', which two of the three systems have and one
+          # does not.
+          run_with_watchdog() {
+            "$binary" > run.log 2>&1 &
+            local pid=$!
+            ( sleep 120; kill -9 "$pid" 2> /dev/null ) &
+            local guard=$!
+            wait "$pid"; local status=$?
+            kill "$guard" 2> /dev/null || true
+            return $status
+          }
+
           # A program that stops without printing has told the reader nothing.
           # Where the system has a debugger, it is asked where the program was,
           # because "exit code 139" names a signal and not a place.
-          if ! "$binary" > run.log 2>&1; then
+          if ! run_with_watchdog; then
+            echo "--- what the program printed before it stopped ---"
             cat run.log
             if command -v lldb > /dev/null 2>&1; then
               # -k runs when the program stops on a signal, which -o does not:
