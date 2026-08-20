@@ -95,7 +95,7 @@ static void entry(void* p)
 	if (t->ctid) {
 		__atomic_store_n((int*)t->ctid, 0, __ATOMIC_RELEASE);
 		kal_uintptr woken = 0;
-		kal_task_wake((const __UINT32_TYPE__*)t->ctid, 1, &woken);
+		kal_task_wake((const kal_u32*)t->ctid, 1, &woken);
 	}
 	__atomic_store_n(&t->finished, 1, __ATOMIC_RELEASE);
 
@@ -159,17 +159,17 @@ syscall_arg_t __okm_futex(const int* addr, int op, int val, const struct timespe
 	op &= ~(FUTEX_PRIVATE | 256 /* FUTEX_CLOCK_REALTIME */);
 	switch (op) {
 	case FUTEX_WAIT: {
-		const __UINT64_TYPE__ ns = t
-			? (__UINT64_TYPE__)t->tv_sec * 1000000000u + (__UINT64_TYPE__)t->tv_nsec
+		const kal_u64 ns = t
+			? (kal_u64)t->tv_sec * 1000000000u + (kal_u64)t->tv_nsec
 			: 0;
-		const int e = kal_task_wait((const __UINT32_TYPE__*)addr, (__UINT32_TYPE__)val, ns);
+		const int e = kal_task_wait((const kal_u32*)addr, (kal_u32)val, ns);
 		if (e == kal_ok) return 0;
 		if (e == kal_err_again) return -ETIMEDOUT;
 		return -okm_errno(e);
 	}
 	case FUTEX_WAKE: {
 		kal_uintptr woken = 0;
-		const int e = kal_task_wake((const __UINT32_TYPE__*)addr,
+		const int e = kal_task_wake((const kal_u32*)addr,
 		                            val < 0 ? (kal_uintptr)-1 : (kal_uintptr)val, &woken);
 		if (e != kal_ok) return -okm_errno(e);
 		return (long)woken;

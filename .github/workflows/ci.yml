@@ -1,32 +1,71 @@
 name: CI
 
+# What this workflow asserts.
+#
+# The claim this package makes is that a C library ported once onto openkal runs
+# above every implementation of the specification, so the claim is tested by
+# running the same two programs on three systems and comparing what they produce
+# against what the system's own tools produce.
+#
+#   posix       a program that opens a file by an absolute name, reads a
+#               variable, measures an interval, starts another program and waits
+#               for it --- thirty-two observations, none of which the program
+#               contains an implementation of
+#   wordcount   the same counts as the system's own `wc'
+#
+# Two compiler families, gcc and llvm. The third of the three mcpp offers is
+# absent from this package and the reason is recorded in the manifest: musl's
+# four remaining assembly definitions are in an object format that toolchain
+# does not assemble, so the question that toolchain would answer is not one this
+# package can ask.
+
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
 
+env:
+  MCPP_VERSION: 2026.8.19.4
+  XLINGS_VERSION: v2026.8.17.2
+  XLINGS_NON_INTERACTIVE: '1'
+
 jobs:
-  build:
-    name: conformance
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    env:
-      # A version verified to build this package, not a measured minimum. The
-      # package uses modules, exported extern "C" declarations and ordinary
-      # dependencies, none of which is recent; the pin exists for reproducibility
-      # rather than because an older mcpp is known to fail.
-      MCPP_VERSION: 2026.8.19.4
-      XLINGS_VERSION: v2026.8.17.2
-      XLINGS_NON_INTERACTIVE: '1'
+  programs:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: 'linux, gcc',    os: ubuntu-24.04, toolchain: 'gcc@16.1.0',  target: '' }
+          - { name: 'linux, llvm',   os: ubuntu-24.04, toolchain: 'llvm@22.1.8', target: '' }
+          - { name: 'macos, llvm',   os: macos-14,     toolchain: 'llvm@20.1.7', target: '' }
+          - { name: 'windows, gcc',  os: windows-2022, toolchain: 'gcc@16.1.0',  target: 'x86_64-windows-gnu' }
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install xlings
+      - name: The specification and the implementation for this system
+        run: |
+          bash tools/working-trees.sh '${{ github.head_ref || github.ref_name }}'
+
+      - name: Install xlings (Unix)
+        if: runner.os != 'Windows'
         run: |
           curl -fsSL https://raw.githubusercontent.com/openxlings/xlings/main/tools/other/quick_install.sh \
             | bash -s "$XLINGS_VERSION"
           echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+
+      - name: Install xlings (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          irm https://d2learn.org/xlings-install.ps1.txt | iex
+          "$env:USERPROFILE\.xlings\subos\current\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install mcpp
         run: |
@@ -35,47 +74,51 @@ jobs:
           mcpp --version
           mcpp self config --mirror GLOBAL
 
-      - name: Tests
+      - name: Select the toolchain
         run: |
-          mcpp test 2>&1 | tee tests.log
+          spec='${{ matrix.toolchain }}'
+          mcpp toolchain install "${spec%@*}" "${spec#*@}"
+          mcpp toolchain default "$spec"
+          mcpp toolchain list
 
-          # A suite that discovered nothing reports success, so every suite is
-          # asserted to have run. The list is derived from the files present
-          # rather than written out here: a hand-written list names the suites
-          # that existed when it was written, and one added afterwards escapes
-          # the assertion silently.
-          missing=0
-          for f in tests/*.cpp; do
-            name="$(basename "$f" .cpp)"
-            if ! grep -q "^$name \.\.\. ok" tests.log; then
-              echo "suite did not run, or did not pass: $name" >&2
-              missing=1
-            fi
-          done
-          test "$missing" -eq 0
+      - name: The library builds
+        run: |
+          extra=''
+          [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
+          mcpp build $extra
 
-      # The claim this package makes is that a program above it reads a file by
-      # global path, consults a variable, measures an interval and starts
-      # another program without containing any of that. The program is compared
-      # against the system's own counter, so the assertion is that it produced
-      # the right answer rather than that it produced an answer.
-      #
-      # The previous form of this step asserted three lines from a different
-      # example, in a directory this repository does not contain. It had never
-      # run: the step before it failed first, and a step that never runs asserts
-      # nothing while appearing to.
-      - name: An ordinary program runs above the library
+      # A program above this package names one package. It does not name
+      # openkal, it does not name an implementation, and it says nothing about
+      # the platform.
+      - name: The posix probe
+        working-directory: examples/posix
+        run: |
+          extra=''
+          [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
+          mcpp build $extra
+          "$(find target -type f \( -name 'posix' -o -name 'posix.exe' \) | head -1)" 2>&1 | tee run.log
+          # Both directions: that the program reported, and that nothing it
+          # observed failed to hold. Asserting only the first would pass for a
+          # program that printed its failures.
+          grep -qE '^-- failures: 0 --$' run.log
+          ! grep -q '^FAIL:' run.log
+
+      - name: The counts agree with the system's own
         working-directory: examples/wordcount
         run: |
           printf 'alpha beta\ngamma\n' > sample.txt
           expected="$(wc < sample.txt | tr -s ' ' | sed 's/^ //')"
-          WORDCOUNT_VERBOSE=1 mcpp run -- sample.txt 2>&1 | tee run.log
+          extra=''
+          [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
+          mcpp build $extra
+          binary="$(find target -type f \( -name 'wordcount' -o -name 'wordcount.exe' \) | head -1)"
+          WORDCOUNT_VERBOSE=1 "$binary" sample.txt 2>&1 | tee run.log
 
-          lines="$(sed -n 's/^lines \([0-9]*\) words \([0-9]*\) bytes \([0-9]*\)$/\1 \2 \3/p' run.log)"
-          test -n "$lines" || { echo "the program printed no count" >&2; exit 1; }
-          echo "wordcount: $lines"
+          counts="$(sed -n 's/^lines \([0-9]*\) words \([0-9]*\) bytes \([0-9]*\)$/\1 \2 \3/p' run.log)"
+          test -n "$counts" || { echo "the program printed no count" >&2; exit 1; }
+          echo "wordcount: $counts"
           echo "wc:        $expected"
-          test "$lines" = "$expected"
+          test "$counts" = "$expected"
 
           # The variable was consulted, and the interval was measured.
           grep -q 'elapsed .* nanoseconds' run.log

@@ -209,8 +209,8 @@ static unsigned char g_random[16];
 
 static void fill_random(void)
 {
-	__UINT64_TYPE__ x = kal_time_wall() ^ (kal_time_monotonic() * 6364136223846793005u);
-	x ^= (__UINT64_TYPE__)(uintptr_t)&g_random;
+	kal_u64 x = kal_time_wall() ^ (kal_time_monotonic() * 6364136223846793005u);
+	x ^= (kal_u64)(uintptr_t)&g_random;
 	if (!x) x = 88172645463325252u;
 	for (int i = 0; i < 16; i++) {
 		x ^= x << 13; x ^= x >> 7; x ^= x << 17;

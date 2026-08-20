@@ -32,6 +32,19 @@
  * which is decided by the name of the target, because musl's placeholders are
  * recognisable by it and by nothing else.
  *
+ * A third object format reaches the same conclusion by a different route. There
+ * the compiler refuses the construct outright --- "aliases are not supported on
+ * darwin" --- so neither form above can be written. What that format does have
+ * is the assembler's own way of giving an address a second name, and the same
+ * measurement establishes it:
+ *
+ *     int base(void) { return 7; }
+ *     __asm__(".globl _w\n\t.set _w, _base");
+ *
+ * produces `w' as a definition at `base's address. That is a strong name, so the
+ * placeholder list below applies there too, and the underscore is written out
+ * because that format prefixes every C name with one.
+ *
  * Two consequences follow, and both are boundaries rather than defects.
  *
  *   A program cannot replace a function of this library by defining one of the
@@ -49,7 +62,7 @@
 
 #include_next <features.h>
 
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__APPLE__)
 
 /* Whether a name is one the preprocessor has been told about. The idiom is the
  * usual one: a name that has been told about expands to a marker that shifts
@@ -79,8 +92,18 @@
 #define OKM_PLACEHOLDER_allzerop           OKM_MARK(~)
 
 /* 0: the second name is made. 1: it is not, and the source that supplies the
- * real definition makes it instead. */
-#define OKM_ALIAS_0(old, new) extern __typeof(old) new __attribute__((__alias__(#old)))
+ * real definition makes it instead.
+ *
+ * The two formats differ only in how a second name is written. One accepts the
+ * compiler's construct without its weakness; the other refuses the construct
+ * and accepts the assembler's directive, where the name carries the leading
+ * underscore that format gives every C name. */
+#if defined(__APPLE__)
+#  define OKM_ALIAS_0(old, new) \
+        __asm__(".globl _" #new "\n\t.set _" #new ", _" #old)
+#else
+#  define OKM_ALIAS_0(old, new) extern __typeof(old) new __attribute__((__alias__(#old)))
+#endif
 #define OKM_ALIAS_1(old, new) extern __typeof(old) new
 #define OKM_ALIAS_PICK2(x)    OKM_ALIAS_##x
 #define OKM_ALIAS_PICK(x)     OKM_ALIAS_PICK2(x)
@@ -88,6 +111,6 @@
 #undef weak_alias
 #define weak_alias(old, new) OKM_ALIAS_PICK(OKM_IS_PLACEHOLDER(old))(old, new)
 
-#endif  /* _WIN32 */
+#endif  /* _WIN32 || __APPLE__ */
 
 #endif

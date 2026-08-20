@@ -91,3 +91,50 @@ almost every public name to a definition through a weak alias, so on that format
 the aliases are made strongly, and the 46 names musl provides as placeholders
 for another source to replace are not made at all --- which is decided by the
 name of the placeholder's target and needs no change to musl.
+
+Two object formats reach that conclusion by different routes. On PE the
+construct compiles and produces a record no linker resolves. On Mach-O the
+compiler refuses it outright --- "aliases are not supported on darwin" --- so the
+second name is made with the assembler's own directive instead:
+
+```c
+int base(void) { return 7; }
+__asm__(".globl _w\n\t.set _w, _base");
+```
+
+which produces `w` as a definition at `base`'s address. That is a strong name
+too, so the same placeholder list applies, and `port/src/okm_format.c` supplies
+what is then absent on either format.
+
+## Three operations this library expresses differently, and what a caller can tell
+
+Each is recorded here because each is a divergence a reader would otherwise have
+to find by testing.
+
+`execve` replaces the running image, and openkal has no such operation: an
+environment that cannot replace a running image cannot supply one, and clause
+3.1 of the specification declines to simulate what cannot be supplied. This
+library expresses it as starting the program, waiting for it, and ending with
+the status it ended with. A caller cannot distinguish that through this library
+--- the same program runs, with the same arguments, on the same streams, and the
+same status reaches whoever waits --- but there are two images where a system
+with the operation would have one, so the identifier the started program reports
+is not the caller's. It is the arrangement every environment without the
+operation uses, and two of the three beneath openkal are such environments.
+
+`utimensat` asks the environment for ownership of the file, and this library
+asks for write access instead, because openkal's operation is stated on an open
+file and one of the three environments decides at the point of opening what may
+afterwards be done with it. The consequence is that a file its owner cannot
+write cannot have its time set here.
+
+A program is named without a suffix by a caller of this library and with one by
+one of the three environments. `port/src/okm_spawn.c` tries the name as given
+first and the name with that environment's suffix second, which is what every C
+library for it does. It is here rather than beneath because openkal is
+deliberately literal about names: it passes on the name it was given and does
+not know that a program is a kind of file.
+
+`fork` is absent and stays absent. Duplicating a running image is not something
+every environment can produce. `posix_spawn`, and therefore `system` and
+`popen`, are supplied, because musl builds them on starting a program.

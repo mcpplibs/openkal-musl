@@ -39,7 +39,13 @@
 #include <poll.h>
 #include <termios.h>
 #include <sys/ioctl.h>
+#include <spawn.h>
 #include "kstat.h"
+
+/* Starting a program: what SYS_execve is expressed as here. */
+int __posix_spawn(pid_t* restrict, const char* restrict,
+                  const posix_spawn_file_actions_t*, const posix_spawnattr_t* restrict,
+                  char* const[restrict], char* const[restrict]);
 
 #define OKM_PAGE 4096
 
@@ -167,8 +173,8 @@ static void fill_kstat(const struct kal_node_info* in, struct kstat* out)
 	if (in->writable) mode |= 0222u;
 	if (in->kind == kal_node_directory) mode |= 0111u;
 	out->st_mode = mode;
-	out->st_mtime_sec  = (__INT64_TYPE__)(in->modified_ns / 1000000000u);
-	out->st_mtime_nsec = (__INT64_TYPE__)(in->modified_ns % 1000000000u);
+	out->st_mtime_sec  = (kal_i64)(in->modified_ns / 1000000000u);
+	out->st_mtime_nsec = (kal_i64)(in->modified_ns % 1000000000u);
 	out->st_atime_sec  = out->st_mtime_sec;
 	out->st_atime_nsec = out->st_mtime_nsec;
 	out->st_ctime_sec  = out->st_mtime_sec;
@@ -433,6 +439,54 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		if (e != kal_ok) return -okm_errno(e);
 		return (syscall_arg_t)at;
 	}
+	/* Setting the time a file reports as its last modification.
+	 *
+	 * openkal states the operation on an open file, so the name is opened here
+	 * and released again. It is opened for writing because openkal requires
+	 * that: one of the environments beneath decides at the point of opening
+	 * what may afterwards be done with a file. The consequence is a divergence
+	 * from this interface's own rule --- POSIX asks for ownership and this asks
+	 * for write access --- and it is recorded rather than concealed, in
+	 * musl/PATCHES.md.
+	 *
+	 * Only the modification time is set. openkal reports one time for a file
+	 * and offers to set that one; a request that leaves it alone therefore
+	 * succeeds and does nothing, which is what it asked for. */
+	case SYS_utimensat: {
+		const struct timespec* times = (const struct timespec*)a3;
+		if (times && times[1].tv_nsec == UTIME_OMIT) return 0;
+
+		uint64_t when;
+		if (!times || times[1].tv_nsec == UTIME_NOW) when = kal_time_wall();
+		else when = (uint64_t)times[1].tv_sec * 1000000000u
+		          + (uint64_t)times[1].tv_nsec;
+
+		/* A null name means the descriptor itself, which is how this
+		 * library expresses `futimens'. Then the file is already open and is
+		 * used as it is; a file the caller opened without asking to write it
+		 * is reported as such by the implementation, which is the same answer
+		 * the environment would give. */
+		if (!(const char*)a2) {
+			struct okm_desc* d = okm_desc_of((int)a1);
+			if (!d || d->kind != OKM_FILE) return -EBADF;
+			const int e = kal_fs_set_modified(d->file, when);
+			return e == kal_ok ? 0 : -okm_errno(e);
+		}
+
+		struct okm_at at;
+		{
+			const long r = okm_resolve((int)a1, (const char*)a2, &at, 0);
+			if (r) return r;
+		}
+		struct kal_file f;
+		int e = kal_fs_open(at.base, at.rel, slen(at.rel),
+		                    KAL_OPEN_READ | KAL_OPEN_WRITE, &f);
+		if (e != kal_ok) return -okm_errno(e);
+		e = kal_fs_set_modified(f, when);
+		kal_fs_close_file(f);
+		return e == kal_ok ? 0 : -okm_errno(e);
+	}
+
 	case SYS_ftruncate: {
 		struct okm_desc* d = okm_desc_of((int)a1);
 		if (!d || d->kind != OKM_FILE) return -EBADF;
@@ -769,6 +823,40 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 
 	/* --- programs ---------------------------------------------------------- */
 	case SYS_wait4: return do_wait4((int)a1, (int*)a2, (int)a3, (void*)a4);
+
+	/* Replacing the calling program with another.
+	 *
+	 * openkal has no such operation and the omission is deliberate: an
+	 * environment that has no way to replace a running image cannot supply one,
+	 * and clause 3.1 declines to simulate what cannot be supplied. What openkal
+	 * has is starting a program, which every environment can do.
+	 *
+	 * So this is expressed as starting the program, waiting for it, and ending
+	 * with the status it ended with. A caller cannot distinguish that from a
+	 * replacement by anything it can observe through this library --- the same
+	 * program runs, with the same arguments, on the same streams, and the same
+	 * status reaches whoever waits. What differs is not observable here: there
+	 * are two images where a system with the operation would have one, so the
+	 * identifier the started program reports is not the caller's, and a signal
+	 * sent to the caller does not reach it. This library has no signals in any
+	 * case.
+	 *
+	 * It is the arrangement every environment without the operation uses, and
+	 * two of the three beneath openkal are such environments. The divergence is
+	 * recorded in musl/PATCHES.md. */
+	case SYS_execve: {
+		pid_t child = 0;
+		const int e = __posix_spawn(&child, (const char*)a1, 0, 0,
+		                            (char* const*)a2, (char* const*)a3);
+		if (e) return -e;
+		int st = 0;
+		if (do_wait4((int)child, &st, 0, 0) < 0) kal_exit(127);
+		/* The status the started program ended with, in the form this library
+		 * hands to a caller of wait: the low seven bits name a signal and are
+		 * zero when the program ended by returning. */
+		kal_exit((st & 0x7f) ? 128 + (st & 0x7f) : ((st >> 8) & 0xff));
+		return 0;
+	}
 #ifdef SYS_kill
 	case SYS_kill: {
 		const int i = child_index((int)a1);

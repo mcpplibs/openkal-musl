@@ -60,8 +60,7 @@ c_standard = "c99"
 # of them --- the four names for which musl ships no C are supplied by
 # port/src/okm_setjmp.S, in one file that assembles for every object format.
 #
-# The five exclusions are the whole of what this port replaces in musl, and
-# The seven exclusions are the whole of what this port replaces in musl, and
+# The nine exclusions are the whole of what this port replaces in musl, and
 # each is replaced for a reason recorded beside it in musl/PATCHES.md. Five read
 # the shape of one environment directly --- the auxiliary vector, the program's
 # own ELF headers, the instruction that installs a thread pointer, the system
@@ -145,6 +144,31 @@ cxx_runtime = "host-coupled"
 [target.'cfg(os = "linux")'.build]
 ldflags = ["-nostdlib", "-static", "-Wl,--no-dynamic-linker",
            "-Wl,--gc-sections", "-lgcc"]
+
+# The link line on this system.
+#
+# -nostdlib is the statement that the program carries one C library and that it
+# is this one. -lSystem follows it because two names this system's openkal
+# implementation needs live there and nowhere else, and both were chosen for the
+# property that no C library defines them.
+#
+# Naming that library alongside a C library of our own is safe here and would
+# not be on the first system, and the difference is a property of the object
+# format rather than of this port. This format binds every reference to the
+# library that defined it: a call inside that library reaches that library's own
+# definition, and a call in the program reaches the program's. So the two
+# `malloc's coexist rather than collide, which is the recursion that made the
+# first system's implementation reject its own C library.
+#
+# The entry point is named rather than found: this format records an entry in
+# the image header rather than looking for a fixed symbol. -dead_strip is this
+# linker's spelling of discarding what nothing reaches.
+[target.'cfg(os = "macos")'.build]
+# One source walks the program headers of an ELF image in order to report what
+# is loaded. This format has no such headers, and the operation it names is one
+# openkal does not offer in any case.
+sources = ["!musl/src/ldso/dl_iterate_phdr.c"]
+ldflags = ["-nostdlib", "-lSystem", "-Wl,-e,_okm_start", "-Wl,-dead_strip"]
 
 # The generated headers, per architecture and per data model.
 #
