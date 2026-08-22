@@ -50,7 +50,22 @@ inc=(-Iport/include -Imusl/src/include -Imusl/src/internal
      -Imusl-generated/internal -Imusl-generated/"$arch"
      -Imusl/arch/"$arch" -Imusl/arch/generic -Imusl/include
      -I"$here"/../openkal/include)
-cflags=(-std=c99 -D_XOPEN_SOURCE=700 -ffreestanding -nostdinc
+# ⚠️ `-DOKM_MUSL_INTERNAL=1` IS LOAD-BEARING AND WAS ADDED AFTER THIS LIST WAS
+# WRITTEN, WHICH IS THE POINT.
+#
+# It says the unit being compiled is one of musl's own, which is what
+# port/include/features.h reads to decide whether `weak`, `hidden` and
+# `weak_alias` mean anything. Without it musl's own sources stop at
+#
+#     crypt_r.c:23: type specifier missing  |  weak_alias(__crypt_r, crypt_r);
+#
+# ⭐ This list is a SECOND COPY of the manifest's, and the comment below already
+# says keeping it in step is what makes the answer the configured one. It went
+# out of step the first time the manifest gained a flag, and continuous
+# integration is what said so. Two places for one decision, and this is the
+# other one.
+cflags=(-std=c99 -D_XOPEN_SOURCE=700 -DOKM_MUSL_INTERNAL=1
+        -ffreestanding -nostdinc
         -fno-stack-protector -fno-strict-aliasing -frounding-math -w
         -ffunction-sections -fdata-sections)
 
@@ -59,7 +74,7 @@ cd "$here"
 # The configured source set: musl's own rule, minus the nine this port replaces,
 # minus the one this system's build excludes. Keeping this list in step with
 # mcpp.toml is what makes question 2's answer the configured one.
-skip='__libc_start_main|__init_tls|__set_thread_area|clone|posix_spawn|mmap|syscall_ret|getcwd|dl_iterate_phdr|okm_phdr'
+skip='__libc_start_main|__init_tls|__set_thread_area|clone|posix_spawn|mmap|syscall_ret|getcwd|dl_iterate_phdr|okm_phdr|cache'
 units=0
 for f in musl/src/*/*.c musl/src/malloc/mallocng/*.c port/src/*.c port/src/*.S; do
     base=$(basename "$f"); base=${base%.*}
