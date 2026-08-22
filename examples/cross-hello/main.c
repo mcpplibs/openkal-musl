@@ -11,6 +11,16 @@
 
 int main(int argc, char** argv)
 {
+	/* ⚠️ UNBUFFERED, AND THAT IS PART OF THE PROBE.
+	 *
+	 * Output to a pipe is fully buffered, so a program that dies part way
+	 * through loses everything it had printed --- and what the machine that
+	 * runs this reports is then not where the program got to. Measured: one run
+	 * showed a single line and stopped, and the line it showed was not the last
+	 * one it had executed. A probe whose report is buffered is a probe that
+	 * lies about where it stopped. */
+	setvbuf(stdout, NULL, _IONBF, 0);
+
 	int failures = 0;
 	#define check(ok, what) do { \
 		printf("%s: %s\n", (ok) ? "ok" : "FAIL", what); \
