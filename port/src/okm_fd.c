@@ -22,6 +22,7 @@
  * environment supplied, not of the program's cooperation.
  */
 #include "okm.h"
+#include "okm_opt.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -57,7 +58,7 @@ static volatile int g_lock;
 void okm_lock(void)
 {
 	while (__atomic_exchange_n(&g_lock, 1, __ATOMIC_ACQUIRE))
-		kal_task_yield();
+		okm_task_yield();
 }
 
 void okm_unlock(void) { __atomic_store_n(&g_lock, 0, __ATOMIC_RELEASE); }
@@ -88,8 +89,8 @@ static void desc_release(int d)
 	if (d < 0 || d >= OKM_MAX_DESC) return;
 	if (--g_desc[d].refs > 0) return;
 	struct okm_desc* p = &g_desc[d];
-	if (p->kind == OKM_FILE) kal_fs_close_file(p->file);
-	else if (p->kind == OKM_DIR) kal_fs_close_dir(p->dir);
+	if (p->kind == OKM_FILE) okm_fs_close_file(p->file);
+	else if (p->kind == OKM_DIR) okm_fs_close_dir(p->dir);
 	if (p->path_slot >= 0) g_dirpath_used[p->path_slot] = 0;
 	p->kind = OKM_FREE; p->iter = 0; p->iter_open = 0; p->path_slot = -1;
 	p->pending = 0;
@@ -207,11 +208,11 @@ void okm_table_init(void)
 	okm_fd_bind(1, OKM_STREAM, kal_stdout().h, nof, nod, O_WRONLY);
 	okm_fd_bind(2, OKM_STREAM, kal_stderr().h, nof, nod, O_WRONLY);
 
-	const kal_uintptr n = kal_fs_preopen_count();
+	const kal_uintptr n = okm_fs_preopen_count();
 	g_npre = 0;
 	for (kal_uintptr i = 0; i < n && g_npre < 16; i++) {
 		struct kal_dir d; const char* nm = 0; kal_uintptr l = 0;
-		if (kal_fs_preopen(i, &d, &nm, &l) != kal_ok) continue;
+		if (okm_fs_preopen(i, &d, &nm, &l) != kal_ok) continue;
 		g_pre[g_npre].dir = d; g_pre[g_npre].name = nm; g_pre[g_npre].len = l;
 		g_npre++;
 	}
@@ -397,7 +398,7 @@ int okm_chdir(int dirfd, const char* path)
 		struct okm_at at;
 		const int r = okm_resolve(dirfd, path, &at, 0);
 		if (r) return r;
-		const int e = kal_fs_open_dir(at.base, at.rel, __builtin_strlen(at.rel), &target);
+		const int e = okm_fs_open_dir(at.base, at.rel, __builtin_strlen(at.rel), &target);
 		if (e != kal_ok) return -okm_errno(e);
 		if (root_length(path)) { if (join("", path, abs, sizeof abs)) return -ENAMETOOLONG; }
 		else                   { if (join(g_cwd, path, abs, sizeof abs)) return -ENAMETOOLONG; }
@@ -413,7 +414,7 @@ int okm_chdir(int dirfd, const char* path)
 		 * own handle and the working directory takes another by opening it
 		 * through itself. */
 		struct kal_dir own;
-		if (kal_fs_open_dir(d->dir, ".", 1, &own) == kal_ok) target = own;
+		if (okm_fs_open_dir(d->dir, ".", 1, &own) == kal_ok) target = own;
 	}
 
 	okm_cwd_dir = target;

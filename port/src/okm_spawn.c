@@ -22,6 +22,7 @@
  */
 #define _GNU_SOURCE
 #include "okm.h"
+#include "okm_opt.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -115,7 +116,7 @@ int __posix_spawn(pid_t* restrict res, const char* restrict path,
 	 * started program reads its own name through kal_env_arg(0), so a caller
 	 * that did not supply it could not predict what the program would read. */
 	struct kal_process child;
-	int e = kal_process_spawn(at.base, at.rel, slen(at.rel),
+	int e = okm_process_spawn(at.base, at.rel, slen(at.rel),
 	                          a_ptr, a_len, (kal_uintptr)argc,
 	                          e_ptr, e_len, (kal_uintptr)envc,
 	                          &streams, &child);
@@ -143,7 +144,7 @@ int __posix_spawn(pid_t* restrict res, const char* restrict path,
 		if (!has_suffix && n + 4 < sizeof at.rel) {
 			at.rel[n + 0] = '.'; at.rel[n + 1] = 'e';
 			at.rel[n + 2] = 'x'; at.rel[n + 3] = 'e'; at.rel[n + 4] = 0;
-			e = kal_process_spawn(at.base, at.rel, n + 4,
+			e = okm_process_spawn(at.base, at.rel, n + 4,
 			                      a_ptr, a_len, (kal_uintptr)argc,
 			                      e_ptr, e_len, (kal_uintptr)envc,
 			                      &streams, &child);
@@ -155,7 +156,7 @@ int __posix_spawn(pid_t* restrict res, const char* restrict path,
 	if (e != kal_ok) return okm_errno(e);
 
 	const int pid = __okm_child_record(child);
-	if (pid < 0) { kal_process_close(child); return EAGAIN; }
+	if (pid < 0) { okm_process_close(child); return EAGAIN; }
 	*res = (pid_t)pid;
 	return 0;
 }

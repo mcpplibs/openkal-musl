@@ -18,6 +18,7 @@
  * Everything else musl does at startup is unchanged and runs from here.
  */
 #include "okm.h"
+#include "okm_opt.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -74,7 +75,7 @@ int __init_tp(void* p)
 	if (__set_thread_area(TP_ADJ(p)) < 0) return -1;
 	libc.can_do_threads = 1;
 	td->detach_state = DT_JOINABLE;
-	td->tid = (int)kal_task_current();
+	td->tid = (int)OKM_CONTEXT_ID();
 	if (td->tid == 0) td->tid = 1;
 	td->locale = &libc.global_locale;
 	td->robust_list.head = &td->robust_list.head;

@@ -32,6 +32,7 @@
  * an arrangement clause 7.10 explicitly permits.
  */
 #include "okm.h"
+#include "okm_opt.h"
 
 #include <stdint.h>
 
@@ -112,7 +113,7 @@ static volatile int g_recorded;
 
 uintptr_t __okm_get_tp(void)
 {
-	struct okm_slot* s = find(key_of(kal_task_current()), 0);
+	struct okm_slot* s = find(key_of(OKM_CONTEXT_ID()), 0);
 	if (s) return s->tp;
 	if (__atomic_load_n(&g_recorded, __ATOMIC_ACQUIRE)) {
 		static const char m[] =
@@ -126,7 +127,7 @@ uintptr_t __okm_get_tp(void)
 
 void __okm_set_tp(uintptr_t value)
 {
-	struct okm_slot* s = find(key_of(kal_task_current()), 1);
+	struct okm_slot* s = find(key_of(OKM_CONTEXT_ID()), 1);
 	if (!s) {
 		static const char m[] =
 			"openkal-musl: more execution contexts than this port can record\n";
@@ -138,13 +139,13 @@ void __okm_set_tp(uintptr_t value)
 
 void* __okm_get_self(void)
 {
-	struct okm_slot* s = find(key_of(kal_task_current()), 0);
+	struct okm_slot* s = find(key_of(OKM_CONTEXT_ID()), 0);
 	return s ? s->self : 0;
 }
 
 void __okm_set_self(void* value)
 {
-	struct okm_slot* s = find(key_of(kal_task_current()), 1);
+	struct okm_slot* s = find(key_of(OKM_CONTEXT_ID()), 1);
 	if (s) s->self = value;
 }
 
@@ -153,7 +154,7 @@ void __okm_set_self(void* value)
  * past it to reach one placed beyond it by an earlier collision. */
 void __okm_release_context(void)
 {
-	struct okm_slot* s = find(key_of(kal_task_current()), 0);
+	struct okm_slot* s = find(key_of(OKM_CONTEXT_ID()), 0);
 	if (!s) return;
 	s->tp = 0;
 	s->self = 0;

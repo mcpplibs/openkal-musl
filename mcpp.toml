@@ -39,6 +39,28 @@ openkal-macos = { git = "https://github.com/mcpplibs/openkal-macos", branch = "f
 [target.'cfg(os = "none")'.dependencies]
 openkal-opensbi = { git = "https://github.com/mcpplibs/openkal-opensbi", branch = "feat/openkal-closure" }
 
+# ⭐ WHICH OPENKAL INTERFACES THE IMPLEMENTATION BENEATH IS EXPECTED TO PROVIDE.
+#
+# A machine with no operating system has no storage to open a file on, no second
+# image to start, and no scheduler to give a context to. openkal's answer to
+# each is that the interface is ABSENT — clause 6.2 forbids an implementation
+# from providing one whose operations always fail — and the answer for this C
+# library is that it must not be built calling them.
+#
+# ⚠️ IT IS BUILT CALLING THEM UNLESS TOLD OTHERWISE, AND THE WAY THAT SHOWS IS A
+# LINK FAILURE IN A PROGRAM THAT NEVER OPENS A FILE. Measured 2026-08-23 on
+# riscv64-none-elf: a program whose whole text was `import std;` and one line of
+# output failed on fifteen names it can never reach, because `fclose` is on the
+# exit path of anything that uses stdio and the descriptor table closes what it
+# holds. port/src/okm.h records what these three change and why answering with
+# an error is right for a C library and wrong for an openkal implementation.
+#
+# ⚠️ THE TARGET IS A PROXY FOR THE IMPLEMENTATION, AND AN IMPERFECT ONE. A board
+# CAN carry a real filesystem. Each macro is `#ifndef`-guarded, so a project
+# with one turns it back on from its own build without editing this file.
+[target.'cfg(os = "none")'.build]
+defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
+
 [target.'cfg(windows)'.dependencies]
 openkal-windows = { git = "https://github.com/mcpplibs/openkal-windows", branch = "feat/openkal-closure", features = ["standalone"] }
 
