@@ -297,8 +297,28 @@ include_dirs = ["musl-generated/x86_64", "musl/arch/x86_64", "musl/arch/generic"
 [target.'cfg(all(arch = "x86_64", windows))'.build]
 include_dirs = ["musl-generated/x86_64-windows", "musl/arch/x86_64", "musl/arch/generic"]
 
-[target.'cfg(arch = "aarch64")'.build]
+# ⚠️ TWO ROWS FOR ONE ARCHITECTURE, AND MUTUALLY EXCLUSIVE — the same shape
+# x86_64 already has for Windows, and for a narrower version of the same reason.
+#
+# musl states its data model in three lines of bits/alltypes.h. Windows needed a
+# variant because it is LLP64 and every musl architecture is LP64. Apple is
+# LP64 — a `long` holds a pointer — and still differs in one of the three:
+# `int64_t` is spelled `long long` there and `long` on Linux.
+#
+# ⚠️ One spelling, and it is not cosmetic. Measured 2026-08-23 on a macOS cross:
+#
+#   okm_syscall.c:439: incompatible pointer types passing 'uint64_t *'
+#     (aka 'unsigned long *') to parameter of type 'kal_u64 *'
+#     (aka 'unsigned long long *')
+#
+# `kal_u64` comes from the COMPILER (`__UINT64_TYPE__`), which is authoritative
+# about the target's ABI; `uint64_t` came from these three lines, which carried
+# Linux's answer. Same width, different type, and the two do not convert.
+[target.'cfg(all(arch = "aarch64", not(os = "macos")))'.build]
 include_dirs = ["musl-generated/aarch64", "musl/arch/aarch64", "musl/arch/generic"]
+
+[target.'cfg(all(arch = "aarch64", os = "macos"))'.build]
+include_dirs = ["musl-generated/aarch64-macos", "musl/arch/aarch64", "musl/arch/generic"]
 
 [target.'cfg(arch = "riscv64")'.build]
 include_dirs = ["musl-generated/riscv64", "musl/arch/riscv64", "musl/arch/generic"]
