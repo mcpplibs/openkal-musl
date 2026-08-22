@@ -171,3 +171,49 @@ jobs:
 
           # The variable was consulted, and the interval was measured.
           grep -q 'elapsed .* nanoseconds' run.log
+
+  # ---------------------------------------------------------------------------
+  # The measurement musl/PATCHES.md records, made from a machine that is not the
+  # system it is about.
+  #
+  # It is a job rather than a note because the claim it supports --- that a
+  # program for that system can be built, and linked, without any file that
+  # system supplies --- is one that a change to this port could silently undo.
+  # The two numbers it asserts are zero indirect symbols and exactly two names.
+  cross-macos:
+    name: cross-link for the other system, from this one
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The implementation for that system
+        run: |
+          branch='${{ github.head_ref || github.ref_name }}'
+          git clone --quiet https://github.com/mcpplibs/openkal-macos.git ../openkal-macos
+          git -C ../openkal-macos checkout --quiet "origin/$branch" 2>/dev/null || true
+          git clone --quiet https://github.com/mcpplibs/openkal.git ../openkal
+          git -C ../openkal checkout --quiet "origin/$branch" 2>/dev/null || true
+
+      - name: Install LLVM
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang lld llvm
+          # ld64.lld is the Mach-O driver of the same binary; Ubuntu's package
+          # installs it under a version suffix and without the plain name.
+          v=$(ls /usr/lib/llvm-*/bin/ld64.lld 2>/dev/null | sort -V | tail -1)
+          test -n "$v" || { echo "::error::this image has no ld64.lld"; exit 1; }
+          d=$(dirname "$v")
+          echo "LD64=$v" >> "$GITHUB_ENV"
+          # The tools are installed under a version suffix and the probe asks for
+          # them by their plain names, so the directory that has both spellings
+          # is named rather than assumed.
+          echo "NM=$d/llvm-nm" >> "$GITHUB_ENV"
+          echo "$d" >> "$GITHUB_PATH"
+          "$d/llvm-nm" --version | head -1
+          clang --version | head -1
+
+      - name: Zero indirect symbols, and two names
+        run: |
+          bash tools/probe-cross-macos.sh aarch64
+          bash tools/probe-cross-macos.sh x86_64
