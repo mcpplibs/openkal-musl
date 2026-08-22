@@ -280,7 +280,24 @@ sources = ["!port/src/okm_phdr.c"]
 # reach the construct, does not need this system's linker, and therefore does
 # not need any file this system supplies. musl/PATCHES.md records both
 # measurements and the two names a program does still need.
-ldflags = ["-nostdlib", "-lSystem", "--ld-path=/usr/bin/ld",
+# ⚠️ `--ld-path` IS GONE, AND THE COMMENT ABOVE ALREADY SAID WHY IT WOULD BE.
+#
+# It named this system's own linker, to work around a construct that the
+# compiler this package was FIRST built with produced. The remeasurement above
+# is the whole of the reason it can go: with the open-source toolchain, the same
+# objects produce ZERO indirect symbols, and `ld64.lld` links them.
+#
+# ⚠️ AND IT HAD TO GO, because mcpp's conditions are on the TARGET and not on the
+# host. `cfg(os = "macos")` is true when this library is BUILT ON macOS and also
+# when it is BUILT FOR macOS from somewhere else — and the second case is a Linux
+# machine, where `/usr/bin/ld` is GNU ld and cannot link a Mach-O:
+#
+#     /usr/bin/ld: Error: unable to disambiguate: -dead_strip
+#                  (did you mean --dead_strip ?)
+#
+# Without it the clang driver picks the linker its target needs, which is what a
+# retargetable driver is for.
+ldflags = ["-nostdlib", "-lSystem",
            "-Wl,-e,_okm_start", "-Wl,-dead_strip"]
 
 # The generated headers, per architecture and per data model.
