@@ -1,0 +1,44 @@
+import mcpp;
+import std;
+
+// ⭐⭐ THE COMPILER'S OWN RUNTIME, NAMED ONLY WHEN IT HAS THAT NAME.
+//
+// A compiler emits calls to routines no C library defines — a 128-bit shift, a
+// stack probe, a complex multiply on `long double`. They live in `libgcc.a`
+// under GCC and in compiler-rt under clang, and the two are not
+// interchangeable names for one file: `-lgcc` on a clang link is a library that
+// does not exist.
+//
+// ⚠️ THE MANIFEST CANNOT SAY THIS, WHICH IS WHY THERE IS A PROGRAM. A
+// `[target.'cfg(windows)']` block describes the TARGET, and this is a question
+// about the toolchain that resolved. Both measurements arrived on 2026-08-22
+// from the same missing distinction:
+//
+//   naming it unconditionally    lld: error: unable to find library -lgcc
+//                                (a clean runner, clang, cross to PE)
+//   naming it never              undefined reference to `___chkstk_ms'
+//                                undefined reference to `__mulxc3'
+//                                (a Windows runner, GCC, no C++ runtime in the
+//                                 graph to supply compiler-rt instead)
+//
+// Each was the correct behaviour for the other configuration.
+//
+// ⚠️ PE ONLY, AND `gcc_eh` WITH IT. On this format a thread-local variable is
+// reached through a helper rather than through an address the processor
+// supplies, and that helper is in the second archive rather than the first.
+// Where the graph brings `openkal-llvm-runtime`, compiler-rt's `emutls.c` is
+// the same answer and neither archive is consulted.
+//
+// ⚠️ NOT ON ELF OR Mach-O. There the driver still links the compiler's runtime
+// even under `-nostdlib`, or the graph supplies it; adding a name here would be
+// a second source for something that already has one.
+int main() {
+    const std::string os  = mcpp::target_os() ? mcpp::target_os() : "";
+    const std::string fam = mcpp::compiler()  ? mcpp::compiler()  : "";
+
+    if (os == "windows" && fam == "gcc") {
+        mcpp::link_lib("gcc");
+        mcpp::link_lib("gcc_eh");
+    }
+    return 0;
+}
