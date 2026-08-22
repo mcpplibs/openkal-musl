@@ -22,9 +22,21 @@ int main(int argc, char** argv)
 	setvbuf(stdout, NULL, _IONBF, 0);
 
 	int failures = 0;
+	/* ⚠️ THE CONDITION IS EVALUATED ONCE, AND THE FIRST VERSION DID NOT.
+	 *
+	 * It read `(ok) ? "ok" : "FAIL"' and then `if (!(ok))', so an argument with
+	 * an effect happened twice --- and one of the arguments below is
+	 * `fclose(f) == 0'. The second close was of a stream already closed, and
+	 * the program died at the NEXT fopen with a segmentation fault.
+	 *
+	 * It was measured on a machine of the other system first, where it looked
+	 * like a defect in this port, and it reproduced on this one --- which is
+	 * what said it was not. A probe that has an effect in its own condition is
+	 * a probe that tests itself as well as its subject. */
 	#define check(ok, what) do { \
-		printf("%s: %s\n", (ok) ? "ok" : "FAIL", what); \
-		if (!(ok)) ++failures; } while (0)
+		const int okm_ok_ = !!(ok); \
+		printf("%s: %s\n", okm_ok_ ? "ok" : "FAIL", what); \
+		if (!okm_ok_) ++failures; } while (0)
 
 	check(argc >= 1 && argv[0] != NULL, "the program received its own name");
 
