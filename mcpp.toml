@@ -348,12 +348,33 @@ include_dirs = ["musl-generated/riscv64", "musl/arch/riscv64", "musl/arch/generi
 # The port's own dl_iterate_phdr is for ELF and is excluded here, as musl's was:
 # this format has no program headers.
 sources = ["!port/src/okm_phdr.c"]
-# -lgcc supplies the routines a compiler emits calls to and no C library
-# defines. -lgcc_eh supplies one more that only this format needs: this
-# toolchain reaches a thread-local variable through a helper rather than through
-# an address the processor supplies, because on this format a thread-local
-# variable cannot be reached directly from something loaded at run time. The
-# helper is in that archive and not in the other, which is a fact about the
-# toolchain rather than about this port.
-ldflags = ["-nostdlib", "-static", "-Wl,--gc-sections", "-Wl,-e,okw_start",
-           "-lgcc", "-lgcc_eh"]
+# ⚠️ `-lgcc` AND `-lgcc_eh` WERE HERE AND ARE NOT ANY MORE.
+#
+# They named GCC's runtime: the routines a compiler emits calls to and no C
+# library defines, plus one more this format needs — the helper a thread-local
+# variable is reached through, because on this format it cannot be reached
+# directly from something loaded at run time.
+#
+# Both statements were true. What was false is that this port should name them:
+#
+# 1. ⭐ THE macOS BLOCK ABOVE NAMES NEITHER, and it is the same C library on the
+#    same compiler. Builtins come from the graph there — `openkal-llvm-runtime`
+#    builds compiler-rt for the target — and the thread-local helper is
+#    `__emutls_get_address` from that same build. This block was the outlier.
+#
+# 2. ⚠️ AND IT ONLY EVER WORKED BY ACCIDENT. `libgcc.a` and `libgcc_eh.a` are
+#    mingw's, so a cross build resolved them out of `/usr/x86_64-w64-mingw32/lib`
+#    — present on a machine with mingw installed and nowhere else. Measured
+#    2026-08-22 on a clean CI runner, alongside the four import libraries that
+#    failed for the same reason:
+#
+#        lld: error: unable to find library -lgcc
+#        lld: error: unable to find library -lgcc_eh
+#
+#    A GCC runtime on a link whose compiler is clang was the sign, and the
+#    missing file was the report.
+#
+# ⇒ Measured after removing them, with `openkal-llvm-runtime` in the graph
+# (which now builds compiler-rt's builtins AND `emutls.c` for this format):
+# `examples/same-source` links and the program runs, printing `unwound: true`.
+ldflags = ["-nostdlib", "-static", "-Wl,--gc-sections", "-Wl,-e,okw_start"]
