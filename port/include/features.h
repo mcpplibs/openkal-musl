@@ -62,71 +62,101 @@
 
 #include_next <features.h>
 
-/* ⚠️ THE INTERNAL HEADERS ARE C, AND A CONSUMER MAY NOT BE.
+/* ⚠️ THE INTERNAL HEADERS ARE MUSL'S, AND A CONSUMER IS NOT MUSL.
  *
  * musl's build reaches its own declarations through src/include, whose headers
  * add the hidden entries the public ones do not have. This package publishes
  * the path it is built from --- one set of directories rather than two, which
- * is the decision mcpp.toml records --- so a consumer reaches src/include too.
+ * is the decision mcpp.toml records --- so a consumer reaches src/include too,
+ * and finds <features.h> defining `weak', `hidden' and `weak_alias' as macros
+ * that mean something only to musl's own sources.
  *
  * ⓘ THIS IS THE SECOND-BEST REMEDY. The first would be for a package to
  * distinguish the directories it is built from from the directories it
- * publishes. Measured 2026-08-22: mcpp cannot express it. Moving the two
- * directories into per-glob flags places them AFTER include_dirs on the command
- * line, and musl's own build then finds the public <features.h> before the
- * internal one and fails with `unknown type name hidden'. The note is here so
- * that the better fix is not lost. */
-#ifdef __cplusplus
-/* The rule, rather than a remedy per collision.
+ * publishes. Measured 2026-08-22: mcpp cannot express it --- publicUsage takes
+ * privateBuild's include directories entire. Moving the two directories into
+ * per-glob flags places them AFTER include_dirs on the command line, and musl's
+ * own build then finds the public <features.h> before the internal one and
+ * fails with `unknown type name hidden'. The note is here so that the better
+ * fix is not lost.
  *
- * musl's own sources are C and are never compiled as anything else. So a
- * translation unit that is C++ is, with certainty, NOT one of them --- it is a
- * consumer that reached these headers because this package publishes the path
- * it is built from. Everything src/include adds for musl's own build is
- * therefore inert here, and what it must not do is collide with the consumer.
+ * ⭐⭐ THE DISCRIMINATOR WAS WRONG ONCE, AND THE WRONG ONE HELD FOR A DAY.
  *
- * Three names, and they were found one at a time by two consumers rather than
- * by reading:
+ * It used to be `#ifdef __cplusplus', with this reasoning written beside it:
+ * musl's own sources are C and are never compiled as anything else, so a
+ * translation unit that is C++ is with certainty not one of them.
  *
- *   restrict     a C keyword, not a C++ one. `f(int *restrict, int *restrict)'
- *                is read as two parameters both named `restrict'. Given the
- *                spelling every compiler accepts in both languages.
+ * Both halves are true. The conclusion drawn from them was not, because it was
+ * used backwards: a C++ unit is certainly not musl's, but a C unit is not
+ * certainly musl's. Measured 2026-08-23, when a freestanding target needed
+ * compiler-rt's soft-float routines built --- C, not musl, and the first file
+ * compiled stopped at
  *
-   hidden       ⭐ GIVEN C LINKAGE, not emptied. Every declaration the internal
- *                overlay adds begins with it --- that is what it is for --- so
- *                one spelling gives all of them the linkage they were written
- *                with. The overlay's headers carry no `extern "C"' of their own
- *                because musl never compiles them as C++, and a C++ consumer
- *                that emptied `hidden' instead would parse the declarations and
- *                then fail to link against musl's definitions: measured, with
- *                `undefined symbol: ___errno_location()' beside
- *                `did you mean: extern "C" ___errno_location'.
+ *     int_util.c:49: use of undeclared identifier `__weak__'
+ *     features.h:6: expanded from macro `weak'
  *
- *   weak         an attribute musl spells as a bare word; made empty.
+ * ⇒ The property that matters is not the LANGUAGE of the unit. It is whether
+ * this package is the one compiling it, and that is a thing this package can
+ * simply say: mcpp.toml defines OKM_MUSL_INTERNAL for its own build, and
+ * `defines' does not propagate to a consumer --- publicUsage carries include
+ * directories and flags, and this is neither. Verified by building both sides.
+ *
+ * A consumer therefore gets the block below in EITHER language, and musl's own
+ * sources get the machinery at the end of the file. */
+#ifndef OKM_MUSL_INTERNAL
+
+/* The rule, rather than a remedy per collision. Everything src/include adds for
+ * musl's own build is inert here, and what it must not do is collide with the
+ * consumer. Four names, found one at a time by three consumers rather than by
+ * reading:
+ *
+ *   restrict     C++ ONLY --- in C it is a keyword and needs nothing. There
+ *                `f(int *restrict, int *restrict)' is read as two parameters
+ *                both named `restrict'. Given the spelling every compiler
+ *                accepts in both languages.
+ *
+ *   hidden       ⭐ IN C++, GIVEN C LINKAGE rather than emptied. Every
+ *                declaration the internal overlay adds begins with it --- that
+ *                is what it is for --- so one spelling gives all of them the
+ *                linkage they were written with. The overlay's headers carry no
+ *                `extern "C"' of their own because musl never compiles them as
+ *                C++, and a consumer that emptied `hidden' instead would parse
+ *                the declarations and then fail to link against musl's
+ *                definitions: measured, with `undefined symbol:
+ *                ___errno_location()' beside `did you mean: extern "C"
+ *                ___errno_location'. In C there is no linkage to restore, so it
+ *                is emptied.
+ *
+ *   weak         an attribute musl spells as a bare word. Emptied. ⚠️ This is
+ *                the one that bit compiler-rt: it writes
+ *                `__attribute__((weak))' of its own, which became
+ *                `__attribute__((__attribute__((__weak__))))'.
  *
  *   weak_alias   REMOVED rather than emptied. It is used in musl's .c files and
  *                in no header, so nothing here needs it --- and leaving it
  *                defined breaks any consumer that writes
  *                `__attribute__((weak_alias(...)))' of its own. LLVM's
  *                libunwind does, in fifteen places, and reported
- *                `use of undeclared identifier __weak__'.
- *
- * ⓘ Still the second-best remedy, for the reason recorded below: a package that
- * could distinguish the directories it is built from from the directories it
- * publishes would need none of this. */
-#  if !defined(restrict)
-#    define restrict __restrict
+ *                `use of undeclared identifier __weak__'. */
+#  ifdef __cplusplus
+#    if !defined(restrict)
+#      define restrict __restrict
+#    endif
+#    undef hidden
+#    define hidden extern "C"
+#  else
+#    undef hidden
+#    define hidden
 #  endif
-#  undef hidden
-#  define hidden extern "C"
 #  undef weak
 #  define weak
 #  undef weak_alias
-#endif
 
-/* Not for a C++ consumer: it redefines weak_alias, and the block above removed
- * that name deliberately. musl's own sources are C, so this never applies to them. */
-#if (defined(_WIN32) || defined(__APPLE__)) && !defined(__cplusplus)
+#endif  /* !OKM_MUSL_INTERNAL */
+
+/* Only for musl's own sources: it redefines weak_alias, and the block above
+ * removed that name deliberately for everyone else. */
+#if (defined(_WIN32) || defined(__APPLE__)) && defined(OKM_MUSL_INTERNAL)
 
 /* Whether a name is one the preprocessor has been told about. The idiom is the
  * usual one: a name that has been told about expands to a marker that shifts
