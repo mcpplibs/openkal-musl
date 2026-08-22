@@ -347,7 +347,18 @@ include_dirs = ["musl-generated/riscv64", "musl/arch/riscv64", "musl/arch/generi
 [target.'cfg(windows)'.build]
 # The port's own dl_iterate_phdr is for ELF and is excluded here, as musl's was:
 # this format has no program headers.
-sources = ["!port/src/okm_phdr.c"]
+sources = [
+  "!port/src/okm_phdr.c",
+  # ⭐ AND ONE THIS FORMAT NEEDS THAT NO OTHER DOES.
+  #
+  # ⚠️ IN A SUBDIRECTORY, AND THAT IS THE POINT. `port/src/*.c` in the
+  # package-wide list is a glob, so a file placed beside its neighbours would be
+  # compiled for EVERY target — and `__main` is a name only this format's
+  # compiler emits a call to. `port/src/win/` is not matched by that glob, which
+  # states the restriction in the layout rather than relying on an exclusion
+  # that would have to win against an inclusion.
+  "port/src/win/*.c",
+]
 # ⚠️ `-lgcc` AND `-lgcc_eh` WERE HERE AND ARE NOT ANY MORE.
 #
 # They named GCC's runtime: the routines a compiler emits calls to and no C
