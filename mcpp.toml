@@ -28,6 +28,17 @@ openkal-linux = { git = "https://github.com/mcpplibs/openkal-linux", branch = "f
 [target.'cfg(os = "macos")'.dependencies]
 openkal-macos = { git = "https://github.com/mcpplibs/openkal-macos", branch = "feat/openkal-closure", features = ["standalone"] }
 
+# ⚠️ FIRST STEP TOWARD A BARE MACHINE, AND NOT THE WHOLE OF IT.
+#
+# An environment with no operating system reaches openkal through firmware. The
+# architecture directory and the generated headers for it are now here --- they
+# were not, and their absence was the blocker, not any property of libc++ or of
+# this port. What is NOT here yet is the rest of the chain: a linker script, a
+# runtime that receives control, and a C library configured for an environment
+# with no process to exit from. So this declares the implementation and stops.
+[target.'cfg(os = "none")'.dependencies]
+openkal-opensbi = { git = "https://github.com/mcpplibs/openkal-opensbi", branch = "main" }
+
 [target.'cfg(windows)'.dependencies]
 openkal-windows = { git = "https://github.com/mcpplibs/openkal-windows", branch = "feat/openkal-closure", features = ["standalone"] }
 
@@ -214,6 +225,9 @@ include_dirs = ["musl-generated/x86_64-windows", "musl/arch/x86_64", "musl/arch/
 
 [target.'cfg(arch = "aarch64")'.build]
 include_dirs = ["musl-generated/aarch64", "musl/arch/aarch64", "musl/arch/generic"]
+
+[target.'cfg(arch = "riscv64")'.build]
+include_dirs = ["musl-generated/riscv64", "musl/arch/riscv64", "musl/arch/generic"]
 
 # The link line on this environment. There is no separate loader to name and no
 # archive of compiler support routines to add: the entry point is this

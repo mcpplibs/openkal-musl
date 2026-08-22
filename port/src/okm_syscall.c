@@ -595,7 +595,13 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 #endif
+	/* One architecture states only the later of the two. The kernel's table
+	 * grew, and an architecture added after the growth has no number for the
+	 * operation the earlier one named --- so the pair is written as two
+	 * conditionals rather than as one name and an optional second. */
+#ifdef SYS_renameat
 	case SYS_renameat:
+#endif
 #ifdef SYS_renameat2
 	case SYS_renameat2:
 #endif
