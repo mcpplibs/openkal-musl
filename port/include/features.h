@@ -62,6 +62,38 @@
 
 #include_next <features.h>
 
+/* ⚠️ THE INTERNAL HEADERS ARE C, AND A CONSUMER MAY NOT BE.
+ *
+ * musl's build reaches its own declarations through src/include, whose headers
+ * add the hidden entries the public ones do not have. Those headers are written
+ * as C and use the C keyword `restrict' bare; musl's public headers use
+ * `__restrict', which every compiler accepts in both languages.
+ *
+ * This package publishes the path it is built from --- one set of directories
+ * rather than two, which is the decision mcpp.toml records --- so a C++
+ * consumer reaches src/include as well. There `restrict' is not a keyword, and
+ * a declaration like
+ *
+ *     hidden struct tm *__gmtime_r(const time_t *restrict, struct tm *restrict);
+ *
+ * is read as two parameters both named `restrict', which the compiler rejects
+ * as a redefinition. Measured: a C++ translation unit that includes <vector>
+ * fails with four such errors before reaching anything of its own.
+ *
+ * The keyword is given a spelling here rather than in musl, because the
+ * alternative is editing the 1345 sources this port compiles unmodified, and
+ * because a name musl uses as a keyword is not one a consumer may use as an
+ * identifier while also including musl's headers.
+ *
+ * ⓘ This is the second-best remedy. The first would be for a package to
+ * distinguish the directories it is built from from the directories it
+ * publishes, which the build tool does not express today; with that, the
+ * internal overlay would simply not reach a consumer and nothing would need a
+ * spelling. The note is here so that the better fix is not lost. */
+#if defined(__cplusplus) && !defined(restrict)
+#  define restrict __restrict
+#endif
+
 #if defined(_WIN32) || defined(__APPLE__)
 
 /* Whether a name is one the preprocessor has been told about. The idiom is the
