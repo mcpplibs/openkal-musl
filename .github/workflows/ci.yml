@@ -152,6 +152,22 @@ jobs:
           grep -qE '^-- failures: 0 --$' run.log
           ! grep -q '^FAIL:' run.log
 
+      - name: The same program, built the ordinary way, as a control
+        run: |
+          # ⚠️ THIS STEP EXISTS BECAUSE IT ALREADY EARNED ITS PLACE.
+          #
+          # The cross-built copy failed on a machine of the other system, and the
+          # obvious reading was a defect in this port or in the way it was
+          # cross-built. A native build of the SAME source reproduced it here ---
+          # which said it was neither, and the defect was in the program's own
+          # assertion macro, which evaluated its condition twice and so closed a
+          # stream that was already closed.
+          #
+          # Two failures that look alike are told apart by building the same
+          # source two ways, and that is cheap enough to do every time.
+          cd examples/cross-hello && mcpp run 2>&1 | tee out.log
+          grep -q -- '-- failures: 0 --' out.log
+
       - name: The counts agree with the system's own
         working-directory: examples/wordcount
         run: |
@@ -229,22 +245,6 @@ jobs:
       # So the artifact is carried there. The job that receives it is the only
       # place in this workflow where the claim becomes "a program built here
       # runs there" rather than "a program built here links".
-      - name: The same program, built the ordinary way, as a control
-        run: |
-          # ⚠️ THIS STEP EXISTS BECAUSE IT ALREADY EARNED ITS PLACE.
-          #
-          # The cross-built copy failed on a machine of the other system, and the
-          # obvious reading was a defect in this port or in the way it was
-          # cross-built. A native build of the SAME source reproduced it here ---
-          # which said it was neither, and the defect was in the program's own
-          # assertion macro, which evaluated its condition twice and so closed a
-          # stream that was already closed.
-          #
-          # Two failures that look alike are told apart by building the same
-          # source two ways, and that is cheap enough to do every time.
-          cd examples/cross-hello && mcpp run 2>&1 | tee out.log
-          grep -q -- '-- failures: 0 --' out.log
-
       - name: A program for that system, built here
         run: |
           bash tools/cross-build-macos.sh aarch64 examples/cross-hello/main.c cross-hello-arm64
