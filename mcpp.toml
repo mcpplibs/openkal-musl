@@ -79,6 +79,9 @@ sources = [
   "!musl/src/mman/mmap.c",
   "!musl/src/internal/syscall_ret.c",
   "!musl/src/unistd/getcwd.c",
+  # Replaced by port/src/okm_phdr.c: musl answers this from the auxiliary
+  # vector, which the replaced __libc_start_main does not read.
+  "!musl/src/ldso/dl_iterate_phdr.c",
   "port/src/*.c",
   "port/src/*.S",
 ]
@@ -164,10 +167,9 @@ ldflags = ["-nostdlib", "-static", "-Wl,--no-dynamic-linker",
 # the image header rather than looking for a fixed symbol. -dead_strip is this
 # linker's spelling of discarding what nothing reaches.
 [target.'cfg(os = "macos")'.build]
-# One source walks the program headers of an ELF image in order to report what
-# is loaded. This format has no such headers, and the operation it names is one
-# openkal does not offer in any case.
-sources = ["!musl/src/ldso/dl_iterate_phdr.c"]
+# The port's own dl_iterate_phdr is for ELF and is excluded here, as musl's was:
+# this format has no program headers.
+sources = ["!port/src/okm_phdr.c"]
 #
 # --ld-path names this system's own linker rather than the one the toolchain
 # brings. The reason is one construct and fifteen uses of it. A second name for
@@ -218,10 +220,9 @@ include_dirs = ["musl-generated/aarch64", "musl/arch/aarch64", "musl/arch/generi
 # library's, and the implementation beneath it names the libraries its own
 # interfaces live in.
 [target.'cfg(windows)'.build]
-# One source walks the program headers of an ELF image in order to report what
-# is loaded. This format has no such headers, and the operation it names is one
-# openkal does not offer in any case.
-sources = ["!musl/src/ldso/dl_iterate_phdr.c"]
+# The port's own dl_iterate_phdr is for ELF and is excluded here, as musl's was:
+# this format has no program headers.
+sources = ["!port/src/okm_phdr.c"]
 # -lgcc supplies the routines a compiler emits calls to and no C library
 # defines. -lgcc_eh supplies one more that only this format needs: this
 # toolchain reaches a thread-local variable through a helper rather than through
