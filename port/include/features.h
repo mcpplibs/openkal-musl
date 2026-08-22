@@ -92,9 +92,17 @@
  *                is read as two parameters both named `restrict'. Given the
  *                spelling every compiler accepts in both languages.
  *
- *   hidden, weak attributes musl spells as bare words. Made empty rather than
- *                removed, because src/include's declarations use them and a
- *                consumer that includes <pthread.h> reaches those declarations.
+   hidden       ⭐ GIVEN C LINKAGE, not emptied. Every declaration the internal
+ *                overlay adds begins with it --- that is what it is for --- so
+ *                one spelling gives all of them the linkage they were written
+ *                with. The overlay's headers carry no `extern "C"' of their own
+ *                because musl never compiles them as C++, and a C++ consumer
+ *                that emptied `hidden' instead would parse the declarations and
+ *                then fail to link against musl's definitions: measured, with
+ *                `undefined symbol: ___errno_location()' beside
+ *                `did you mean: extern "C" ___errno_location'.
+ *
+ *   weak         an attribute musl spells as a bare word; made empty.
  *
  *   weak_alias   REMOVED rather than emptied. It is used in musl's .c files and
  *                in no header, so nothing here needs it --- and leaving it
@@ -110,7 +118,7 @@
 #    define restrict __restrict
 #  endif
 #  undef hidden
-#  define hidden
+#  define hidden extern "C"
 #  undef weak
 #  define weak
 #  undef weak_alias
