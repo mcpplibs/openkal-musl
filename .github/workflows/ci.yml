@@ -217,3 +217,53 @@ jobs:
         run: |
           bash tools/probe-cross-macos.sh aarch64
           bash tools/probe-cross-macos.sh x86_64
+
+      # ⚠️ LINKING IS NOT RUNNING, AND THIS IS WHERE THAT IS ADMITTED.
+      #
+      # Everything above happens on a machine that is not the system in
+      # question, and everything above is about the objects and the link. Whether
+      # the result STARTS is a different question, and it cannot be asked here:
+      # that system's 64-bit ARM variant refuses to start an image that is not
+      # signed, and the signature can only be made on a machine of that system.
+      #
+      # So the artifact is carried there. The job that receives it is the only
+      # place in this workflow where the claim becomes "a program built here
+      # runs there" rather than "a program built here links".
+      - name: A program for that system, built here
+        run: |
+          bash tools/cross-build-macos.sh aarch64 examples/cross-hello/main.c cross-hello-arm64
+          file cross-hello-arm64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cross-hello-arm64
+          path: cross-hello-arm64
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # The other half of the claim, on a machine of that system.
+  cross-macos-run:
+    name: what was cross-built starts, on that system
+    needs: cross-macos
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: cross-hello-arm64
+
+      - name: Sign it, because this system will not start it otherwise
+        run: |
+          chmod +x cross-hello-arm64
+          # Ad hoc: the identity is `-', which asserts nothing about who made
+          # the program and is exactly what this system requires before it will
+          # start one on this architecture. A program that is distributed needs
+          # more; a program that is checked needs this.
+          codesign -s - --force cross-hello-arm64
+          codesign -dv cross-hello-arm64 2>&1 | head -3
+
+      - name: It starts, and the C library beneath it came up
+        run: |
+          ./cross-hello-arm64 | tee run.log
+          grep -q -- '-- failures: 0 --' run.log
