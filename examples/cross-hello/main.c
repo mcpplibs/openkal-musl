@@ -26,11 +26,20 @@ int main(int argc, char** argv)
 	check(f != NULL, "a file is created");
 	if (f) {
 		check(fprintf(f, "%d", 12345) == 5, "it is written to");
-		fclose(f);
+		check(fclose(f) == 0, "it closes");
 		f = fopen("cross-hello.tmp", "r");
-		int v = 0;
-		check(f && fscanf(f, "%d", &v) == 1 && v == 12345, "it reads back");
-		if (f) fclose(f);
+		check(f != NULL, "it opens again for reading");
+		if (f) {
+			/* Split, because a single assertion over three operations names
+			 * none of them when it fails --- which is what the first version
+			 * of this program did, on a machine this one cannot run. */
+			int v = 0;
+			int n = fscanf(f, "%d", &v);
+			printf("   (fscanf returned %d, value %d)\n", n, v);
+			check(n == 1, "a formatted read succeeds");
+			check(v == 12345, "it reads back what was written");
+			fclose(f);
+		}
 		remove("cross-hello.tmp");
 	}
 

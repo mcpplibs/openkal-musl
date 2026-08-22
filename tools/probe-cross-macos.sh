@@ -59,7 +59,7 @@ cd "$here"
 # The configured source set: musl's own rule, minus the nine this port replaces,
 # minus the one this system's build excludes. Keeping this list in step with
 # mcpp.toml is what makes question 2's answer the configured one.
-skip='__libc_start_main|__init_tls|__set_thread_area|clone|posix_spawn|mmap|syscall_ret|getcwd|dl_iterate_phdr'
+skip='__libc_start_main|__init_tls|__set_thread_area|clone|posix_spawn|mmap|syscall_ret|getcwd|dl_iterate_phdr|okm_phdr'
 units=0
 for f in musl/src/*/*.c musl/src/malloc/mallocng/*.c port/src/*.c port/src/*.S; do
     base=$(basename "$f"); base=${base%.*}
