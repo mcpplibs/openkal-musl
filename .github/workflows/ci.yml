@@ -165,7 +165,16 @@ jobs:
           #
           # Two failures that look alike are told apart by building the same
           # source two ways, and that is cheap enough to do every time.
-          cd examples/cross-hello && mcpp run 2>&1 | tee out.log
+          # ⚠️ The target has to be named here as it is everywhere else in this
+          # job: one system needs it, and a step that omitted it built for that
+          # system's other toolchain and failed at the link with names kernel32
+          # supplies. Measured, on the first run of this step.
+          extra=''
+          [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
+          cd examples/cross-hello
+          mcpp build $extra
+          binary="$(find target -type f \( -name 'cross-hello' -o -name 'cross-hello.exe' \) | head -1)"
+          "./$binary" 2>&1 | tee out.log
           grep -q -- '-- failures: 0 --' out.log
 
       - name: The counts agree with the system's own
