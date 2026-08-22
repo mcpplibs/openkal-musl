@@ -21,6 +21,65 @@
 #include <openkal.h>
 #include <stddef.h>
 
+/* ⭐ WHICH OPENKAL INTERFACES THE IMPLEMENTATION BENEATH PROVIDES.
+ *
+ * openkal is composable. An implementation provides an interface in whole or
+ * not at all (clause 6.1), and one that cannot provide `fs' does not provide
+ * it, because clause 6.2 forbids the alternative in terms: an operation that is
+ * present and always fails is a defect.
+ *
+ * ⚠️ THE CONSEQUENCE FOR A C LIBRARY, WHICH IS WHY THIS BLOCK EXISTS.
+ *
+ * A C library calls those interfaces. If it is BUILT calling one the
+ * implementation beneath does not provide, the link fails --- and it fails for
+ * every program, including one that never opens a file, because `fclose' is on
+ * the exit path of anything that touches stdio and the descriptor table closes
+ * what it holds.
+ *
+ * Measured 2026-08-23 on riscv64-none-elf, above an implementation providing
+ * openkal's core set: a program whose entire text was `import std;' and one
+ * line of output failed to link on fifteen names it can never reach.
+ *
+ * ⭐ SO THE C LIBRARY IS CONFIGURED AND AN OPENKAL IMPLEMENTATION IS NOT. THAT
+ * LOOKS LIKE A CONTRADICTION AND IS NOT ONE.
+ *
+ *   An openkal implementation may not answer "unsupported", because openkal's
+ *   surface has no such answer to give and a caller could not act on one.
+ *
+ *   A C library may, because POSIX's surface HAS one --- ENOSYS --- and every
+ *   caller of `open' already handles a failure.
+ *
+ * Absence expressed as absence at one layer becomes absence expressed as a
+ * defined error at the next. That is the two layers doing their jobs, and the
+ * place where it would go wrong is a library that returned SUCCESS having done
+ * nothing.
+ *
+ * ⭐ THREE MACROS HERE AND ALL THE CONSEQUENCES IN ONE OTHER FILE. This block
+ * says what the environment HAS; okm_opt.h says what follows, and it is the
+ * only file in the port that reads these. A source that calls an interface
+ * which need not be there names `okm_fs_*' rather than `kal_fs_*', and never
+ * asks the question itself --- because the same question asked in forty places
+ * is answered wrongly in the forty-first.
+ *
+ * ⚠️ THE TARGET IS A PROXY FOR THE IMPLEMENTATION, AND AN IMPERFECT ONE.
+ *
+ * The manifest clears these for cfg(os="none"), because a target with no
+ * operating system is the case where an implementation providing storage is
+ * the exception. It is not the same statement --- a board CAN carry a real
+ * filesystem --- so each is `#ifndef'-guarded and a project that has one turns
+ * it back on from its own build. mcpp conditions on the target and not on which
+ * package satisfies a capability; when it can, this block is where that would
+ * be read instead, and nothing below would change. */
+#ifndef OKM_HAS_FS
+#  define OKM_HAS_FS 1
+#endif
+#ifndef OKM_HAS_PROCESS
+#  define OKM_HAS_PROCESS 1
+#endif
+#ifndef OKM_HAS_TASK
+#  define OKM_HAS_TASK 1
+#endif
+
 #define OKM_MAX_FD    1024
 #define OKM_MAX_DESC  512
 #define OKM_MAX_PATH  4096

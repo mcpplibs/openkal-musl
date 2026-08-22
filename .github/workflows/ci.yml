@@ -152,6 +152,31 @@ jobs:
           grep -qE '^-- failures: 0 --$' run.log
           ! grep -q '^FAIL:' run.log
 
+      - name: The same program, built the ordinary way, as a control
+        run: |
+          # ⚠️ THIS STEP EXISTS BECAUSE IT ALREADY EARNED ITS PLACE.
+          #
+          # The cross-built copy failed on a machine of the other system, and the
+          # obvious reading was a defect in this port or in the way it was
+          # cross-built. A native build of the SAME source reproduced it here ---
+          # which said it was neither, and the defect was in the program's own
+          # assertion macro, which evaluated its condition twice and so closed a
+          # stream that was already closed.
+          #
+          # Two failures that look alike are told apart by building the same
+          # source two ways, and that is cheap enough to do every time.
+          # ⚠️ The target has to be named here as it is everywhere else in this
+          # job: one system needs it, and a step that omitted it built for that
+          # system's other toolchain and failed at the link with names kernel32
+          # supplies. Measured, on the first run of this step.
+          extra=''
+          [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
+          cd examples/cross-hello
+          mcpp build $extra
+          binary="$(find target -type f \( -name 'cross-hello' -o -name 'cross-hello.exe' \) | head -1)"
+          "./$binary" 2>&1 | tee out.log
+          grep -q -- '-- failures: 0 --' out.log
+
       - name: The counts agree with the system's own
         working-directory: examples/wordcount
         run: |
@@ -171,3 +196,99 @@ jobs:
 
           # The variable was consulted, and the interval was measured.
           grep -q 'elapsed .* nanoseconds' run.log
+
+  # ---------------------------------------------------------------------------
+  # The measurement musl/PATCHES.md records, made from a machine that is not the
+  # system it is about.
+  #
+  # It is a job rather than a note because the claim it supports --- that a
+  # program for that system can be built, and linked, without any file that
+  # system supplies --- is one that a change to this port could silently undo.
+  # The two numbers it asserts are zero indirect symbols and exactly two names.
+  cross-macos:
+    name: cross-link for the other system, from this one
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The implementation for that system
+        run: |
+          branch='${{ github.head_ref || github.ref_name }}'
+          git clone --quiet https://github.com/mcpplibs/openkal-macos.git ../openkal-macos
+          git -C ../openkal-macos checkout --quiet "origin/$branch" 2>/dev/null || true
+          git clone --quiet https://github.com/mcpplibs/openkal.git ../openkal
+          git -C ../openkal checkout --quiet "origin/$branch" 2>/dev/null || true
+
+      - name: Install LLVM
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang lld llvm
+          # ld64.lld is the Mach-O driver of the same binary; Ubuntu's package
+          # installs it under a version suffix and without the plain name.
+          v=$(ls /usr/lib/llvm-*/bin/ld64.lld 2>/dev/null | sort -V | tail -1)
+          test -n "$v" || { echo "::error::this image has no ld64.lld"; exit 1; }
+          d=$(dirname "$v")
+          echo "LD64=$v" >> "$GITHUB_ENV"
+          # The tools are installed under a version suffix and the probe asks for
+          # them by their plain names, so the directory that has both spellings
+          # is named rather than assumed.
+          echo "NM=$d/llvm-nm" >> "$GITHUB_ENV"
+          echo "$d" >> "$GITHUB_PATH"
+          "$d/llvm-nm" --version | head -1
+          clang --version | head -1
+
+      - name: Zero indirect symbols, and two names
+        run: |
+          bash tools/probe-cross-macos.sh aarch64
+          bash tools/probe-cross-macos.sh x86_64
+
+      # ⚠️ LINKING IS NOT RUNNING, AND THIS IS WHERE THAT IS ADMITTED.
+      #
+      # Everything above happens on a machine that is not the system in
+      # question, and everything above is about the objects and the link. Whether
+      # the result STARTS is a different question, and it cannot be asked here:
+      # that system's 64-bit ARM variant refuses to start an image that is not
+      # signed, and the signature can only be made on a machine of that system.
+      #
+      # So the artifact is carried there. The job that receives it is the only
+      # place in this workflow where the claim becomes "a program built here
+      # runs there" rather than "a program built here links".
+      - name: A program for that system, built here
+        run: |
+          bash tools/cross-build-macos.sh aarch64 examples/cross-hello/src/main.c cross-hello-arm64
+          file cross-hello-arm64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cross-hello-arm64
+          path: cross-hello-arm64
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # The other half of the claim, on a machine of that system.
+  cross-macos-run:
+    name: what was cross-built starts, on that system
+    needs: cross-macos
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: cross-hello-arm64
+
+      - name: Sign it, because this system will not start it otherwise
+        run: |
+          chmod +x cross-hello-arm64
+          # Ad hoc: the identity is `-', which asserts nothing about who made
+          # the program and is exactly what this system requires before it will
+          # start one on this architecture. A program that is distributed needs
+          # more; a program that is checked needs this.
+          codesign -s - --force cross-hello-arm64
+          codesign -dv cross-hello-arm64 2>&1 | head -3
+
+      - name: It starts, and the C library beneath it came up
+        run: |
+          ./cross-hello-arm64 | tee run.log
+          grep -q -- '-- failures: 0 --' run.log

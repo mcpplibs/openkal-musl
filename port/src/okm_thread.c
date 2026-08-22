@@ -22,6 +22,7 @@
  * exactly what CLONE_SETTLS would have done.
  */
 #include "okm.h"
+#include "okm_opt.h"
 
 #include <errno.h>
 #include <setjmp.h>
@@ -69,7 +70,7 @@ static void reap(void)
 		if (!__atomic_load_n(&t->finished, __ATOMIC_ACQUIRE)) { p = &t->next; continue; }
 		*p = t->next;
 		okm_unlock();
-		kal_task_join(t->task);
+		okm_task_join(t->task);
 		kal_free(t, sizeof *t, _Alignof(struct okm_thread));
 		okm_lock();
 		p = &okm_done;
@@ -95,7 +96,7 @@ static void entry(void* p)
 	if (t->ctid) {
 		__atomic_store_n((int*)t->ctid, 0, __ATOMIC_RELEASE);
 		kal_uintptr woken = 0;
-		kal_task_wake((const kal_u32*)t->ctid, 1, &woken);
+		okm_task_wake((const kal_u32*)t->ctid, 1, &woken);
 	}
 	__atomic_store_n(&t->finished, 1, __ATOMIC_RELEASE);
 
@@ -130,7 +131,7 @@ int __clone(int (*fn)(void*), void* stack, int flags, void* arg, ...)
 	okm_unlock();
 	if (ptid) *ptid = t->tid;
 
-	if (kal_task_start(entry, t, &t->task) != kal_ok) {
+	if (okm_task_start(entry, t, &t->task) != kal_ok) {
 		kal_free(t, sizeof *t, _Alignof(struct okm_thread));
 		return -EAGAIN;
 	}
@@ -162,14 +163,14 @@ syscall_arg_t __okm_futex(const int* addr, int op, int val, const struct timespe
 		const kal_u64 ns = t
 			? (kal_u64)t->tv_sec * 1000000000u + (kal_u64)t->tv_nsec
 			: 0;
-		const int e = kal_task_wait((const kal_u32*)addr, (kal_u32)val, ns);
+		const int e = okm_task_wait((const kal_u32*)addr, (kal_u32)val, ns);
 		if (e == kal_ok) return 0;
 		if (e == kal_err_again) return -ETIMEDOUT;
 		return -okm_errno(e);
 	}
 	case FUTEX_WAKE: {
 		kal_uintptr woken = 0;
-		const int e = kal_task_wake((const kal_u32*)addr,
+		const int e = okm_task_wake((const kal_u32*)addr,
 		                            val < 0 ? (kal_uintptr)-1 : (kal_uintptr)val, &woken);
 		if (e != kal_ok) return -okm_errno(e);
 		return (long)woken;

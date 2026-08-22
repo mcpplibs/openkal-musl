@@ -34,3 +34,11 @@ the model, so stating a different one is where the difference begins.
 It is not where it ends. The rest is recorded in the package README under
 "What Windows required", because a reader who finds these three lines is
 entitled to know that they were not sufficient.
+
+## riscv64
+
+Added 2026-08-22 by the same three commands, with `ARCH=riscv64`. The
+architecture directory it needs (`musl/arch/riscv64/`) was taken from the same
+musl 1.2.5 release the rest of this tree is, and its absence — not any property
+of the C++ runtime above — was what stopped this package building for a machine
+with no operating system.
