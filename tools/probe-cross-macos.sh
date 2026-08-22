@@ -8,9 +8,18 @@
 #      recorded is zero; a build that produces any is a build this probe should
 #      report, because the linker that would refuse them is still in use.
 #
-#   2. Which names does that system supply? The number recorded is two, and they
-#      are listed. A third would mean this port has acquired a dependency on
-#      that system that nobody decided to acquire.
+#   2. Which names does that system supply TO THIS PORT'S OWN CODE? The number
+#      recorded is two, and they are listed. A third would mean this port has
+#      acquired a dependency on that system that nobody decided to acquire.
+#
+#      ⚠️ That is not the same as the set the LINK needs. `dyld_stub_binder' is
+#      referenced by the linker for its own lazy binding and by no source here,
+#      and whether it is referenced at all depends on the linker's version:
+#      ld64.lld 22 does not, ld64.lld 18 does. So the enumeration below asks
+#      what the port calls, and the link below asks whether the stub is
+#      sufficient --- two questions, and answering the first does not answer the
+#      second. Measured 2026-08-22, when the first was taken for the second and
+#      continuous integration disagreed with the machine it was written on.
 #
 # The second question is asked of the LINKER rather than of the sources. A
 # reading of the sources produces a false positive --- a name referenced by a
@@ -93,9 +102,14 @@ printf 'int main(void){return 0;}\n' > "$out/probe_main.c"
 set +e
 undef=$("$LD64" -arch "${triple%%-*}" -platform_version macos 14.0 14.0 \
         -o /dev/null "$out"/*.o -e _okm_start -dead_strip 2>&1 \
-        | sed -n 's/.*undefined symbol: //p' | sort -u)
+        | sed -n 's/.*undefined symbol: //p' | sort -u \
+        | grep -vx 'dyld_stub_binder' || true)
 set -e
 
+# `dyld_stub_binder' is filtered out above rather than listed here, because it
+# is not an answer to this question: no source names it, the linker emits the
+# reference for its own lazy binding, and whether it appears at all depends on
+# the linker's version. It belongs to the stub, which the link below exercises.
 expected=$'_clock_gettime_nsec_np\n_pthread_create_from_mach_thread'
 echo "probe: names this system supplies:"
 printf '  %s\n' $undef
