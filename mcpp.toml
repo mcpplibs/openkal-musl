@@ -115,6 +115,32 @@ sources = [
   # Replaced by port/src/okm_phdr.c: musl answers this from the auxiliary
   # vector, which the replaced __libc_start_main does not read.
   "!musl/src/ldso/dl_iterate_phdr.c",
+  # ⭐ THE ONE SOURCE WHOSE vDSO DEPENDENCY SURVIVES AN ARCHITECTURE HEADER THAT
+  # DOES NOT OPT IN.
+  #
+  # There is no vDSO above openkal — that is a facility one system supplies to
+  # the programs it starts, and nothing here is started by it. musl's own
+  # arrangement handles that correctly: `__vdsosym` is defined only under
+  # VDSO_USEFUL, this port's syscall_arch.h replaces the architecture's and
+  # therefore never defines it, and every user of `__vdsosym` is behind a
+  # VDSO_* guard that is likewise never defined. So `vdso.c` compiles to an
+  # empty object and nothing misses it.
+  #
+  # ⚠️ Except this one. `cache.c` guards its vDSO use on SYS_riscv_flush_icache
+  # — a SYSCALL NUMBER, which the generated bits/syscall.h does define — rather
+  # than on a VDSO_* macro. So on riscv64 it alone compiles a call to a
+  # definition that was compiled away, and the link reports
+  # `undefined hidden symbol: __vdsosym`.
+  #
+  # ⚠️ It was invisible until 2026-08-23, and not because it is new: on the
+  # other architectures the guard is false and the file is empty, and riscv64's
+  # first COMPLETE link is this one. A latent defect of the port, found by the
+  # target that has nothing to fall back on — which is the reason §8.2 makes
+  # bare metal the acceptance environment.
+  #
+  # What the file provides is `__riscv_flush_icache`, which a program above
+  # openkal reaches through openkal.exec instead.
+  "!musl/src/linux/cache.c",
   "port/src/*.c",
   "port/src/*.S",
 ]
