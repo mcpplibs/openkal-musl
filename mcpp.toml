@@ -37,7 +37,7 @@ openkal-macos = { git = "https://github.com/mcpplibs/openkal-macos", branch = "f
 # runtime that receives control, and a C library configured for an environment
 # with no process to exit from. So this declares the implementation and stops.
 [target.'cfg(os = "none")'.dependencies]
-openkal-opensbi = { git = "https://github.com/mcpplibs/openkal-opensbi", branch = "feat/openkal-closure" }
+openkal-opensbi = { git = "https://github.com/mcpplibs/openkal-opensbi", branch = "feat/openkal-closure", features = ["standalone"] }
 
 # ⭐ WHICH OPENKAL INTERFACES THE IMPLEMENTATION BENEATH IS EXPECTED TO PROVIDE.
 #
