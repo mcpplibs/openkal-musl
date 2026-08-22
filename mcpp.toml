@@ -180,9 +180,19 @@ sources = ["!musl/src/ldso/dl_iterate_phdr.c"]
 # 1". This system's own linker is the one the format was designed alongside and
 # resolves them.
 #
-# The measurement: 1154 of musl's translation units compiled for this system
-# produce fifteen indirect symbols between them, and they are listed in
-# musl/PATCHES.md.
+# ⚠️ The flag's scope is narrower than it reads, and the difference matters for
+# cross builds. Remeasured 2026-08-22 with the open-source toolchain: the same
+# 1356 objects produce ZERO indirect symbols, for both architectures and for two
+# compiler versions, and ld64.lld links them on Linux. The linker's limitation
+# is still present --- the string is still in the binary --- but the compiler no
+# longer produces the construct that reaches it. The fifteen symbols are a
+# property of THIS SYSTEM'S OWN COMPILER, which is what the original measurement
+# was made with, and not of this port or of the object format.
+#
+# So: this flag is for a NATIVE build on this system. A cross build does not
+# reach the construct, does not need this system's linker, and therefore does
+# not need any file this system supplies. musl/PATCHES.md records both
+# measurements and the two names a program does still need.
 ldflags = ["-nostdlib", "-lSystem", "--ld-path=/usr/bin/ld",
            "-Wl,-e,_okm_start", "-Wl,-dead_strip"]
 
