@@ -32,9 +32,45 @@ import std;
 // ⚠️ NOT ON ELF OR Mach-O. There the driver still links the compiler's runtime
 // even under `-nostdlib`, or the graph supplies it; adding a name here would be
 // a second source for something that already has one.
+
+// ⭐⭐ WHICH COMPILER FAMILY RESOLVED — AND WHAT AN ABSENT ANSWER MEANS.
+//
+// ⚠️ READ FROM THE ENVIRONMENT, NOT THROUGH A HELPER. A build program is
+// compiled against the `mcpp` module of whichever tool RUNS it, so naming a
+// helper newer than the released tool makes this package require an unreleased
+// one. Measured 2026-08-22, on every row of three repositories at once:
+//
+//     build.mcpp: error: no member named 'compiler' in namespace 'mcpp'
+//     build.mcpp: error: 'toolchain_dir' is not a member of 'mcpp'
+//
+// — and the second is the more useful of the two, because `toolchain_dir` was
+// the FALLBACK written for the first. The environment variables are the
+// contract and `std::getenv` reads them on every version.
+//
+// ⚠️ AND AN ABSENT VALUE IS NOT "NO COMPILER". Measured against mcpp 2026.8.19.1,
+// which is what CI installs: `MCPP_TARGET_OS`, `MCPP_HOST`, `MCPP_OUT_DIR`,
+// `MCPP_MANIFEST_DIR`, `MCPP_TARGET` and `MCPP_TARGET_ARCH` are all set, and
+// `MCPP_COMPILER` and `MCPP_TOOLCHAIN_DIR` are absent.
+//
+// ⭐ So absent means "a build tool from before the question could be asked" —
+// and such a tool cannot produce the configuration the answer would change. The
+// clang-over-openkal cross to PE arrives on the same release as the variable.
+// The one configuration a tool that predates it can produce is the GCC one, so
+// that is what absent is answered with, and it is a deduction rather than a
+// default.
+std::string compiler_family() {
+    if (const char* v = std::getenv("MCPP_COMPILER"); v && *v) return v;
+    return "gcc";
+}
+
+std::string env_or_empty(const char* name) {
+    const char* v = std::getenv(name);
+    return v ? v : "";
+}
+
 int main() {
-    const std::string os  = mcpp::target_os() ? mcpp::target_os() : "";
-    const std::string fam = mcpp::compiler()  ? mcpp::compiler()  : "";
+    const std::string os  = env_or_empty("MCPP_TARGET_OS");
+    const std::string fam = compiler_family();
 
     if (os == "windows" && fam == "gcc") {
         mcpp::link_lib("gcc");
