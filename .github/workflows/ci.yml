@@ -247,7 +247,7 @@ jobs:
       # runs there" rather than "a program built here links".
       - name: A program for that system, built here
         run: |
-          bash tools/cross-build-macos.sh aarch64 examples/cross-hello/main.c cross-hello-arm64
+          bash tools/cross-build-macos.sh aarch64 examples/cross-hello/src/main.c cross-hello-arm64
           file cross-hello-arm64
 
       - uses: actions/upload-artifact@v4
