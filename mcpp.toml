@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.3.2"
+version     = "0.3.3"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 
@@ -15,7 +15,7 @@ authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-musl"
 
 [dependencies]
-openkal = { git = "https://github.com/mcpplibs/openkal", branch = "feat/openkal-closure" }
+openkal = "0.6.0"
 
 # An ordinary consumer of openkal declares the specification and leaves the
 # choice of implementation to whoever builds the program, which is what the
@@ -30,10 +30,10 @@ openkal = { git = "https://github.com/mcpplibs/openkal", branch = "feat/openkal-
 #
 # The consequence for a program is that it names this package and nothing else.
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = { git = "https://github.com/mcpplibs/openkal-linux", branch = "feat/openkal-closure", features = ["standalone"] }
+openkal-linux = { version = "0.5.3", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
-openkal-macos = { git = "https://github.com/mcpplibs/openkal-macos", branch = "feat/openkal-closure", features = ["standalone"] }
+openkal-macos = { version = "0.3.3", features = ["standalone"] }
 
 # ⚠️ FIRST STEP TOWARD A BARE MACHINE, AND NOT THE WHOLE OF IT.
 #
@@ -44,7 +44,7 @@ openkal-macos = { git = "https://github.com/mcpplibs/openkal-macos", branch = "f
 # runtime that receives control, and a C library configured for an environment
 # with no process to exit from. So this declares the implementation and stops.
 [target.'cfg(os = "none")'.dependencies]
-openkal-opensbi = { git = "https://github.com/mcpplibs/openkal-opensbi", branch = "feat/openkal-closure", features = ["standalone"] }
+openkal-opensbi = { version = "0.1.2", features = ["standalone"] }
 
 # ⭐ WHICH OPENKAL INTERFACES THE IMPLEMENTATION BENEATH IS EXPECTED TO PROVIDE.
 #
@@ -69,7 +69,7 @@ openkal-opensbi = { git = "https://github.com/mcpplibs/openkal-opensbi", branch 
 defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
 
 [target.'cfg(windows)'.dependencies]
-openkal-windows = { git = "https://github.com/mcpplibs/openkal-windows", branch = "feat/openkal-closure", features = ["standalone"] }
+openkal-windows = { version = "0.1.3", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #
