@@ -1,0 +1,21 @@
+# The same program, built the ordinary way.
+#
+# It exists as a control. The cross-built copy of this source is carried to a
+# machine of that system and run there; if it fails, the failure is either in
+# the port or in the way it was cross-built, and those are different things. A
+# native build of the same source on the same machine separates them --- which
+# is the step that, on the first failure of the C++ runtime, turned a day of
+# guessing into four measurements.
+[package]
+name    = "cross-hello"
+version = "0.1.0"
+
+[dependencies]
+openkal-musl = { path = "../.." }
+
+[targets.cross-hello]
+kind = "bin"
+main = "src/main.c"
+
+[build]
+cxx_runtime = "host-coupled"

@@ -12,6 +12,7 @@
  * thinks to look.
  */
 #include "okm.h"
+#include "okm_opt.h"
 
 #include <errno.h>
 #include <limits.h>

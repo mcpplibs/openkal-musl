@@ -1,14 +1,21 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.3.1"
+version     = "0.3.2"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
+
+# The layer this package supplies. `mcpp:c-abi` is the C library — the triple's
+# environment field — and `=musl` is the interface it answers to, which is the
+# same answer it would give above a kernel rather than above openkal. What
+# changes is not the C library a program sees but what that library is written
+# on.
+provides    = ["mcpp:c-abi=musl"]
 authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-musl"
 
 [dependencies]
-openkal = "0.5.1"
+openkal = { git = "https://github.com/mcpplibs/openkal", branch = "feat/openkal-closure" }
 
 # An ordinary consumer of openkal declares the specification and leaves the
 # choice of implementation to whoever builds the program, which is what the
@@ -23,13 +30,46 @@ openkal = "0.5.1"
 #
 # The consequence for a program is that it names this package and nothing else.
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = { version = "0.5.1", features = ["standalone"] }
+openkal-linux = { git = "https://github.com/mcpplibs/openkal-linux", branch = "feat/openkal-closure", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
-openkal-macos = { version = "0.3.1", features = ["standalone"] }
+openkal-macos = { git = "https://github.com/mcpplibs/openkal-macos", branch = "feat/openkal-closure", features = ["standalone"] }
+
+# ⚠️ FIRST STEP TOWARD A BARE MACHINE, AND NOT THE WHOLE OF IT.
+#
+# An environment with no operating system reaches openkal through firmware. The
+# architecture directory and the generated headers for it are now here --- they
+# were not, and their absence was the blocker, not any property of libc++ or of
+# this port. What is NOT here yet is the rest of the chain: a linker script, a
+# runtime that receives control, and a C library configured for an environment
+# with no process to exit from. So this declares the implementation and stops.
+[target.'cfg(os = "none")'.dependencies]
+openkal-opensbi = { git = "https://github.com/mcpplibs/openkal-opensbi", branch = "feat/openkal-closure", features = ["standalone"] }
+
+# ⭐ WHICH OPENKAL INTERFACES THE IMPLEMENTATION BENEATH IS EXPECTED TO PROVIDE.
+#
+# A machine with no operating system has no storage to open a file on, no second
+# image to start, and no scheduler to give a context to. openkal's answer to
+# each is that the interface is ABSENT — clause 6.2 forbids an implementation
+# from providing one whose operations always fail — and the answer for this C
+# library is that it must not be built calling them.
+#
+# ⚠️ IT IS BUILT CALLING THEM UNLESS TOLD OTHERWISE, AND THE WAY THAT SHOWS IS A
+# LINK FAILURE IN A PROGRAM THAT NEVER OPENS A FILE. Measured 2026-08-23 on
+# riscv64-none-elf: a program whose whole text was `import std;` and one line of
+# output failed on fifteen names it can never reach, because `fclose` is on the
+# exit path of anything that uses stdio and the descriptor table closes what it
+# holds. port/src/okm.h records what these three change and why answering with
+# an error is right for a C library and wrong for an openkal implementation.
+#
+# ⚠️ THE TARGET IS A PROXY FOR THE IMPLEMENTATION, AND AN IMPERFECT ONE. A board
+# CAN carry a real filesystem. Each macro is `#ifndef`-guarded, so a project
+# with one turns it back on from its own build without editing this file.
+[target.'cfg(os = "none")'.build]
+defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
 
 [target.'cfg(windows)'.dependencies]
-openkal-windows = { version = "0.1.1", features = ["standalone"] }
+openkal-windows = { git = "https://github.com/mcpplibs/openkal-windows", branch = "feat/openkal-closure", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #
@@ -79,6 +119,35 @@ sources = [
   "!musl/src/mman/mmap.c",
   "!musl/src/internal/syscall_ret.c",
   "!musl/src/unistd/getcwd.c",
+  # Replaced by port/src/okm_phdr.c: musl answers this from the auxiliary
+  # vector, which the replaced __libc_start_main does not read.
+  "!musl/src/ldso/dl_iterate_phdr.c",
+  # ⭐ THE ONE SOURCE WHOSE vDSO DEPENDENCY SURVIVES AN ARCHITECTURE HEADER THAT
+  # DOES NOT OPT IN.
+  #
+  # There is no vDSO above openkal — that is a facility one system supplies to
+  # the programs it starts, and nothing here is started by it. musl's own
+  # arrangement handles that correctly: `__vdsosym` is defined only under
+  # VDSO_USEFUL, this port's syscall_arch.h replaces the architecture's and
+  # therefore never defines it, and every user of `__vdsosym` is behind a
+  # VDSO_* guard that is likewise never defined. So `vdso.c` compiles to an
+  # empty object and nothing misses it.
+  #
+  # ⚠️ Except this one. `cache.c` guards its vDSO use on SYS_riscv_flush_icache
+  # — a SYSCALL NUMBER, which the generated bits/syscall.h does define — rather
+  # than on a VDSO_* macro. So on riscv64 it alone compiles a call to a
+  # definition that was compiled away, and the link reports
+  # `undefined hidden symbol: __vdsosym`.
+  #
+  # ⚠️ It was invisible until 2026-08-23, and not because it is new: on the
+  # other architectures the guard is false and the file is empty, and riscv64's
+  # first COMPLETE link is this one. A latent defect of the port, found by the
+  # target that has nothing to fall back on — which is the reason §8.2 makes
+  # bare metal the acceptance environment.
+  #
+  # What the file provides is `__riscv_flush_icache`, which a program above
+  # openkal reaches through openkal.exec instead.
+  "!musl/src/linux/cache.c",
   "port/src/*.c",
   "port/src/*.S",
 ]
@@ -93,6 +162,32 @@ sources = [
 # headers: this package is built from the same include path it publishes, and
 # the alternative --- two paths --- is a second place where the set of headers
 # is configured.
+# ⭐ THE ONE THING THIS PACKAGE KNOWS THAT A CONSUMER DOES NOT: THAT IT IS THIS
+# PACKAGE DOING THE COMPILING.
+#
+# musl's internal header overlay defines `weak`, `hidden` and `weak_alias` as
+# macros that mean something only to musl's own sources, and this package
+# publishes the path it is built from — so every consumer sees them too. Which
+# consumers break by it was found one at a time: a C++ one on `restrict`, then
+# on linkage; a C one (compiler-rt) on `weak`, which it writes itself.
+#
+# ⚠️ The discriminator used to be the LANGUAGE of the translation unit, and that
+# was wrong in one direction: a C++ unit is certainly not musl's, but a C unit
+# is not certainly musl's. Authorship is the property, and it is expressible —
+# `defines` is applied to this package's own sources and is not carried to a
+# consumer, which publicUsage's include directories and flags are.
+# port/include/features.h records the measurement and what it cost.
+#
+# ⚠️ A CONSUMER THAT WAS BUILT BEFORE THIS LINE EXISTED DOES NOT SEE IT UNTIL ITS
+# BUILD DIRECTORY IS CLEARED. Measured 2026-08-23: adding a flag here changed
+# nothing in an example that depends on this package by path — not after a
+# rebuild, and not after touching the sources either. The generated build file
+# still carried the previous list. Removing `target/` and `mcpp.lock` picked it
+# up at once. So a change to a path dependency's MANIFEST does not invalidate
+# the consumer's plan, and the way that shows is a change that appears to have
+# had no effect. Reported; nothing here works around it.
+defines = ["OKM_MUSL_INTERNAL=1"]
+
 include_dirs = [
   "port/include",
   "musl/src/include",
@@ -143,7 +238,9 @@ cxx_runtime = "host-coupled"
 # arithmetic musl's own <complex.h> calls.
 [target.'cfg(os = "linux")'.build]
 ldflags = ["-nostdlib", "-static", "-Wl,--no-dynamic-linker",
-           "-Wl,--gc-sections", "-lgcc"]
+           "-Wl,--gc-sections"]
+# ⚠️ `-lgcc` was here; it is now named by build.mcpp, and only when the compiler
+# is the one whose runtime has that name. See that file.
 
 # The link line on this system.
 #
@@ -164,10 +261,16 @@ ldflags = ["-nostdlib", "-static", "-Wl,--no-dynamic-linker",
 # the image header rather than looking for a fixed symbol. -dead_strip is this
 # linker's spelling of discarding what nothing reaches.
 [target.'cfg(os = "macos")'.build]
-# One source walks the program headers of an ELF image in order to report what
-# is loaded. This format has no such headers, and the operation it names is one
-# openkal does not offer in any case.
-sources = ["!musl/src/ldso/dl_iterate_phdr.c"]
+# The port's own dl_iterate_phdr is for ELF and is excluded here, as musl's was:
+# this format has no program headers.
+sources = [
+  "!port/src/okm_phdr.c",
+  # ⭐ One file this format needs that no other does — the loader here runs
+  # constructors before the entry point, so the library has to be able to come
+  # up from a constructor too. `port/src/*.c` is a package-wide glob, so the
+  # file lives in a subdirectory it does not match.
+  "port/src/mach/*.c",
+]
 #
 # --ld-path names this system's own linker rather than the one the toolchain
 # brings. The reason is one construct and fifteen uses of it. A second name for
@@ -180,10 +283,37 @@ sources = ["!musl/src/ldso/dl_iterate_phdr.c"]
 # 1". This system's own linker is the one the format was designed alongside and
 # resolves them.
 #
-# The measurement: 1154 of musl's translation units compiled for this system
-# produce fifteen indirect symbols between them, and they are listed in
-# musl/PATCHES.md.
-ldflags = ["-nostdlib", "-lSystem", "--ld-path=/usr/bin/ld",
+# ⚠️ The flag's scope is narrower than it reads, and the difference matters for
+# cross builds. Remeasured 2026-08-22 with the open-source toolchain: the same
+# 1356 objects produce ZERO indirect symbols, for both architectures and for two
+# compiler versions, and ld64.lld links them on Linux. The linker's limitation
+# is still present --- the string is still in the binary --- but the compiler no
+# longer produces the construct that reaches it. The fifteen symbols are a
+# property of THIS SYSTEM'S OWN COMPILER, which is what the original measurement
+# was made with, and not of this port or of the object format.
+#
+# So: this flag is for a NATIVE build on this system. A cross build does not
+# reach the construct, does not need this system's linker, and therefore does
+# not need any file this system supplies. musl/PATCHES.md records both
+# measurements and the two names a program does still need.
+# ⚠️ `--ld-path` IS GONE, AND THE COMMENT ABOVE ALREADY SAID WHY IT WOULD BE.
+#
+# It named this system's own linker, to work around a construct that the
+# compiler this package was FIRST built with produced. The remeasurement above
+# is the whole of the reason it can go: with the open-source toolchain, the same
+# objects produce ZERO indirect symbols, and `ld64.lld` links them.
+#
+# ⚠️ AND IT HAD TO GO, because mcpp's conditions are on the TARGET and not on the
+# host. `cfg(os = "macos")` is true when this library is BUILT ON macOS and also
+# when it is BUILT FOR macOS from somewhere else — and the second case is a Linux
+# machine, where `/usr/bin/ld` is GNU ld and cannot link a Mach-O:
+#
+#     /usr/bin/ld: Error: unable to disambiguate: -dead_strip
+#                  (did you mean --dead_strip ?)
+#
+# Without it the clang driver picks the linker its target needs, which is what a
+# retargetable driver is for.
+ldflags = ["-nostdlib", "-lSystem",
            "-Wl,-e,_okm_start", "-Wl,-dead_strip"]
 
 # The generated headers, per architecture and per data model.
@@ -200,24 +330,78 @@ include_dirs = ["musl-generated/x86_64", "musl/arch/x86_64", "musl/arch/generic"
 [target.'cfg(all(arch = "x86_64", windows))'.build]
 include_dirs = ["musl-generated/x86_64-windows", "musl/arch/x86_64", "musl/arch/generic"]
 
-[target.'cfg(arch = "aarch64")'.build]
+# ⚠️ TWO ROWS FOR ONE ARCHITECTURE, AND MUTUALLY EXCLUSIVE — the same shape
+# x86_64 already has for Windows, and for a narrower version of the same reason.
+#
+# musl states its data model in three lines of bits/alltypes.h. Windows needed a
+# variant because it is LLP64 and every musl architecture is LP64. Apple is
+# LP64 — a `long` holds a pointer — and still differs in one of the three:
+# `int64_t` is spelled `long long` there and `long` on Linux.
+#
+# ⚠️ One spelling, and it is not cosmetic. Measured 2026-08-23 on a macOS cross:
+#
+#   okm_syscall.c:439: incompatible pointer types passing 'uint64_t *'
+#     (aka 'unsigned long *') to parameter of type 'kal_u64 *'
+#     (aka 'unsigned long long *')
+#
+# `kal_u64` comes from the COMPILER (`__UINT64_TYPE__`), which is authoritative
+# about the target's ABI; `uint64_t` came from these three lines, which carried
+# Linux's answer. Same width, different type, and the two do not convert.
+[target.'cfg(all(arch = "aarch64", not(os = "macos")))'.build]
 include_dirs = ["musl-generated/aarch64", "musl/arch/aarch64", "musl/arch/generic"]
+
+[target.'cfg(all(arch = "aarch64", os = "macos"))'.build]
+include_dirs = ["musl-generated/aarch64-macos", "musl/arch/aarch64", "musl/arch/generic"]
+
+[target.'cfg(arch = "riscv64")'.build]
+include_dirs = ["musl-generated/riscv64", "musl/arch/riscv64", "musl/arch/generic"]
 
 # The link line on this environment. There is no separate loader to name and no
 # archive of compiler support routines to add: the entry point is this
 # library's, and the implementation beneath it names the libraries its own
 # interfaces live in.
 [target.'cfg(windows)'.build]
-# One source walks the program headers of an ELF image in order to report what
-# is loaded. This format has no such headers, and the operation it names is one
-# openkal does not offer in any case.
-sources = ["!musl/src/ldso/dl_iterate_phdr.c"]
-# -lgcc supplies the routines a compiler emits calls to and no C library
-# defines. -lgcc_eh supplies one more that only this format needs: this
-# toolchain reaches a thread-local variable through a helper rather than through
-# an address the processor supplies, because on this format a thread-local
-# variable cannot be reached directly from something loaded at run time. The
-# helper is in that archive and not in the other, which is a fact about the
-# toolchain rather than about this port.
-ldflags = ["-nostdlib", "-static", "-Wl,--gc-sections", "-Wl,-e,okw_start",
-           "-lgcc", "-lgcc_eh"]
+# The port's own dl_iterate_phdr is for ELF and is excluded here, as musl's was:
+# this format has no program headers.
+sources = [
+  "!port/src/okm_phdr.c",
+  # ⭐ AND ONE THIS FORMAT NEEDS THAT NO OTHER DOES.
+  #
+  # ⚠️ IN A SUBDIRECTORY, AND THAT IS THE POINT. `port/src/*.c` in the
+  # package-wide list is a glob, so a file placed beside its neighbours would be
+  # compiled for EVERY target — and `__main` is a name only this format's
+  # compiler emits a call to. `port/src/win/` is not matched by that glob, which
+  # states the restriction in the layout rather than relying on an exclusion
+  # that would have to win against an inclusion.
+  "port/src/win/*.c",
+]
+# ⚠️ `-lgcc` AND `-lgcc_eh` WERE HERE AND ARE NOT ANY MORE.
+#
+# They named GCC's runtime: the routines a compiler emits calls to and no C
+# library defines, plus one more this format needs — the helper a thread-local
+# variable is reached through, because on this format it cannot be reached
+# directly from something loaded at run time.
+#
+# Both statements were true. What was false is that this port should name them:
+#
+# 1. ⭐ THE macOS BLOCK ABOVE NAMES NEITHER, and it is the same C library on the
+#    same compiler. Builtins come from the graph there — `openkal-llvm-runtime`
+#    builds compiler-rt for the target — and the thread-local helper is
+#    `__emutls_get_address` from that same build. This block was the outlier.
+#
+# 2. ⚠️ AND IT ONLY EVER WORKED BY ACCIDENT. `libgcc.a` and `libgcc_eh.a` are
+#    mingw's, so a cross build resolved them out of `/usr/x86_64-w64-mingw32/lib`
+#    — present on a machine with mingw installed and nowhere else. Measured
+#    2026-08-22 on a clean CI runner, alongside the four import libraries that
+#    failed for the same reason:
+#
+#        lld: error: unable to find library -lgcc
+#        lld: error: unable to find library -lgcc_eh
+#
+#    A GCC runtime on a link whose compiler is clang was the sign, and the
+#    missing file was the report.
+#
+# ⇒ Measured after removing them, with `openkal-llvm-runtime` in the graph
+# (which now builds compiler-rt's builtins AND `emutls.c` for this format):
+# `examples/same-source` links and the program runs, printing `unwound: true`.
+ldflags = ["-nostdlib", "-static", "-Wl,--gc-sections", "-Wl,-e,okw_start"]

@@ -1,30 +1,39 @@
-#define _Addr long long
+#define _Addr long
 #define _Int64 long long
-#define _Reg long long
+#define _Reg long
 
+#if __AARCH64EB__
+#define __BYTE_ORDER 4321
+#else
 #define __BYTE_ORDER 1234
-#define __LONG_MAX 0x7fffffffL
+#endif
+
+#define __LONG_MAX 0x7fffffffffffffffL
 
 #ifndef __cplusplus
 #if defined(__NEED_wchar_t) && !defined(__DEFINED_wchar_t)
-typedef int wchar_t;
+typedef unsigned wchar_t;
 #define __DEFINED_wchar_t
 #endif
 
 #endif
-
-#if defined(__FLT_EVAL_METHOD__) && __FLT_EVAL_METHOD__ == 2
-#if defined(__NEED_float_t) && !defined(__DEFINED_float_t)
-typedef long double float_t;
-#define __DEFINED_float_t
+#if defined(__NEED_wint_t) && !defined(__DEFINED_wint_t)
+typedef unsigned wint_t;
+#define __DEFINED_wint_t
 #endif
 
-#if defined(__NEED_double_t) && !defined(__DEFINED_double_t)
-typedef long double double_t;
-#define __DEFINED_double_t
+
+#if defined(__NEED_blksize_t) && !defined(__DEFINED_blksize_t)
+typedef int blksize_t;
+#define __DEFINED_blksize_t
 #endif
 
-#else
+#if defined(__NEED_nlink_t) && !defined(__DEFINED_nlink_t)
+typedef unsigned int nlink_t;
+#define __DEFINED_nlink_t
+#endif
+
+
 #if defined(__NEED_float_t) && !defined(__DEFINED_float_t)
 typedef float float_t;
 #define __DEFINED_float_t
@@ -35,7 +44,6 @@ typedef double double_t;
 #define __DEFINED_double_t
 #endif
 
-#endif
 
 #if defined(__NEED_max_align_t) && !defined(__DEFINED_max_align_t)
 typedef struct { long long __ll; long double __ld; } max_align_t;

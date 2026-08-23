@@ -23,6 +23,7 @@
  */
 #define _GNU_SOURCE
 #include "okm.h"
+#include "okm_opt.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -105,7 +106,7 @@ static syscall_arg_t do_openat(int dirfd, const char* path, int flags, int mode)
 
 	if (flags & O_DIRECTORY) {
 		struct kal_dir d;
-		const int e = kal_fs_open_dir(at.base, at.rel, n, &d);
+		const int e = okm_fs_open_dir(at.base, at.rel, n, &d);
 		if (e != kal_ok) { okm_unlock(); return -okm_errno(e); }
 		struct kal_file nof = { 0 };
 		okm_fd_bind(fd, OKM_DIR, 0, nof, d, flags);
@@ -127,12 +128,12 @@ static syscall_arg_t do_openat(int dirfd, const char* path, int flags, int mode)
 	if (flags & O_APPEND) want |= KAL_OPEN_APPEND;
 
 	struct kal_file f;
-	const int e = kal_fs_open(at.base, at.rel, n, want, &f);
+	const int e = okm_fs_open(at.base, at.rel, n, want, &f);
 	if (e == kal_err_is_directory) {
 		/* A program that opens a directory without saying so gets one, which
 		 * is what a Linux program expects of O_RDONLY on a directory. */
 		struct kal_dir d;
-		const int e2 = kal_fs_open_dir(at.base, at.rel, n, &d);
+		const int e2 = okm_fs_open_dir(at.base, at.rel, n, &d);
 		if (e2 != kal_ok) { okm_unlock(); return -okm_errno(e2); }
 		struct kal_file nof = { 0 };
 		okm_fd_bind(fd, OKM_DIR, 0, nof, d, flags);
@@ -143,7 +144,7 @@ static syscall_arg_t do_openat(int dirfd, const char* path, int flags, int mode)
 	}
 	if (e != kal_ok) { okm_unlock(); return -okm_errno(e); }
 	struct kal_dir nod = { 0 };
-	okm_fd_bind(fd, OKM_FILE, kal_fs_stream(f), f, nod, flags);
+	okm_fd_bind(fd, OKM_FILE, okm_fs_stream(f), f, nod, flags);
 	okm_unlock();
 	return fd;
 }
@@ -189,7 +190,7 @@ static syscall_arg_t do_fstat(int fd, struct kstat* st)
 	if (!d) return -EBADF;
 	struct kal_node_info info;
 	if (d->kind == OKM_FILE) {
-		const int e = kal_fs_file_info(d->file, &info);
+		const int e = okm_fs_file_info(d->file, &info);
 		if (e != kal_ok) return -okm_errno(e);
 	} else if (d->kind == OKM_DIR) {
 		for (unsigned i = 0; i < sizeof info; i++) ((char*)&info)[i] = 0;
@@ -219,7 +220,7 @@ static syscall_arg_t do_fstatat(int dirfd, const char* path, struct kstat* st, i
 	const syscall_arg_t r = okm_resolve(dirfd, path, &at, 0);
 	if (r) return r;
 	struct kal_node_info info;
-	const int e = kal_fs_info(at.base, at.rel, slen(at.rel), &info);
+	const int e = okm_fs_info(at.base, at.rel, slen(at.rel), &info);
 	if (e != kal_ok) return -okm_errno(e);
 	if (info.kind == kal_node_absent) return -ENOENT;
 	fill_kstat(&info, st);
@@ -243,7 +244,7 @@ static syscall_arg_t do_getdents(int fd, void* buf, size_t cap)
 	if (d->kind != OKM_DIR) return -ENOTDIR;
 
 	if (!d->iter_open) {
-		const int e = kal_fs_list_begin(d->dir, &d->iter);
+		const int e = okm_fs_list_begin(d->dir, &d->iter);
 		if (e != kal_ok) return -okm_errno(e);
 		d->iter_open = 1;
 	}
@@ -258,7 +259,7 @@ static syscall_arg_t do_getdents(int fd, void* buf, size_t cap)
 			name = d->pending_name; kind = d->pending_kind;
 			len = slen(d->pending_name);
 		} else {
-			const int e = kal_fs_list_next(d->dir, &d->iter, &name, &len, &kind);
+			const int e = okm_fs_list_next(d->dir, &d->iter, &name, &len, &kind);
 			if (e != kal_ok) return used ? (syscall_arg_t)used : -okm_errno(e);
 			if (!name) { d->iter = 0; break; }      /* the iterator is spent */
 			if (len >= sizeof held) continue;       /* a name this layer cannot carry */
@@ -365,9 +366,9 @@ static syscall_arg_t do_wait4(int pid, int* status, int options, void* rusage)
 	else { for (int k = 0; k < OKM_MAX_CHILD; k++) if (g_child[k].used) { i = k; break; } }
 	if (i < 0) return -ECHILD;
 	int st = 0, terminated = 0;
-	const int e = kal_process_wait(g_child[i].h, &st, &terminated);
+	const int e = okm_process_wait(g_child[i].h, &st, &terminated);
 	if (e != kal_ok) return -okm_errno(e);
-	kal_process_close(g_child[i].h);
+	okm_process_close(g_child[i].h);
 	const int got = g_child[i].pid;
 	g_child[i].used = 0;
 	if (status) *status = terminated ? (st & 0x7f) : ((st & 0xff) << 8);
@@ -435,7 +436,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		if (!d) return -EBADF;
 		if (d->kind != OKM_FILE) return -ESPIPE;
 		uint64_t at = 0;
-		const int e = kal_fs_seek(d->file, (int64_t)a2, (int)a3, &at);
+		const int e = okm_fs_seek(d->file, (int64_t)a2, (int)a3, &at);
 		if (e != kal_ok) return -okm_errno(e);
 		return (syscall_arg_t)at;
 	}
@@ -469,7 +470,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		if (!(const char*)a2) {
 			struct okm_desc* d = okm_desc_of((int)a1);
 			if (!d || d->kind != OKM_FILE) return -EBADF;
-			const int e = kal_fs_set_modified(d->file, when);
+			const int e = okm_fs_set_modified(d->file, when);
 			return e == kal_ok ? 0 : -okm_errno(e);
 		}
 
@@ -479,18 +480,18 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			if (r) return r;
 		}
 		struct kal_file f;
-		int e = kal_fs_open(at.base, at.rel, slen(at.rel),
+		int e = okm_fs_open(at.base, at.rel, slen(at.rel),
 		                    KAL_OPEN_READ | KAL_OPEN_WRITE, &f);
 		if (e != kal_ok) return -okm_errno(e);
-		e = kal_fs_set_modified(f, when);
-		kal_fs_close_file(f);
+		e = okm_fs_set_modified(f, when);
+		okm_fs_close_file(f);
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 
 	case SYS_ftruncate: {
 		struct okm_desc* d = okm_desc_of((int)a1);
 		if (!d || d->kind != OKM_FILE) return -EBADF;
-		const int e = kal_fs_truncate(d->file, (uint64_t)a2);
+		const int e = okm_fs_truncate(d->file, (uint64_t)a2);
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 	case SYS_fsync:
@@ -558,7 +559,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		struct okm_at at;
 		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, &at, 0);
 		if (r) return r;
-		const int e = kal_fs_mkdir(at.base, at.rel, slen(at.rel));
+		const int e = okm_fs_mkdir(at.base, at.rel, slen(at.rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 #ifdef SYS_mkdir
@@ -566,7 +567,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		struct okm_at at;
 		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
 		if (r) return r;
-		const int e = kal_fs_mkdir(at.base, at.rel, slen(at.rel));
+		const int e = okm_fs_mkdir(at.base, at.rel, slen(at.rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 #endif
@@ -574,7 +575,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		struct okm_at at;
 		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, &at, 0);
 		if (r) return r;
-		const int e = kal_fs_remove(at.base, at.rel, slen(at.rel));
+		const int e = okm_fs_remove(at.base, at.rel, slen(at.rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 #ifdef SYS_unlink
@@ -582,7 +583,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		struct okm_at at;
 		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
 		if (r) return r;
-		const int e = kal_fs_remove(at.base, at.rel, slen(at.rel));
+		const int e = okm_fs_remove(at.base, at.rel, slen(at.rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 #endif
@@ -591,11 +592,17 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		struct okm_at at;
 		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
 		if (r) return r;
-		const int e = kal_fs_remove(at.base, at.rel, slen(at.rel));
+		const int e = okm_fs_remove(at.base, at.rel, slen(at.rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 #endif
+	/* One architecture states only the later of the two. The kernel's table
+	 * grew, and an architecture added after the growth has no number for the
+	 * operation the earlier one named --- so the pair is written as two
+	 * conditionals rather than as one name and an optional second. */
+#ifdef SYS_renameat
 	case SYS_renameat:
+#endif
 #ifdef SYS_renameat2
 	case SYS_renameat2:
 #endif
@@ -605,7 +612,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		if (r) return r;
 		r = okm_resolve((int)a3, (const char*)a4, &to, 0);
 		if (r) return r;
-		const int e = kal_fs_rename(from.base, from.rel, slen(from.rel),
+		const int e = okm_fs_rename(from.base, from.rel, slen(from.rel),
 		                            to.base, to.rel, slen(to.rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
@@ -616,7 +623,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		if (r) return r;
 		r = okm_resolve(AT_FDCWD, (const char*)a2, &to, 0);
 		if (r) return r;
-		const int e = kal_fs_rename(from.base, from.rel, slen(from.rel),
+		const int e = okm_fs_rename(from.base, from.rel, slen(from.rel),
 		                            to.base, to.rel, slen(to.rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
@@ -630,7 +637,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, &at, 0);
 		if (r) return r;
 		struct kal_node_info info;
-		const int e = kal_fs_info(at.base, at.rel, slen(at.rel), &info);
+		const int e = okm_fs_info(at.base, at.rel, slen(at.rel), &info);
 		if (e != kal_ok) return -okm_errno(e);
 		if (info.kind == kal_node_absent) return -ENOENT;
 		if (((int)a3 & W_OK) && !info.writable) return -EACCES;
@@ -642,7 +649,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
 		if (r) return r;
 		struct kal_node_info info;
-		const int e = kal_fs_info(at.base, at.rel, slen(at.rel), &info);
+		const int e = okm_fs_info(at.base, at.rel, slen(at.rel), &info);
 		if (e != kal_ok) return -okm_errno(e);
 		if (info.kind == kal_node_absent) return -ENOENT;
 		if (((int)a2 & W_OK) && !info.writable) return -EACCES;
@@ -665,7 +672,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, &at, 0);
 		if (r) return r;
 		struct kal_node_info info;
-		const int e = kal_fs_info(at.base, at.rel, slen(at.rel), &info);
+		const int e = okm_fs_info(at.base, at.rel, slen(at.rel), &info);
 		if (e != kal_ok) return -okm_errno(e);
 		if (info.kind == kal_node_absent) return -ENOENT;
 		/* A name that is not a symbolic link is answered as POSIX answers it.
@@ -681,7 +688,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
 		if (r) return r;
 		struct kal_node_info info;
-		const int e = kal_fs_info(at.base, at.rel, slen(at.rel), &info);
+		const int e = okm_fs_info(at.base, at.rel, slen(at.rel), &info);
 		if (e != kal_ok) return -okm_errno(e);
 		if (info.kind == kal_node_absent) return -ENOENT;
 		return info.kind == kal_node_link ? -ENOSYS : -EINVAL;
@@ -814,10 +821,10 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	/* --- execution contexts ------------------------------------------------ */
 	case SYS_futex:
 		return __okm_futex((const int*)a1, (int)a2, (int)a3, (const struct timespec*)a4);
-	case SYS_sched_yield: kal_task_yield(); return 0;
-	case SYS_gettid:      return (syscall_arg_t)kal_task_current();
+	case SYS_sched_yield: okm_task_yield(); return 0;
+	case SYS_gettid:      return (syscall_arg_t)OKM_CONTEXT_ID();
 	case SYS_getpid:      return 1;
-	case SYS_set_tid_address: return (syscall_arg_t)kal_task_current();
+	case SYS_set_tid_address: return (syscall_arg_t)OKM_CONTEXT_ID();
 	case SYS_exit:        return __okm_task_exit((int)a1);
 	case SYS_exit_group:  kal_exit((int)a1); return 0;
 
@@ -861,7 +868,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_kill: {
 		const int i = child_index((int)a1);
 		if (i < 0) return -ESRCH;
-		const int e = kal_process_terminate(g_child[i].h);
+		const int e = okm_process_terminate(g_child[i].h);
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 #endif

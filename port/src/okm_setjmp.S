@@ -212,8 +212,101 @@ OKM_NAME(longjmp):
 	br x30
 	OKM_SIZE(OKM_NAME(longjmp))
 
+#elif defined(__riscv) && __riscv_xlen == 64
+
+/* Transcribed from musl's src/setjmp/riscv64/{setjmp,longjmp}.S, which this
+ * package does not compile because it takes no architecture directory from
+ * musl. The registers are the callee-saved set of that architecture's procedure
+ * call standard, and the floating-point half is conditional on the ABI rather
+ * than on the hardware: a program built for the soft-float ABI has no such
+ * registers to save, and the compiler states which ABI it is building for. */
+
+OKM_DECL(__setjmp)
+OKM_DECL(_setjmp)
+OKM_DECL(setjmp)
+OKM_DECL(sigsetjmp)
+OKM_DECL(__sigsetjmp)
+OKM_NAME(__setjmp):
+OKM_NAME(_setjmp):
+OKM_NAME(setjmp):
+OKM_NAME(sigsetjmp):
+OKM_NAME(__sigsetjmp):
+	sd s0,    0(a0)
+	sd s1,    8(a0)
+	sd s2,    16(a0)
+	sd s3,    24(a0)
+	sd s4,    32(a0)
+	sd s5,    40(a0)
+	sd s6,    48(a0)
+	sd s7,    56(a0)
+	sd s8,    64(a0)
+	sd s9,    72(a0)
+	sd s10,   80(a0)
+	sd s11,   88(a0)
+	sd sp,    96(a0)
+	sd ra,    104(a0)
+#ifndef __riscv_float_abi_soft
+	fsd fs0,  112(a0)
+	fsd fs1,  120(a0)
+	fsd fs2,  128(a0)
+	fsd fs3,  136(a0)
+	fsd fs4,  144(a0)
+	fsd fs5,  152(a0)
+	fsd fs6,  160(a0)
+	fsd fs7,  168(a0)
+	fsd fs8,  176(a0)
+	fsd fs9,  184(a0)
+	fsd fs10, 192(a0)
+	fsd fs11, 200(a0)
+#endif
+	li a0, 0
+	ret
+	OKM_SIZE(OKM_NAME(setjmp))
+
+OKM_DECL(__longjmp)
+OKM_DECL(_longjmp)
+OKM_DECL(longjmp)
+OKM_NAME(__longjmp):
+OKM_NAME(_longjmp):
+OKM_NAME(longjmp):
+	ld s0,    0(a0)
+	ld s1,    8(a0)
+	ld s2,    16(a0)
+	ld s3,    24(a0)
+	ld s4,    32(a0)
+	ld s5,    40(a0)
+	ld s6,    48(a0)
+	ld s7,    56(a0)
+	ld s8,    64(a0)
+	ld s9,    72(a0)
+	ld s10,   80(a0)
+	ld s11,   88(a0)
+	ld sp,    96(a0)
+	ld ra,    104(a0)
+#ifndef __riscv_float_abi_soft
+	fld fs0,  112(a0)
+	fld fs1,  120(a0)
+	fld fs2,  128(a0)
+	fld fs3,  136(a0)
+	fld fs4,  144(a0)
+	fld fs5,  152(a0)
+	fld fs6,  160(a0)
+	fld fs7,  168(a0)
+	fld fs8,  176(a0)
+	fld fs9,  184(a0)
+	fld fs10, 192(a0)
+	fld fs11, 200(a0)
+#endif
+	/* The value a caller sees is the one it passed, except that zero becomes
+	 * one --- because zero is what setjmp itself returns and the two must be
+	 * distinguishable. */
+	seqz a0, a1
+	add a0, a0, a1
+	ret
+	OKM_SIZE(OKM_NAME(longjmp))
+
 #else
-#error "openkal-musl provides setjmp for x86_64 and aarch64"
+#error "openkal-musl provides setjmp for x86_64, aarch64 and riscv64"
 #endif
 
 /* An executable stack is not required by anything above, and the linker assumes

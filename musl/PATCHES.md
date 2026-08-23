@@ -161,6 +161,56 @@ The response is one flag on the link line rather than fifteen exceptions in a
 macro: the link names that system's own linker, which is the one its object
 format was designed alongside and which resolves an indirect symbol.
 
+#### The measurement is toolchain-specific, and the flag's scope is narrower
+#### than it reads
+
+Remeasured on 2026-08-22, on Linux, with the open-source toolchain:
+
+| what was measured | result |
+| --- | --- |
+| every source of this package compiled for `arm64-apple-macos14` (1336 units), `llvm-nm -m` counting indirect symbols | **0** |
+| the same for `x86_64-apple-macos14` | **0** |
+| the same again with clang 22.1.8 rather than clang 18 | **0** |
+| `port/src` (11 units) and `openkal-macos/src` (9 units) added — 1356 objects | **0** |
+| `strings` over lld 22.1.8, looking for the refusal | still present: `TODO: support aliasing to symbols of kind ` |
+| `ld64.lld` linking all 1356 objects plus a program, **on Linux** | **succeeds** |
+
+The last two rows are not in conflict. The linker's limitation is still there;
+what has changed is that the compiler does not produce the construct that
+reaches it. The fifteen symbols are a property of **the compiler the measurement
+above was made with** — the one this system's own toolchain supplies — and not a
+property of this port, of musl, or of the object format.
+
+Two consequences, and both narrow rather than widen what is claimed:
+
+- `--ld-path` in `mcpp.toml` applies to a **native build on that system with that
+  system's own compiler**. A cross build from another system does not reach the
+  construct and does not need the flag. The comment beside the flag says so.
+- A program for that system can therefore be linked **without any file that
+  system supplies**. What it needs is recorded under "Two names, and how they
+  were counted" below.
+
+#### Two names, and how they were counted
+
+The count was not read out of the sources. Every object of a complete build was
+given to the linker **without** `-undefined dynamic_lookup`, and the linker was
+asked what remained:
+
+```
+_clock_gettime_nsec_np              openkal-macos/src/time.cpp
+_pthread_create_from_mach_thread    openkal-macos/src/task.cpp
+__DYNAMIC                           src/ldso/dl_iterate_phdr.c
+```
+
+The third is not one of them. That source is excluded from this system's build
+by `mcpp.toml`, and it appears here only because the probe compiled the whole
+tree rather than the configured set. **Reading the sources would not have found
+that false positive; the linker did.**
+
+So the whole of what this system supplies to a program built above this package
+is two names, and a stub naming them is eight lines of text. `openkal-macos`
+carries it as `port/libSystem.tbd`.
+
 ## What the architecture does not decide alone
 
 `long double`.

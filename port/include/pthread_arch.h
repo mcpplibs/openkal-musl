@@ -31,6 +31,11 @@ static inline uintptr_t __get_tp(void) { return __okm_get_tp(); }
  * diagnosed rather than swallowed by a name nothing has. */
 #if defined(__aarch64__)
 #define MC_PC pc
+#elif defined(__riscv) && __riscv_xlen == 64
+/* That architecture spells the array with two leading underscores, and the
+ * definition here names the member that exists rather than one that does not
+ * --- which is the whole point of the paragraph above. */
+#define MC_PC __gregs[0]
 #else
 #define MC_PC gregs[0]
 #endif

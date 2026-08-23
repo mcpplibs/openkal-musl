@@ -18,6 +18,7 @@
  * Everything else musl does at startup is unchanged and runs from here.
  */
 #include "okm.h"
+#include "okm_opt.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -74,7 +75,7 @@ int __init_tp(void* p)
 	if (__set_thread_area(TP_ADJ(p)) < 0) return -1;
 	libc.can_do_threads = 1;
 	td->detach_state = DT_JOINABLE;
-	td->tid = (int)kal_task_current();
+	td->tid = (int)OKM_CONTEXT_ID();
 	if (td->tid == 0) td->tid = 1;
 	td->locale = &libc.global_locale;
 	td->robust_list.head = &td->robust_list.head;
@@ -218,10 +219,42 @@ static void fill_random(void)
 	}
 }
 
-int __libc_start_main(int (*main_fn)(int, char**, char**), int argc, char** argv,
-                      void (*init_dummy)(), void (*fini_dummy)(), void (*ldso_dummy)())
+/* ⭐⭐ BRINGING THE LIBRARY UP, SEPARATED FROM BEING ENTERED — BECAUSE ON ONE
+ * OBJECT FORMAT THOSE ARE NOT THE SAME MOMENT.
+ *
+ * On ELF this function runs from the entry point, before anything else, and
+ * `__libc_start_init` then walks the constructors. The order is: library, then
+ * constructors, then `main`.
+ *
+ * ⚠️ Mach-O INVERTS IT. The dynamic loader runs an image's constructors BEFORE
+ * transferring control to its entry point, so a C++ runtime's static
+ * initialisers execute while this library has not been initialised at all.
+ * Measured 2026-08-23, an arm64 image built on Linux and run on a real Mac:
+ *
+ *     dyld: running initializer 0x…f3aa48 in openkal-same-source
+ *       _GLOBAL__I_000100 → std::ios_base::Init::Init()
+ *         → DoIOSInit::DoIOSInit()
+ *           → init_stream<basic_istream, __stdinbuf<char>>(FILE*, …)
+ *             → __stdinbuf<char>::__stdinbuf(FILE*, mbstate_t*)   ← EXC_BAD_ACCESS
+ *
+ * libc++ constructs its standard streams over this library's `stdin`, and at
+ * that moment `okm_start` has not run.
+ *
+ * ⇒ So the bringing-up is a function of its own with a once guard, and the
+ * platform that needs it earlier calls it earlier (`port/src/mach/`). Calling
+ * it twice is not a hazard; calling it late is.
+ *
+ * ⚠️ NOT A LOCK. This runs before the thread layer exists — `__init_tls` is one
+ * of the things it does — so a mutex here would be using what it is installing.
+ * A plain flag is correct because there is exactly one execution context at
+ * this point on every format: the loader has not started any, and neither have
+ * we. */
+static int g_libc_up;
+
+void __okm_libc_init(void)
 {
-	(void)argc; (void)argv; (void)init_dummy; (void)fini_dummy; (void)ldso_dummy;
+	if (g_libc_up) return;
+	g_libc_up = 1;
 
 	libc.page_size = 4096;
 	fill_random();
@@ -234,6 +267,14 @@ int __libc_start_main(int (*main_fn)(int, char**, char**), int argc, char** argv
 	__init_tls(0);
 	__init_ssp(g_random);
 	okm_table_init();
+}
+
+int __libc_start_main(int (*main_fn)(int, char**, char**), int argc, char** argv,
+                      void (*init_dummy)(), void (*fini_dummy)(), void (*ldso_dummy)())
+{
+	(void)argc; (void)argv; (void)init_dummy; (void)fini_dummy; (void)ldso_dummy;
+
+	__okm_libc_init();
 
 	__libc_start_init();
 	exit(main_fn(g_argc, g_argv_store, __environ));

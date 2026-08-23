@@ -1,0 +1,93 @@
+import mcpp;
+import std;
+
+// ⭐⭐ THE COMPILER'S OWN RUNTIME, NAMED ONLY WHEN IT HAS THAT NAME.
+//
+// A compiler emits calls to routines no C library defines — a 128-bit shift, a
+// stack probe, a complex multiply on `long double`. They live in `libgcc.a`
+// under GCC and in compiler-rt under clang, and the two are not
+// interchangeable names for one file: `-lgcc` on a clang link is a library that
+// does not exist.
+//
+// ⚠️ THE MANIFEST CANNOT SAY THIS, WHICH IS WHY THERE IS A PROGRAM. A
+// `[target.'cfg(windows)']` block describes the TARGET, and this is a question
+// about the toolchain that resolved. Both measurements arrived on 2026-08-22
+// from the same missing distinction:
+//
+//   naming it unconditionally    lld: error: unable to find library -lgcc
+//                                (a clean runner, clang, cross to PE)
+//   naming it never              undefined reference to `___chkstk_ms'
+//                                undefined reference to `__mulxc3'
+//                                (a Windows runner, GCC, no C++ runtime in the
+//                                 graph to supply compiler-rt instead)
+//
+// Each was the correct behaviour for the other configuration.
+//
+// ⚠️ PE ONLY, AND `gcc_eh` WITH IT. On this format a thread-local variable is
+// reached through a helper rather than through an address the processor
+// supplies, and that helper is in the second archive rather than the first.
+// Where the graph brings `openkal-llvm-runtime`, compiler-rt's `emutls.c` is
+// the same answer and neither archive is consulted.
+//
+// ⚠️ NOT ON ELF OR Mach-O. There the driver still links the compiler's runtime
+// even under `-nostdlib`, or the graph supplies it; adding a name here would be
+// a second source for something that already has one.
+
+// ⭐⭐ WHICH COMPILER FAMILY RESOLVED — AND WHAT AN ABSENT ANSWER MEANS.
+//
+// ⚠️ READ FROM THE ENVIRONMENT, NOT THROUGH A HELPER. A build program is
+// compiled against the `mcpp` module of whichever tool RUNS it, so naming a
+// helper newer than the released tool makes this package require an unreleased
+// one. Measured 2026-08-22, on every row of three repositories at once:
+//
+//     build.mcpp: error: no member named 'compiler' in namespace 'mcpp'
+//     build.mcpp: error: 'toolchain_dir' is not a member of 'mcpp'
+//
+// — and the second is the more useful of the two, because `toolchain_dir` was
+// the FALLBACK written for the first. The environment variables are the
+// contract and `std::getenv` reads them on every version.
+//
+// ⚠️ AND AN ABSENT VALUE IS NOT "NO COMPILER". Measured against mcpp 2026.8.19.1,
+// which is what CI installs: `MCPP_TARGET_OS`, `MCPP_HOST`, `MCPP_OUT_DIR`,
+// `MCPP_MANIFEST_DIR`, `MCPP_TARGET` and `MCPP_TARGET_ARCH` are all set, and
+// `MCPP_COMPILER` and `MCPP_TOOLCHAIN_DIR` are absent.
+//
+// ⭐ So absent means "a build tool from before the question could be asked" —
+// and such a tool cannot produce the configuration the answer would change. The
+// clang-over-openkal cross to PE arrives on the same release as the variable.
+// The one configuration a tool that predates it can produce is the GCC one, so
+// that is what absent is answered with, and it is a deduction rather than a
+// default.
+std::string compiler_family() {
+    if (const char* v = std::getenv("MCPP_COMPILER"); v && *v) return v;
+    return "gcc";
+}
+
+std::string env_or_empty(const char* name) {
+    const char* v = std::getenv(name);
+    return v ? v : "";
+}
+
+int main() {
+    const std::string os  = env_or_empty("MCPP_TARGET_OS");
+    const std::string fam = compiler_family();
+
+    if (fam != "gcc") return 0;
+
+    // ⚠️ ELF NEEDS IT TOO, AND FOR THE SAME REASON THE PE BLOCK DID. The Linux
+    // block of the manifest named `-lgcc` unconditionally, and that resolved on
+    // a Linux host because a payload with it happens to be installed there.
+    // Measured 2026-08-23, a macOS host cross-building for `x86_64-linux-gnu`:
+    //
+    //     ld.lld: error: unable to find library -lgcc
+    //
+    // ⇒ Under clang the answer is compiler-rt, which `openkal-llvm-runtime`
+    // builds for this target as it already did for the other three.
+    if (os == "linux") {
+        mcpp::link_lib("gcc");
+    } else if (os == "windows") {
+        mcpp::link_lib("gcc");
+        mcpp::link_lib("gcc_eh");
+    }
+    return 0;
+}
