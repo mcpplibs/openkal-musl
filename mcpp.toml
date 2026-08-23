@@ -231,7 +231,9 @@ cxx_runtime = "host-coupled"
 # arithmetic musl's own <complex.h> calls.
 [target.'cfg(os = "linux")'.build]
 ldflags = ["-nostdlib", "-static", "-Wl,--no-dynamic-linker",
-           "-Wl,--gc-sections", "-lgcc"]
+           "-Wl,--gc-sections"]
+# ⚠️ `-lgcc` was here; it is now named by build.mcpp, and only when the compiler
+# is the one whose runtime has that name. See that file.
 
 # The link line on this system.
 #

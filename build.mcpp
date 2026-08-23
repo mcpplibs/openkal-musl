@@ -72,7 +72,20 @@ int main() {
     const std::string os  = env_or_empty("MCPP_TARGET_OS");
     const std::string fam = compiler_family();
 
-    if (os == "windows" && fam == "gcc") {
+    if (fam != "gcc") return 0;
+
+    // ⚠️ ELF NEEDS IT TOO, AND FOR THE SAME REASON THE PE BLOCK DID. The Linux
+    // block of the manifest named `-lgcc` unconditionally, and that resolved on
+    // a Linux host because a payload with it happens to be installed there.
+    // Measured 2026-08-23, a macOS host cross-building for `x86_64-linux-gnu`:
+    //
+    //     ld.lld: error: unable to find library -lgcc
+    //
+    // ⇒ Under clang the answer is compiler-rt, which `openkal-llvm-runtime`
+    // builds for this target as it already did for the other three.
+    if (os == "linux") {
+        mcpp::link_lib("gcc");
+    } else if (os == "windows") {
         mcpp::link_lib("gcc");
         mcpp::link_lib("gcc_eh");
     }
