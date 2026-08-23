@@ -4,6 +4,13 @@ name        = "openkal-musl"
 version     = "0.3.1"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
+
+# The layer this package supplies. `mcpp:c-abi` is the C library — the triple's
+# environment field — and `=musl` is the interface it answers to, which is the
+# same answer it would give above a kernel rather than above openkal. What
+# changes is not the C library a program sees but what that library is written
+# on.
+provides    = ["mcpp:c-abi=musl"]
 authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-musl"
 
