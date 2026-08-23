@@ -254,7 +254,14 @@ ldflags = ["-nostdlib", "-static", "-Wl,--no-dynamic-linker",
 [target.'cfg(os = "macos")'.build]
 # The port's own dl_iterate_phdr is for ELF and is excluded here, as musl's was:
 # this format has no program headers.
-sources = ["!port/src/okm_phdr.c"]
+sources = [
+  "!port/src/okm_phdr.c",
+  # ⭐ One file this format needs that no other does — the loader here runs
+  # constructors before the entry point, so the library has to be able to come
+  # up from a constructor too. `port/src/*.c` is a package-wide glob, so the
+  # file lives in a subdirectory it does not match.
+  "port/src/mach/*.c",
+]
 #
 # --ld-path names this system's own linker rather than the one the toolchain
 # brings. The reason is one construct and fifteen uses of it. A second name for
