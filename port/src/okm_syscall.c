@@ -24,6 +24,7 @@
 #define _GNU_SOURCE
 #include "okm.h"
 #include "okm_opt.h"
+#include <openkal/random.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -821,6 +822,28 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	/* --- execution contexts ------------------------------------------------ */
 	case SYS_futex:
 		return __okm_futex((const int*)a1, (int)a2, (int)a3, (const struct timespec*)a4);
+	/* ⭐ THROUGH THE INTERFACE, NOT THROUGH THE PLATFORM.
+	 *
+	 * musl's own `src/linux/getrandom.c` issues SYS_getrandom directly, which
+	 * is right where a Linux kernel is underneath and wrong here: this port
+	 * exists so that every request reaches the environment through openkal.
+	 * The call below is the whole difference.
+	 *
+	 * ⚠️ AND IT IS WHY `openkal.random` HAD TO EXIST. Entropy is not derivable
+	 * from the other interfaces --- a clock reading is unpredictable to a
+	 * reader of the source and not to an adversary, which the AT_RANDOM note
+	 * in okm_start.c already says about the bytes it derives, and openkal.fs
+	 * deliberately cannot open `/dev/urandom`. Neither bypassing the layer nor
+	 * inventing entropy was acceptable, so the layer gained an interface.
+	 *
+	 * The flags argument is ignored: GRND_NONBLOCK asks for a short read and
+	 * `kal_random_fill` has no partial success to report. An environment that
+	 * blocks says so in `kal_random_props`. */
+	case SYS_getrandom: {
+		const int rc = kal_random_fill((void*)a1, (kal_uintptr)a2);
+		if (rc != kal_ok) return -okm_errno(rc);
+		return (syscall_arg_t)a2;
+	}
 	case SYS_sched_yield: okm_task_yield(); return 0;
 	case SYS_gettid:      return (syscall_arg_t)OKM_CONTEXT_ID();
 	case SYS_getpid:      return 1;
