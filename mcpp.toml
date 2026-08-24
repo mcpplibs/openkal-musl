@@ -15,7 +15,7 @@ authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-musl"
 
 [dependencies]
-openkal = "0.6.0"
+openkal = "0.7.0"
 
 # An ordinary consumer of openkal declares the specification and leaves the
 # choice of implementation to whoever builds the program, which is what the
