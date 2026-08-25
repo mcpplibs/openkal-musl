@@ -25,6 +25,10 @@
 #include "okm.h"
 #include "okm_opt.h"
 #include <openkal/random.h>
+/* Weak, for the reason given at SYS_getrandom below: the interface is
+ * optional, and an implementation that does not provide it is absent as a
+ * definition rather than present and refusing. */
+extern __typeof(kal_random_fill) kal_random_fill __attribute__((weak));
 
 #include <errno.h>
 #include <fcntl.h>
@@ -838,8 +842,34 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 *
 	 * The flags argument is ignored: GRND_NONBLOCK asks for a short read and
 	 * `kal_random_fill` has no partial success to report. An environment that
-	 * blocks says so in `kal_random_props`. */
+	 * blocks says so in `kal_random_props`.
+	 *
+	 * ⭐⭐ AND THE REFERENCE IS WEAK, BECAUSE THE INTERFACE IS OPTIONAL.
+	 *
+	 * `openkal.random` is optional, and clause 6.1 expresses an implementation
+	 * that does not provide it as the absence of a link-time definition. This
+	 * dispatcher is linked into every program, so a strong reference here turns
+	 * that absence into a failure for programs that never ask for a random
+	 * byte:
+	 *
+	 *     ld.lld: error: undefined symbol: kal_random_fill
+	 *     >>> referenced by okm_syscall.c:409
+	 *
+	 * measured on a bare-metal program over openkal-opensbi, which provides
+	 * eight interfaces and not this one.
+	 *
+	 * ⚠️ A WEAK REFERENCE IS NOT THE RUN-TIME REFUSAL CLAUSE 6.1 FORBIDS. That
+	 * clause governs an IMPLEMENTATION of openkal: one shall not offer an
+	 * interface whose operations report a lack of support while running. What
+	 * happens below is on the other side of the layer --- this file implements
+	 * Linux's system call ABI, where `ENOSYS` is that ABI's defined answer for
+	 * a call the kernel does not have, and musl's own `getrandom` is written
+	 * against exactly that answer.
+	 *
+	 * The idiom is already used in this port: see `__ehdr_start` in
+	 * okm_phdr.c. */
 	case SYS_getrandom: {
+		if (!kal_random_fill) return -ENOSYS;
 		const int rc = kal_random_fill((void*)a1, (kal_uintptr)a2);
 		if (rc != kal_ok) return -okm_errno(rc);
 		return (syscall_arg_t)a2;
