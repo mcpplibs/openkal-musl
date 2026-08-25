@@ -88,6 +88,45 @@ jobs:
           [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
           mcpp build $extra
 
+      # ⭐ AN OPTIONAL INTERFACE IS REFERENCED WEAKLY, WHICH IS A PROPERTY OF
+      # THE OBJECT AND NOT OF ANY ONE LINK.
+      #
+      # `openkal.random` is optional, and clause 6.1 expresses an
+      # implementation that does not provide it as the absence of a link-time
+      # definition. This dispatcher is linked into every program, so a strong
+      # reference to `kal_random_fill` makes an optional interface mandatory:
+      # every program over a backend without it fails to link, whether or not
+      # it wanted a random byte.
+      #
+      # ⚠️ THAT DEFECT SHIPPED, AND NOTHING HERE SAW IT. It was found one
+      # repository downstream, by a bare-metal program in openkal-llvm-runtime
+      # linking over openkal-opensbi:
+      #
+      #     ld.lld: error: undefined symbol: kal_random_fill
+      #
+      # Reproducing it here would need a bare-metal toolchain and a backend
+      # that declines the interface. The symbol class needs neither, and states
+      # the invariant more directly than a link would: `w` for the optional
+      # one, `U` for a required one beside it.
+      - name: An optional interface is referenced weakly
+        if: runner.os == 'Linux'
+        run: |
+          obj="$(find target -name okm_syscall.o | head -1)"
+          test -n "$obj" || { echo "::error::okm_syscall.o was not built"; exit 1; }
+          nm="$(command -v llvm-nm || command -v nm)"
+          "$nm" "$obj" > syms.txt
+
+          # The control: a required interface must still be a strong reference,
+          # so that a backend failing to provide one is still a link error.
+          grep -qE '^ *U kal_time_sleep$' syms.txt \
+            || { echo "::error::kal_time_sleep is not an undefined strong reference — the check below proves nothing"
+                 grep kal_time syms.txt; exit 1; }
+
+          grep -qE '^ *w kal_random_fill$' syms.txt \
+            || { echo "::error::kal_random_fill is not a weak reference; an optional interface has been made mandatory"
+                 grep kal_random syms.txt; exit 1; }
+          echo "  ok  kal_random_fill is weak, kal_time_sleep is strong"
+
       # A program above this package names one package. It does not name
       # openkal, it does not name an implementation, and it says nothing about
       # the platform.
