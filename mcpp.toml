@@ -33,7 +33,7 @@ openkal = "0.8.0"
 openkal-linux = { version = "0.6.0", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
-openkal-macos = { version = "0.4.0", features = ["standalone"] }
+openkal-macos = { version = "0.5.0", features = ["standalone"] }
 
 # ⚠️ FIRST STEP TOWARD A BARE MACHINE, AND NOT THE WHOLE OF IT.
 #
@@ -69,7 +69,7 @@ openkal-opensbi = { version = "0.2.0", features = ["standalone"] }
 defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
 
 [target.'cfg(windows)'.dependencies]
-openkal-windows = { version = "0.2.0", features = ["standalone"] }
+openkal-windows = { version = "0.3.0", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #
