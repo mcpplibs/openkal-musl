@@ -251,7 +251,7 @@ jobs:
           TOML
           sed -i 's/^          //' "$d/mcpp.toml"
           printf '#include <unistd.h>\n#include <stdio.h>\nint main(void){ printf("%%d\\n", isatty(1)); return 0; }\n' > "$d/src/main.c"
-          ( cd "$d" && "$MCPP" build --toolchain '${{ matrix.toolchain }}' )
+          ( cd "$d" && mcpp build --toolchain '${{ matrix.toolchain }}' )
           bin="$(find "$d/target" -name isattyprobe -type f | head -1)"
           test -n "$bin" || { echo "::error::the probe did not build"; exit 1; }
 
@@ -291,26 +291,47 @@ jobs:
         run: |
           extra=''
           [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
-          "$MCPP" build --toolchain '${{ matrix.toolchain }}' $extra
+          mcpp build --toolchain '${{ matrix.toolchain }}' $extra
           test -s compile_commands.json \
             || { echo "::error::no compile_commands.json — nothing to check"; exit 1; }
 
-          # ⚠️ A DENOMINATOR. With no consumer row the greps below are
-          # vacuously true, which is the false green this check must not have.
-          rows="$(grep -c '"file"' compile_commands.json || true)"
-          [ "${rows:-0}" -ge 1 ] \
-            || { echo "::error::compile_commands.json has no rows"; exit 1; }
+          # ⚠️⚠️ PER ROW, NOT OVER THE FILE. This example depends on the
+          # package by path, so THE PROVIDER'S OWN ROWS ARE IN THIS SAME FILE
+          # and they carry the overlay legitimately — that is what "private,
+          # not unused" means. A `grep` over the whole file cannot tell the two
+          # apart and would call the package's own build a leak.
+          #
+          # ⚠️ Separators are normalised because the Windows runner writes
+          # `…\musl\src\include`, and a check that silently stops matching on
+          # one platform is a check that platform does not have.
+          norm='(.arguments // (.command | split(" "))) | join(" ") | gsub("\\\\"; "/")'
+          jq -r ".[] | select((.file | gsub(\"\\\\\\\\\"; \"/\")) | test(\"examples/cross-hello\"))       | $norm" \
+             compile_commands.json > consumer.txt
+          jq -r ".[] | select((.file | gsub(\"\\\\\\\\\"; \"/\")) | test(\"examples/cross-hello\") | not) | $norm" \
+             compile_commands.json > provider.txt
+
+          # ⚠️ DENOMINATORS ON BOTH SIDES. With no consumer row every absence
+          # below is vacuously true; with no provider row the control is.
+          cons="$(wc -l < consumer.txt)"; prov="$(wc -l < provider.txt)"
+          echo "  rows: consumer=$cons provider=$prov"
+          [ "$cons" -ge 1 ] && [ "$prov" -ge 1 ] \
+            || { echo "::error::consumer=$cons provider=$prov — nothing was checked"; exit 1; }
 
           bad=0
           for d in musl/src/include musl/src/internal musl-generated/internal; do
-            if grep -q -- "$d" compile_commands.json; then
+            if grep -q -- "$d" consumer.txt; then
               echo "::error::the internal overlay '$d' reached a consumer"
               bad=1
             fi
+            # The other half of the same key: private is not the same as
+            # dropped. musl's own sources must still reach their declarations.
+            grep -q -- "$d" provider.txt \
+              || { echo "::error::'$d' is on nobody's command line — private_include_dirs withheld it from this package too"
+                   bad=1; }
           done
-          # The control: a PUBLIC directory must still be there, or this check
+          # And something PUBLIC must still cross the boundary, or this check
           # would pass for a build that published nothing at all.
-          grep -q -- 'port/include' compile_commands.json \
+          grep -q -- 'port/include' consumer.txt \
             || { echo "::error::no public include directory reached the consumer — the check above proves nothing"
                  exit 1; }
           [ "$bad" = 0 ] || exit 1
