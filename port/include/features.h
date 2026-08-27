@@ -71,14 +71,36 @@
  * and finds <features.h> defining `weak', `hidden' and `weak_alias' as macros
  * that mean something only to musl's own sources.
  *
- * ⓘ THIS IS THE SECOND-BEST REMEDY. The first would be for a package to
- * distinguish the directories it is built from from the directories it
- * publishes. Measured 2026-08-22: mcpp cannot express it --- publicUsage takes
- * privateBuild's include directories entire. Moving the two directories into
+ * ⓘ THIS WAS THE SECOND-BEST REMEDY, AND THE FIRST ONE HAS ARRIVED.
+ *
+ * The note used to read: "The first would be for a package to distinguish the
+ * directories it is built from from the directories it publishes. Measured
+ * 2026-08-22: mcpp cannot express it --- publicUsage takes privateBuild's
+ * include directories entire." It was left here so that the better fix would
+ * not be lost, and it was not: mcpp 2026.8.27.1 added
+ * `[build] private_include_dirs`, and this package's manifest now uses it.
+ *
+ * ⚠️ SO WHY IS THE BLOCK BELOW STILL HERE? Because the two answer different
+ * questions and only one of them is about visibility.
+ *
+ *   private_include_dirs  --- WHO SEES the internal overlay. A consumer no
+ *                             longer has these directories on its command line
+ *                             at all, so the macros cannot reach it.
+ *   OKM_MUSL_INTERNAL     --- WHO IS COMPILING. A C source that IS built with
+ *                             these directories on its line and is NOT musl's
+ *                             --- compiler-rt, when a board builds it here ---
+ *                             still needs the macros inert.
+ *
+ * The second case is measured and is recorded further down: `int_util.c:49:
+ * use of undeclared identifier __weak__'. Removing either axis brings back a
+ * defect that has already been paid for once.
+ *
+ * ⚠️ The rejected alternative is also kept: moving the two directories into
  * per-glob flags places them AFTER include_dirs on the command line, and musl's
  * own build then finds the public <features.h> before the internal one and
- * fails with `unknown type name hidden'. The note is here so that the better
- * fix is not lost.
+ * fails with `unknown type name hidden'. That is why `private_include_dirs` is
+ * a SUBSET of `include_dirs` rather than a second list --- the order is the
+ * thing that cannot be given up.
  *
  * ⭐⭐ THE DISCRIMINATOR WAS WRONG ONCE, AND THE WRONG ONE HELD FOR A DAY.
  *

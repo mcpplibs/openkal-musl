@@ -95,6 +95,7 @@
 enum okm_kind {
 	OKM_FREE = 0,
 	OKM_STREAM,     /* a borrowed stream: the program's own three */
+	OKM_CHANNEL,    /* an OWNED stream, obtained from openkal.process */
 	OKM_FILE,       /* an owned file obtained from openkal.fs     */
 	OKM_DIR,        /* an owned directory                          */
 };
@@ -107,7 +108,7 @@ struct okm_desc {
 	int          refs;
 	int          kind;
 	int          flags;          /* the open(2) flags this description carries */
-	kal_uintptr  stream;         /* valid for OKM_STREAM and OKM_FILE          */
+	kal_uintptr  stream;         /* OKM_STREAM, OKM_CHANNEL and OKM_FILE      */
 	struct kal_file file;
 	struct kal_dir  dir;
 	kal_uintptr  iter;           /* directory enumeration, when begun          */

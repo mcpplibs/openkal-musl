@@ -25,6 +25,26 @@
 #include "okm.h"
 #include "okm_opt.h"
 #include <openkal/random.h>
+/* For pipe and pipe2, which are kal_process_channel. Included here rather than
+ * through okm.h because this is the only source that reaches for it. */
+#include <openkal/process.h>
+/* ⚠️⚠️ WEAK, OR AN INTERFACE A BACKEND MAY DECLINE BECOMES ONE IT MUST PROVIDE.
+ *
+ * Clause 6.1 expresses an interface an implementation does not provide as the
+ * absence of a definition, and a bare-metal backend provides no `openkal.process'
+ * at all --- it has no second image to start. A strong reference from this port
+ * would therefore make every program above it fail to link, whether or not it
+ * ever asked for a pipe:
+ *
+ *     ld.lld: error: undefined symbol: kal_process_channel
+ *     >>> referenced by okm_syscall.c:407
+ *
+ * ⚠️ Measured on openkal-opensbi through openkal-llvm-runtime's bare-metal row,
+ * which is the row that has nothing to fall back on. The same rule is already
+ * applied to `kal_random_fill' below, and it is the second time this port has
+ * had to learn it. */
+extern __typeof(kal_process_channel) kal_process_channel __attribute__((weak));
+extern __typeof(kal_process_channel_close) kal_process_channel_close __attribute__((weak));
 /* Weak, for the reason given at SYS_getrandom below: the interface is
  * optional, and an implementation that does not provide it is absent as a
  * definition rather than present and refusing. */
@@ -63,7 +83,9 @@ static syscall_arg_t stream_of(int fd, kal_uintptr* out)
 {
 	struct okm_desc* d = okm_desc_of(fd);
 	if (!d) return -EBADF;
-	if (d->kind == OKM_STREAM || d->kind == OKM_FILE) { *out = d->stream; return 0; }
+	if (d->kind == OKM_STREAM || d->kind == OKM_CHANNEL || d->kind == OKM_FILE) {
+		*out = d->stream; return 0;
+	}
 	return -EISDIR;
 }
 
@@ -214,6 +236,12 @@ static syscall_arg_t do_fstat(int fd, struct kstat* st)
 		struct kal_stream s; s.h = d->stream;
 		st->st_mode = (kal_stream_props(s) & KAL_STREAM_PROP_INTERACTIVE)
 		            ? (S_IFCHR | 0620u) : (S_IFIFO | 0600u);
+	} else if (d->kind == OKM_CHANNEL) {
+		/* A channel end is a pipe and is never a terminal, so it is reported as
+		 * one without asking. Asking would be answered correctly too; not
+		 * asking states that the answer is a property of the kind rather than
+		 * of the resource. */
+		st->st_mode = S_IFIFO | 0600u;
 	}
 	return 0;
 }
@@ -385,8 +413,6 @@ static syscall_arg_t do_wait4(int pid, int* status, int options, void* rusage)
 syscall_arg_t __okm_task_exit(int code);          /* okm_thread.c */
 syscall_arg_t __okm_futex(const int* addr, int op, int val, const struct timespec* t);
 
-static unsigned g_umask = 022;
-
 syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
                             syscall_arg_t a3, syscall_arg_t a4, syscall_arg_t a5,
                             syscall_arg_t a6)
@@ -435,6 +461,162 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		okm_fd_release((int)a1);
 		okm_unlock();
 		return 0;
+	}
+	/* copy_file_range, as a read-and-write loop.
+	 *
+	 * ONLY THIS ONE, AND NOT sendfile. libc++'s std::filesystem::copy_file
+	 * tries copy_file_range first and falls back on a list of errors that
+	 * INCLUDES ENOSYS; its fallback from sendfile accepts only EINVAL. So an
+	 * implementation providing neither reaches the stream fallback through the
+	 * first call, and one providing sendfile alone never gets there. Providing
+	 * this one is therefore both necessary and sufficient, and providing
+	 * sendfile as well would be unreachable code.
+	 *
+	 * A SHORT WRITE IS NOT A RESULT THIS RETURNS. openkal transfers a whole
+	 * buffer or reports what prevented it, so the loop below writes everything
+	 * it read before advancing, and a failure part-way is reported with the
+	 * count that had already been copied --- which is what the caller needs to
+	 * resume, and what the operation's own contract states.
+	 *
+	 * The offsets are optional and, when given, are updated rather than the
+	 * descriptors' own positions. Both forms occur: std::filesystem passes
+	 * offsets, and a caller copying sequentially passes none. */
+	/* pipe and pipe2, upon kal_process_channel.
+	 *
+	 * ⭐ THIS BECAME POSSIBLE IN openkal 0.8 AND WAS NOT BEFORE. A pipe is a
+	 * pair of streams of which one end is meant to cross a spawn, which is
+	 * exactly what that interface provides and what openkal previously had no
+	 * way to express. Until then `pipe` belonged with the facilities the port
+	 * withholds; now it is supplied like any other.
+	 *
+	 * ⚠️ AND THE CLOSURE SAID SO BEFORE THE REASONING DID. Withholding it broke
+	 * `faccessat`, which forks and reports its answer back through a pipe:
+	 *
+	 *     ld64.lld: error: undefined symbol: pipe2
+	 *     >>> referenced by faccessat.c:45
+	 *
+	 * An exclusion that takes an ordinary function with it is the wrong
+	 * exclusion, and that was the first evidence that this one had become so.
+	 *
+	 * The two ends are bound as ordinary stream descriptors, so read, write,
+	 * close, dup and poll reach them through the paths they already take. */
+	/* ⚠️ `SYS_pipe` DOES NOT EXIST EVERYWHERE. The architectures that gained
+	 * their numbering after pipe2 have only the later call, so naming the older
+	 * one unconditionally does not compile there:
+	 *
+	 *     error: use of undeclared identifier 'SYS_pipe'
+	 *
+	 * The guard is on the NUMBER being defined and not on the architecture,
+	 * because what varies is the kernel's table rather than the machine. */
+#ifdef SYS_pipe
+	case SYS_pipe:
+#endif
+	case SYS_pipe2: {
+		int* out = (int*)a1;
+		const int flags = (n == SYS_pipe2) ? (int)a2 : 0;   /* the older call takes none */
+		if (!out) return -EFAULT;
+		/* O_DIRECT would ask for packet boundaries, which a stream does not
+		 * have. Refusing is the honest answer; silently ignoring it would give
+		 * a caller a byte stream where it asked for messages. */
+		if (flags & ~(O_CLOEXEC | O_NONBLOCK)) return -EINVAL;
+
+		/* A backend that provides no `openkal.process' provides no channel,
+		 * and this is where a program learns that a pipe is not available
+		 * here. ENOSYS is the same answer the default branch gives for
+		 * everything else openkal does not have. */
+		if (!kal_process_channel) return -ENOSYS;
+
+		struct kal_stream mine, theirs;
+		const int e = kal_process_channel(&mine, &theirs);
+		if (e != kal_ok) return -okm_errno(e);
+
+		okm_lock();
+		const int rfd = okm_fd_alloc(0);
+		if (rfd < 0) { okm_unlock();
+		               kal_process_channel_close(mine);
+		               kal_process_channel_close(theirs);
+		               return rfd; }
+		struct kal_file nof = { 0 };
+		struct kal_dir  nod = { 0 };
+		okm_fd_bind(rfd, OKM_CHANNEL, mine.h, nof, nod, O_RDONLY | (flags & O_NONBLOCK));
+
+		const int wfd = okm_fd_alloc(0);
+		if (wfd < 0) { okm_unlock();
+		               kal_process_channel_close(theirs);
+		               return wfd; }
+		okm_fd_bind(wfd, OKM_CHANNEL, theirs.h, nof, nod, O_WRONLY | (flags & O_NONBLOCK));
+
+		if (flags & O_CLOEXEC) { okm_fd_cloexec(rfd, 1); okm_fd_cloexec(wfd, 1); }
+		okm_unlock();
+
+		out[0] = rfd;
+		out[1] = wfd;
+		return 0;
+	}
+	case SYS_copy_file_range: {
+		const int fd_in = (int)a1, fd_out = (int)a3;
+		int64_t* off_in  = (int64_t*)a2;
+		int64_t* off_out = (int64_t*)a4;
+		size_t   want    = (size_t)a5;
+		const unsigned flags = (unsigned)a6;
+
+		if (flags != 0) return -EINVAL;   /* none are defined */
+		if (want == 0) return 0;
+
+		struct okm_desc* di = okm_desc_of(fd_in);
+		struct okm_desc* dobj = okm_desc_of(fd_out);
+		if (!di || !dobj) return -EBADF;
+		if (di->kind != OKM_FILE || dobj->kind != OKM_FILE) return -EINVAL;
+
+		/* When an offset is given the descriptor's own position is not to
+		 * move, so it is saved and put back. Seeking to learn it is the only
+		 * way to ask, which is why this is done once rather than per block. */
+		uint64_t keep_in = 0, keep_out = 0;
+		if (off_in) {
+			if (okm_fs_seek(di->file, 0, SEEK_CUR, &keep_in) != kal_ok) return -EIO;
+			if (okm_fs_seek(di->file, *off_in, SEEK_SET, &(uint64_t){0}) != kal_ok) return -EIO;
+		}
+		if (off_out) {
+			if (okm_fs_seek(dobj->file, 0, SEEK_CUR, &keep_out) != kal_ok) return -EIO;
+			if (okm_fs_seek(dobj->file, *off_out, SEEK_SET, &(uint64_t){0}) != kal_ok) return -EIO;
+		}
+
+		char block[8192];
+		size_t done = 0;
+		syscall_arg_t failure = 0;
+
+		while (done < want) {
+			size_t chunk = want - done;
+			if (chunk > sizeof block) chunk = sizeof block;
+
+			const syscall_arg_t got = do_read(fd_in, block, chunk);
+			if (got < 0) { failure = got; break; }
+			if (got == 0) break;                 /* end of input */
+
+			const syscall_arg_t put = do_write(fd_out, block, (size_t)got);
+			if (put < 0) { failure = put; break; }
+			done += (size_t)put;
+			if (put < got) { failure = -EIO; break; }
+		}
+
+		if (off_in) {
+			uint64_t now = 0;
+			okm_fs_seek(di->file, 0, SEEK_CUR, &now);
+			*off_in += (int64_t)done;
+			okm_fs_seek(di->file, (int64_t)keep_in, SEEK_SET, &now);
+		}
+		if (off_out) {
+			uint64_t now = 0;
+			okm_fs_seek(dobj->file, 0, SEEK_CUR, &now);
+			*off_out += (int64_t)done;
+			okm_fs_seek(dobj->file, (int64_t)keep_out, SEEK_SET, &now);
+		}
+
+		/* A failure after some bytes moved reports the bytes, not the failure:
+		 * the caller resumes from there, and reporting the error would lose
+		 * what had already been written. */
+		if (done > 0) return (syscall_arg_t)done;
+		return failure ? failure : 0;
 	}
 	case SYS_lseek: {
 		struct okm_desc* d = okm_desc_of((int)a1);
@@ -741,7 +923,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_ioctl: {
 		struct okm_desc* d = okm_desc_of((int)a1);
 		if (!d) return -EBADF;
-		if (d->kind == OKM_STREAM || d->kind == OKM_FILE) {
+		if (d->kind == OKM_STREAM || d->kind == OKM_CHANNEL || d->kind == OKM_FILE) {
 			struct kal_stream s; s.h = d->stream;
 			const int interactive =
 				(d->kind == OKM_STREAM) &&
@@ -749,9 +931,38 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			/* The only question a C library asks through this call is whether
 			 * the stream is a terminal, and openkal answers it. Everything a
 			 * terminal can be asked to do beyond that is not an operation
-			 * openkal has. */
+			 * openkal has.
+			 *
+			 * ⚠️⚠️ AND THE REQUEST IT ASKS IT WITH IS NOT THE ONE THIS BRANCH
+			 * FIRST RECOGNISED. `TCGETS' is the request a C library uses to
+			 * READ a terminal's settings; the one it uses to ASK WHETHER
+			 * something is a terminal is musl's own `isatty':
+			 *
+			 *     struct winsize wsz;
+			 *     r = syscall(SYS_ioctl, fd, TIOCGWINSZ, &wsz);
+			 *     if (r == 0) return 1;
+			 *
+			 * So every `isatty' over this port answered 0 --- for a real
+			 * terminal as readily as for a pipe. Measured 2026-08-27 against a
+			 * native control under one harness:
+			 *
+			 *                       pipe   pseudo-terminal
+			 *     native glibc        0            1
+			 *     this port           0            0
+			 *
+			 * ⇒ `std::print' never took its terminal path, and any program
+			 * that decides on colour or on line buffering by asking decided
+			 * wrongly and in silence.
+			 *
+			 * ⭐ THE SIZE IS REPORTED AS UNKNOWN RATHER THAN GUESSED. openkal
+			 * has no operation that answers it, and `winsize' is already
+			 * zeroed by the caller; a fabricated 80x24 would be this file's one
+			 * forbidden shape --- reporting success having done nothing.
+			 * A caller that wants the size reads zero, which is what a serial
+			 * line reports too. */
 			if (!interactive) return -ENOTTY;
-			if ((unsigned long)a2 == TCGETS) return 0;
+			if ((unsigned long)a2 == TCGETS)     return 0;
+			if ((unsigned long)a2 == TIOCGWINSZ) return 0;
 			return -ENOTTY;
 		}
 		return -ENOTTY;
@@ -934,7 +1145,24 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * which takes a different path when privileged takes the ordinary one. */
 	case SYS_getuid: case SYS_geteuid: case SYS_getgid: case SYS_getegid:
 		return 1000;
-	case SYS_umask: { const syscall_arg_t old = g_umask; g_umask = (unsigned)a1 & 0777u; return old; }
+	/* SYS_umask is deliberately absent and falls to the default below.
+	 *
+	 * IT USED TO BE ANSWERED, AND THE ANSWER WAS A FICTION. A stored word was
+	 * updated and returned, and nothing else in this port ever read it: the
+	 * variable was written by this case and read by this case, and by nothing
+	 * else. openkal's kal_fs_open takes no mode argument, so there is no
+	 * creation for a mask to apply to.
+	 *
+	 * A caller therefore set a mask, was told the previous one, and observed
+	 * the next file it created ignore both. That is the one outcome okm_opt.h
+	 * forbids in terms: nothing here reports success having done nothing. It
+	 * is a harder defect than a wrong permission bit, because a wrong bit can
+	 * be argued about and an effect that does not exist cannot.
+	 *
+	 * Falling through means musl's umask() now reports ENOSYS. Most callers do
+	 * not check it, which is correct: the success they were getting was false,
+	 * and a program whose security rests upon a mask is better stopped by a
+	 * visible failure than served by one that does nothing. */
 	case SYS_uname: {
 		struct utsname* u = (struct utsname*)a1;
 		static const char* const parts[] = { "openkal", "openkal", "0.5.0", "openkal", 0 };

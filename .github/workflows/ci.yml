@@ -31,7 +31,7 @@ on:
         default: ""
 env:
   MCPP_SOURCE_REF: ${{ github.event.inputs.mcpp_ref || vars.MCPP_SOURCE_REF }}
-  MCPP_VERSION: 2026.8.26.2
+  MCPP_VERSION: 2026.8.27.1
   XLINGS_VERSION: v2026.8.17.2
   XLINGS_NON_INTERACTIVE: '1'
 
@@ -53,6 +53,31 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+
+      # WHAT IS COMMITTED NAMES NO DIRECTORY OF ANYBODY'S MACHINE.
+      #
+      # tools/working-trees.sh rewrites this manifest to name working trees and
+      # deliberately does not restore it: the rewrite must survive for the rest
+      # of the job. A run by hand therefore leaves the manifest naming absolute
+      # paths, and committing that publishes them --- a consumer resolving from
+      # the index is handed a manifest pointing at a directory that exists
+      # nowhere.
+      #
+      # ⚠️ THAT HAS HAPPENED. This step runs BEFORE the rewrite, so what it
+      # examines is what the commit contains rather than what the job has done
+      # to it.
+      - name: The committed manifest names no local directory
+        run: |
+          set -euo pipefail
+          bad=$(grep -nE '^[a-z-]+ = \{[^}]*path = "(/|[A-Za-z]:)' mcpp.toml || true)
+          if [ -n "$bad" ]; then
+            echo "::error::the committed manifest names an absolute path"
+            printf '%s\n' "$bad" | sed 's/^/        /'
+            echo "        tools/working-trees.sh rewrites these and does not restore them;"
+            echo "        run 'git checkout -- mcpp.toml' after using it by hand."
+            exit 1
+          fi
+          echo "  ok  every dependency is named by version or by a relative path"
 
       - name: The specification and the implementation for this system
         run: |
@@ -189,6 +214,183 @@ jobs:
             || { echo "::error::kal_random_fill is not a weak reference; an optional interface has been made mandatory"
                  grep kal_random syms.txt; exit 1; }
           echo "  ok  kal_random_fill is weak, kal_time_sleep is strong"
+
+      # ⭐⭐ ASKING WHETHER A STREAM IS A TERMINAL GETS THE RIGHT ANSWER.
+      #
+      # musl's `isatty' asks with TIOCGWINSZ; this port answered only TCGETS,
+      # so every `isatty' returned 0 — for a real terminal as readily as for a
+      # pipe. Nothing failed: `std::print' simply never took its terminal path,
+      # and a program deciding on colour or on line buffering decided wrongly
+      # and in silence.
+      #
+      # ⭐ THE CRITERION IS A RELATION, NOT A VALUE. `isatty` under a pipe and
+      # under a pseudo-terminal must DIFFER, and must differ the same way the
+      # system's own C library does. A test asserting "0 in a pipe" alone would
+      # have passed throughout the defect.
+      - name: Asking whether a stream is a terminal is answered, not refused
+        if: runner.os == 'Linux' && matrix.target == ''
+        run: |
+          d="$(mktemp -d)"; mkdir -p "$d/src"
+          cat > "$d/mcpp.toml" <<TOML
+          [package]
+          name    = "isattyprobe"
+          version = "0.1.0"
+
+          [dependencies]
+          openkal-musl = { path = "$PWD" }
+
+          [targets.isattyprobe]
+          kind = "bin"
+          main = "src/main.c"
+
+          [build]
+          cxx_runtime = "host-coupled"
+          TOML
+          sed -i 's/^          //' "$d/mcpp.toml"
+          printf '#include <unistd.h>\n#include <stdio.h>\nint main(void){ printf("%%d\\n", isatty(1)); return 0; }\n' > "$d/src/main.c"
+          ( cd "$d" && mcpp build --toolchain '${{ matrix.toolchain }}' )
+          bin="$(find "$d/target" -name isattyprobe -type f | head -1)"
+          test -n "$bin" || { echo "::error::the probe did not build"; exit 1; }
+
+          # The control: the system's own C library, through the same harness.
+          # Without it a `script` that fails to allocate a pty would make the
+          # port look broken.
+          printf '#include <unistd.h>\n#include <stdio.h>\nint main(void){ printf("%%d\\n", isatty(1)); return 0; }\n' > "$d/ctrl.c"
+          cc "$d/ctrl.c" -o "$d/ctrl"
+          ctrl_pipe="$("$d/ctrl" | cat | tr -d '\r')"
+          ctrl_tty="$(script -qec "$d/ctrl" /dev/null | tr -d '\r' | head -1)"
+          [ "$ctrl_pipe" = 0 ] && [ "$ctrl_tty" = 1 ] \
+            || { echo "::error::the harness cannot tell a pty from a pipe (control gave $ctrl_pipe/$ctrl_tty) — this check would prove nothing"
+                 exit 1; }
+
+          port_pipe="$("$bin" | cat | tr -d '\r')"
+          port_tty="$(script -qec "$bin" /dev/null | tr -d '\r' | head -1)"
+          echo "  control: pipe=$ctrl_pipe tty=$ctrl_tty    port: pipe=$port_pipe tty=$port_tty"
+          [ "$port_pipe" = "$ctrl_pipe" ] && [ "$port_tty" = "$ctrl_tty" ] \
+            || { echo "::error::isatty over this port disagrees with the system's own C library"; exit 1; }
+          echo "  ok  isatty answers the same as the system's own C library"
+
+      # ⭐⭐ THE INTERNAL OVERLAY STOPS AT THIS PACKAGE'S BOUNDARY.
+      #
+      # musl reaches its own declarations through `src/include`, whose headers
+      # define `hidden`, `weak` and `weak_alias` — names that mean something
+      # only to musl's own sources. This package publishes the path it is built
+      # from, so every consumer used to see them too, and which consumer broke
+      # on which name was found one at a time (openkal-musl#13).
+      #
+      # `[build] private_include_dirs` (mcpp 2026.8.27.1) says which entries of
+      # `include_dirs` stop here. This asserts the DIRECTORY is absent from a
+      # consumer's command line — not that one macro no longer collides, which
+      # would go green again the moment the package patched that macro while
+      # the leak stayed.
+      # WHAT IS WITHHELD IS NOT DEFINED BY THIS PACKAGE, AND WHAT IS NOT
+      # WITHHELD IS.
+      #
+      # ⚠️⚠️ THE CRITERION IS THE PACKAGE'S OWN OBJECTS, NOT A PROGRAM'S LINK.
+      #
+      # It was a program's link, and that measured the wrong thing. Under one
+      # toolchain the probe built successfully for symbols this package does not
+      # define at all --- something else on the link line supplied them --- so
+      # the check reported "did not fail at the link" for a facility that had in
+      # fact been withheld. A program's link is closed over this port only when
+      # nothing else answers, and that is a property of the toolchain rather than
+      # of this package.
+      #
+      # A definition either is in these objects or is not. That holds under every
+      # toolchain and cannot be satisfied by a host C library.
+      #
+      # ⚠️ AND THE OBJECTS ARE SCOPED TO ONE FINGERPRINT DIRECTORY. `target/`
+      # accumulates one per configuration, so a search across all of them reads
+      # definitions from a build made before the change --- which is how this
+      # check first reported every withheld symbol as still present.
+      - name: What is withheld is not defined, and what is not withheld is
+        if: runner.os == 'Linux' && matrix.target == ''
+        run: |
+          set -euo pipefail
+          fps=$(ls -d target/*/*/ 2>/dev/null | wc -l)
+          [ "$fps" = 1 ] || { echo "::error::expected one fingerprint directory under target/, found $fps"
+                              ls -d target/*/*/ 2>/dev/null | sed 's/^/        /'
+                              exit 1; }
+          objs=$(find target -name '*.o')
+          n=$(printf '%s\n' "$objs" | grep -c . || true)
+          echo "  examining $n objects in $(ls -d target/*/*/)"
+          [ "$n" -gt 100 ] || { echo "::error::only $n objects; nothing was examined"; exit 1; }
+
+          defines() {   # symbol -> the number of definitions in these objects
+            nm $objs 2>/dev/null | grep -cE "^[0-9a-f]+ [TWi] $1\$" || true
+          }
+
+          fail=0
+          for s in epoll_create1 eventfd timerfd_create inotify_init signalfd; do
+            d=$(defines "$s")
+            if [ "$d" = 0 ]; then echo "  withheld, not defined: $s"
+            else echo "::error::$s is withheld and yet defined $d time(s)"; fail=1; fi
+          done
+
+          # The other half. Without it the check above would pass for a package
+          # that had stopped compiling anything at all. `pipe` is here because
+          # openkal 0.8 made it expressible; `socket` and `fork` because their
+          # closures reach the password functions and the thread implementation,
+          # so they are deliberately NOT withheld and the manifest says why.
+          for s in printf malloc open pipe faccessat chmod socket fork; do
+            d=$(defines "$s")
+            if [ "$d" -ge 1 ]; then echo "  defined here: $s"
+            else echo "::error::$s is not withheld and yet is not defined"; fail=1; fi
+          done
+
+          [ "$fail" = 0 ] || exit 1
+          echo "  ok  the withheld set is exactly what the manifest names"
+
+      - name: What this package is built from is not what it publishes
+        working-directory: examples/cross-hello
+        run: |
+          extra=''
+          [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
+          mcpp build --toolchain '${{ matrix.toolchain }}' $extra
+          test -s compile_commands.json \
+            || { echo "::error::no compile_commands.json — nothing to check"; exit 1; }
+
+          # ⚠️⚠️ PER ROW, NOT OVER THE FILE. This example depends on the
+          # package by path, so THE PROVIDER'S OWN ROWS ARE IN THIS SAME FILE
+          # and they carry the overlay legitimately — that is what "private,
+          # not unused" means. A `grep` over the whole file cannot tell the two
+          # apart and would call the package's own build a leak.
+          #
+          # ⚠️ Separators are normalised because the Windows runner writes
+          # `…\musl\src\include`, and a check that silently stops matching on
+          # one platform is a check that platform does not have.
+          norm='(.arguments // (.command | split(" "))) | join(" ") | gsub("\\\\"; "/")'
+          jq -r ".[] | select((.file | gsub(\"\\\\\\\\\"; \"/\")) | test(\"examples/cross-hello\"))       | $norm" \
+             compile_commands.json > consumer.txt
+          jq -r ".[] | select((.file | gsub(\"\\\\\\\\\"; \"/\")) | test(\"examples/cross-hello\") | not) | $norm" \
+             compile_commands.json > provider.txt
+
+          # ⚠️ DENOMINATORS ON BOTH SIDES. With no consumer row every absence
+          # below is vacuously true; with no provider row the control is.
+          cons="$(wc -l < consumer.txt)"; prov="$(wc -l < provider.txt)"
+          echo "  rows: consumer=$cons provider=$prov"
+          [ "$cons" -ge 1 ] && [ "$prov" -ge 1 ] \
+            || { echo "::error::consumer=$cons provider=$prov — nothing was checked"; exit 1; }
+
+          bad=0
+          for d in musl/src/include musl/src/internal musl-generated/internal; do
+            if grep -q -- "$d" consumer.txt; then
+              echo "::error::the internal overlay '$d' reached a consumer"
+              bad=1
+            fi
+            # The other half of the same key: private is not the same as
+            # dropped. musl's own sources must still reach their declarations.
+            grep -q -- "$d" provider.txt \
+              || { echo "::error::'$d' is on nobody's command line — private_include_dirs withheld it from this package too"
+                   bad=1; }
+          done
+          # And something PUBLIC must still cross the boundary, or this check
+          # would pass for a build that published nothing at all.
+          grep -q -- 'port/include' consumer.txt \
+            || { echo "::error::no public include directory reached the consumer — the check above proves nothing"
+                 exit 1; }
+          [ "$bad" = 0 ] || exit 1
+          echo "  ok  the internal overlay stops here; the public headers do not"
 
       # A program above this package names one package. It does not name
       # openkal, it does not name an implementation, and it says nothing about

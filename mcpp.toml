@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.3.5"
+version     = "0.4.0"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 
@@ -15,7 +15,7 @@ authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-musl"
 
 [dependencies]
-openkal = "0.7.0"
+openkal = "0.8.0"
 
 # An ordinary consumer of openkal declares the specification and leaves the
 # choice of implementation to whoever builds the program, which is what the
@@ -30,10 +30,10 @@ openkal = "0.7.0"
 #
 # The consequence for a program is that it names this package and nothing else.
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = { version = "0.5.4", features = ["standalone"] }
+openkal-linux = { version = "0.6.0", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
-openkal-macos = { version = "0.3.4", features = ["standalone"] }
+openkal-macos = { version = "0.4.0", features = ["standalone"] }
 
 # ⚠️ FIRST STEP TOWARD A BARE MACHINE, AND NOT THE WHOLE OF IT.
 #
@@ -44,7 +44,7 @@ openkal-macos = { version = "0.3.4", features = ["standalone"] }
 # runtime that receives control, and a C library configured for an environment
 # with no process to exit from. So this declares the implementation and stops.
 [target.'cfg(os = "none")'.dependencies]
-openkal-opensbi = { version = "0.1.5", features = ["standalone"] }
+openkal-opensbi = { version = "0.2.0", features = ["standalone"] }
 
 # ⭐ WHICH OPENKAL INTERFACES THE IMPLEMENTATION BENEATH IS EXPECTED TO PROVIDE.
 #
@@ -69,7 +69,7 @@ openkal-opensbi = { version = "0.1.5", features = ["standalone"] }
 defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
 
 [target.'cfg(windows)'.dependencies]
-openkal-windows = { version = "0.1.5", features = ["standalone"] }
+openkal-windows = { version = "0.2.0", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #
@@ -148,6 +148,59 @@ sources = [
   # What the file provides is `__riscv_flush_icache`, which a program above
   # openkal reaches through openkal.exec instead.
   "!musl/src/linux/cache.c",
+
+  # --- FACILITIES WITHHELD SO THAT THEIR ABSENCE IS A LINK ERROR -----------
+  #
+  # Below this line the exclusions answer a different question from the ones
+  # above. Those replace a source this port supplies itself. These withhold a
+  # source whose facility openkal does not have and is not going to have, so that
+  # a program requiring it is refused when it is BUILT rather than when it runs.
+  #
+  # Clause 6.2 states the principle: the absence of an operation is expressed by
+  # the absence of its definition. `mcpplibs/tinyhttps` --- a package in mcpp's
+  # own index --- built successfully against this port and failed at its
+  # twenty-seventh test, which is what a run-time refusal costs.
+  #
+  # ⚠️⚠️ THE LIST IS MUCH SHORTER THAN THE PRINCIPLE, AND THE REASON IS MEASURED
+  # RATHER THAN CONSERVATIVE.
+  #
+  # Withholding a family only works when nothing else in musl reaches it. Each
+  # candidate was checked for consumers outside its own directory:
+  #
+  #     timerfd eventfd signalfd inotify epoll     0 consumers   withheld
+  #     select                                     1: network/res_msend.c
+  #     network        syslog.c, nscd_query.c, mq_notify.c   -> getpwnam
+  #     fork           forkpty.c, wordexp.c, daemon.c,
+  #                    linux/clone.c                         -> pthread_create
+  #
+  # The fork closure terminates at the THREAD implementation and the network
+  # closure at the password functions. Withholding either takes an essential or
+  # an ordinary facility with it, so neither is withheld.
+  #
+  # ⚠️ AND THE MECHANISM HAS A PRECONDITION THIS PACKAGE MEETS ON ONE TARGET OF
+  # FOUR. `-ffunction-sections` with `-Wl,--gc-sections` is what makes an
+  # unreferenced definition cost nothing, and only `cfg(os = "linux")` sets those
+  # ldflags. On the mingw target the objects are kept, so `daemon` and `wordexp`
+  # took the build down while the same list passed here:
+  #
+  #     musl/src/legacy/daemon.c:18: undefined reference to `fork'
+  #
+  # ⭐ SO WITHHOLDING THE NETWORK FAMILY IS NOT REFUSED, IT IS NOT YET POSSIBLE.
+  # It becomes possible once every target collects unreferenced sections ---
+  # `--gc-sections` for the ELF and PE linkers, `-dead_strip` for this system's
+  # --- and that is a change to the link line of three targets, testable on its
+  # own, rather than something to attach here.
+  #
+  # What remains withheld are the five whose closure is empty on every target.
+  # ⚠️ THEY GO TOGETHER WITH THEIR REASON: a descriptor that is created and never
+  # becomes ready is worse than one that cannot be created, because a program
+  # waiting on it waits for ever with nothing to report.
+  "!musl/src/linux/timerfd.c",
+  "!musl/src/linux/eventfd.c",
+  "!musl/src/linux/signalfd.c",
+  "!musl/src/linux/inotify.c",
+  "!musl/src/linux/epoll.c",
+
   "port/src/*.c",
   "port/src/*.S",
 ]
@@ -194,6 +247,37 @@ include_dirs = [
   "musl/src/internal",
   "musl-generated/internal",
   "musl/include",
+]
+
+# ⭐⭐ THE FIRST-BEST REMEDY, WHICH port/include/features.h SAID WAS NOT
+# AVAILABLE AND NOW IS.
+#
+# That file records the measurement of 2026-08-22: "The first would be for a
+# package to distinguish the directories it is BUILT FROM from the directories
+# it PUBLISHES. Measured: mcpp cannot express it — publicUsage takes
+# privateBuild's include directories entire."
+#
+# It can now. `private_include_dirs` names the entries OF `include_dirs` that
+# stop at this package's boundary, so musl's internal overlay reaches musl's
+# own sources and reaches no consumer.
+#
+# ⚠️ A SUBSET OF THE LIST ABOVE RATHER THAN A LIST OF ITS OWN, and that is the
+# point: the ORDER is load-bearing. `port/include` must precede the
+# architecture's directory, and the internal overlay must precede
+# `musl/include` — moving these three to the end makes musl's own build find
+# the public <features.h> first and fail with `unknown type name hidden`.
+# The one ordered list stays the one ordered list.
+#
+# ⚠️ THIS DOES NOT REPLACE `OKM_MUSL_INTERNAL`. That answers a different
+# question — "is this package the one compiling this unit" — and it is what
+# keeps the macros inert for a C consumer that IS built with these directories
+# on its line (compiler-rt, when a board builds it here). The two are the
+# authorship axis and the visibility axis; removing either brings back a defect
+# that has already been measured.
+private_include_dirs = [
+  "musl/src/include",
+  "musl/src/internal",
+  "musl-generated/internal",
 ]
 
 cflags = [

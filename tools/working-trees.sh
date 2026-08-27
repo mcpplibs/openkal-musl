@@ -129,6 +129,17 @@ native() {
 }
 specification="$(native "$beside/openkal")"
 
+# ⚠️ THE REWRITE IS PERMANENT AND IS MEANT TO BE. This runs in a checkout that
+# is thrown away, and the manifests must keep naming the working trees for the
+# rest of the job, so there is no trap restoring them.
+#
+# THE CONSEQUENCE FALLS ON WHOEVER RUNS IT BY HAND. A local run leaves this
+# repository's manifest naming absolute paths on that machine, and committing
+# that publishes them: a consumer resolving from the index is handed a manifest
+# pointing at a directory that exists nowhere. That has happened once. The
+# workflow asserts against it rather than relying on this note, because a note
+# is read by whoever already knows.
+#
 # A package may be reached by a path or by a version and not by both at once, so
 # every manifest that reaches openkal is rewritten and not only this one.
 #
