@@ -190,6 +190,49 @@ jobs:
                  grep kal_random syms.txt; exit 1; }
           echo "  ok  kal_random_fill is weak, kal_time_sleep is strong"
 
+      # ⭐⭐ THE INTERNAL OVERLAY STOPS AT THIS PACKAGE'S BOUNDARY.
+      #
+      # musl reaches its own declarations through `src/include`, whose headers
+      # define `hidden`, `weak` and `weak_alias` — names that mean something
+      # only to musl's own sources. This package publishes the path it is built
+      # from, so every consumer used to see them too, and which consumer broke
+      # on which name was found one at a time (openkal-musl#13).
+      #
+      # `[build] private_include_dirs` (mcpp 2026.8.27.1) says which entries of
+      # `include_dirs` stop here. This asserts the DIRECTORY is absent from a
+      # consumer's command line — not that one macro no longer collides, which
+      # would go green again the moment the package patched that macro while
+      # the leak stayed.
+      - name: What this package is built from is not what it publishes
+        working-directory: examples/cross-hello
+        run: |
+          extra=''
+          [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
+          "$MCPP" build --toolchain '${{ matrix.toolchain }}' $extra
+          test -s compile_commands.json \
+            || { echo "::error::no compile_commands.json — nothing to check"; exit 1; }
+
+          # ⚠️ A DENOMINATOR. With no consumer row the greps below are
+          # vacuously true, which is the false green this check must not have.
+          rows="$(grep -c '"file"' compile_commands.json || true)"
+          [ "${rows:-0}" -ge 1 ] \
+            || { echo "::error::compile_commands.json has no rows"; exit 1; }
+
+          bad=0
+          for d in musl/src/include musl/src/internal musl-generated/internal; do
+            if grep -q -- "$d" compile_commands.json; then
+              echo "::error::the internal overlay '$d' reached a consumer"
+              bad=1
+            fi
+          done
+          # The control: a PUBLIC directory must still be there, or this check
+          # would pass for a build that published nothing at all.
+          grep -q -- 'port/include' compile_commands.json \
+            || { echo "::error::no public include directory reached the consumer — the check above proves nothing"
+                 exit 1; }
+          [ "$bad" = 0 ] || exit 1
+          echo "  ok  the internal overlay stops here; the public headers do not"
+
       # A program above this package names one package. It does not name
       # openkal, it does not name an implementation, and it says nothing about
       # the platform.

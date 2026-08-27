@@ -196,6 +196,37 @@ include_dirs = [
   "musl/include",
 ]
 
+# ⭐⭐ THE FIRST-BEST REMEDY, WHICH port/include/features.h SAID WAS NOT
+# AVAILABLE AND NOW IS.
+#
+# That file records the measurement of 2026-08-22: "The first would be for a
+# package to distinguish the directories it is BUILT FROM from the directories
+# it PUBLISHES. Measured: mcpp cannot express it — publicUsage takes
+# privateBuild's include directories entire."
+#
+# It can now. `private_include_dirs` names the entries OF `include_dirs` that
+# stop at this package's boundary, so musl's internal overlay reaches musl's
+# own sources and reaches no consumer.
+#
+# ⚠️ A SUBSET OF THE LIST ABOVE RATHER THAN A LIST OF ITS OWN, and that is the
+# point: the ORDER is load-bearing. `port/include` must precede the
+# architecture's directory, and the internal overlay must precede
+# `musl/include` — moving these three to the end makes musl's own build find
+# the public <features.h> first and fail with `unknown type name hidden`.
+# The one ordered list stays the one ordered list.
+#
+# ⚠️ THIS DOES NOT REPLACE `OKM_MUSL_INTERNAL`. That answers a different
+# question — "is this package the one compiling this unit" — and it is what
+# keeps the macros inert for a C consumer that IS built with these directories
+# on its line (compiler-rt, when a board builds it here). The two are the
+# authorship axis and the visibility axis; removing either brings back a defect
+# that has already been measured.
+private_include_dirs = [
+  "musl/src/include",
+  "musl/src/internal",
+  "musl-generated/internal",
+]
+
 cflags = [
   # musl is written to C99 and to nothing else. -nostdinc is not an
   # optimisation: a C library that included the headers of another C library
