@@ -22,6 +22,8 @@
  * environment supplied, not of the program's cooperation.
  */
 #include "okm.h"
+/* For kal_process_channel_close: a channel end is owned and is released here. */
+#include <openkal/process.h>
 #include "okm_opt.h"
 
 #include <errno.h>
@@ -91,6 +93,19 @@ static void desc_release(int d)
 	struct okm_desc* p = &g_desc[d];
 	if (p->kind == OKM_FILE) okm_fs_close_file(p->file);
 	else if (p->kind == OKM_DIR) okm_fs_close_dir(p->dir);
+	/* ⚠️ A CHANNEL END IS OWNED AND A STREAM IS NOT, WHICH IS WHY THEY ARE TWO
+	 * KINDS. openkal draws the same division: the three standard streams are
+	 * borrowed and have no release, while a channel end is obtained and must be
+	 * given back.
+	 *
+	 * Closing nothing here is what a borrowed stream requires and what a channel
+	 * end cannot tolerate. Measured before this kind existed: a program that
+	 * wrote to a pipe, closed the write end and read again waited for ever,
+	 * because the end it closed was still open. */
+	else if (p->kind == OKM_CHANNEL) {
+		struct kal_stream s; s.h = p->stream;
+		kal_process_channel_close(s);
+	}
 	if (p->path_slot >= 0) g_dirpath_used[p->path_slot] = 0;
 	p->kind = OKM_FREE; p->iter = 0; p->iter_open = 0; p->path_slot = -1;
 	p->pending = 0;

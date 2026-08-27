@@ -15,7 +15,7 @@ authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-musl"
 
 [dependencies]
-openkal = "0.8.0"
+openkal = { path = "/home/speak/workspace/github/mcpplibs/openkal" }
 
 # An ordinary consumer of openkal declares the specification and leaves the
 # choice of implementation to whoever builds the program, which is what the
@@ -30,7 +30,7 @@ openkal = "0.8.0"
 #
 # The consequence for a program is that it names this package and nothing else.
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = { version = "0.6.0", features = ["standalone"] }
+openkal-linux = { path = "/home/speak/workspace/github/mcpplibs/openkal-linux", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
 openkal-macos = { version = "0.4.0", features = ["standalone"] }
@@ -174,13 +174,23 @@ sources = [
   # references is discarded rather than demanded. A program that does not call
   # `socket` links as it did before; one that calls it does not link at all, and
   # the diagnostic names the symbol.
+  # ⓘ `pipe` IS NOT ON THIS LIST, AND WAS, UNTIL openkal 0.8. A pipe is exactly
+  # what `kal_process_channel` provides --- a pair of streams of which one end
+  # crosses a spawn --- so it is no longer a facility openkal will never have,
+  # and the port supplies it from that interface rather than withholding it.
+  #
+  # ⚠️ The closure said so before the reasoning did. Excluding it broke
+  # `faccessat`, which forks and reports the answer back through a pipe:
+  #
+  #     ld64.lld: error: undefined symbol: pipe2
+  #     >>> referenced by faccessat.c:45
+  #
+  # An exclusion that takes an ordinary function with it is the wrong exclusion.
   "!musl/src/network/*.c",
   "!musl/src/select/*.c",
   "!musl/src/process/fork.c",
   "!musl/src/process/vfork.c",
   "!musl/src/process/_Fork.c",
-  "!musl/src/unistd/pipe.c",
-  "!musl/src/unistd/pipe2.c",
   "!musl/src/stat/chmod.c",
   "!musl/src/stat/fchmod.c",
   "!musl/src/stat/fchmodat.c",

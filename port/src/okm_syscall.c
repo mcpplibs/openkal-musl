@@ -25,6 +25,9 @@
 #include "okm.h"
 #include "okm_opt.h"
 #include <openkal/random.h>
+/* For pipe and pipe2, which are kal_process_channel. Included here rather than
+ * through okm.h because this is the only source that reaches for it. */
+#include <openkal/process.h>
 /* Weak, for the reason given at SYS_getrandom below: the interface is
  * optional, and an implementation that does not provide it is absent as a
  * definition rather than present and refusing. */
@@ -63,7 +66,9 @@ static syscall_arg_t stream_of(int fd, kal_uintptr* out)
 {
 	struct okm_desc* d = okm_desc_of(fd);
 	if (!d) return -EBADF;
-	if (d->kind == OKM_STREAM || d->kind == OKM_FILE) { *out = d->stream; return 0; }
+	if (d->kind == OKM_STREAM || d->kind == OKM_CHANNEL || d->kind == OKM_FILE) {
+		*out = d->stream; return 0;
+	}
 	return -EISDIR;
 }
 
@@ -214,6 +219,12 @@ static syscall_arg_t do_fstat(int fd, struct kstat* st)
 		struct kal_stream s; s.h = d->stream;
 		st->st_mode = (kal_stream_props(s) & KAL_STREAM_PROP_INTERACTIVE)
 		            ? (S_IFCHR | 0620u) : (S_IFIFO | 0600u);
+	} else if (d->kind == OKM_CHANNEL) {
+		/* A channel end is a pipe and is never a terminal, so it is reported as
+		 * one without asking. Asking would be answered correctly too; not
+		 * asking states that the answer is a property of the kind rather than
+		 * of the resource. */
+		st->st_mode = S_IFIFO | 0600u;
 	}
 	return 0;
 }
@@ -453,6 +464,62 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * The offsets are optional and, when given, are updated rather than the
 	 * descriptors' own positions. Both forms occur: std::filesystem passes
 	 * offsets, and a caller copying sequentially passes none. */
+	/* pipe and pipe2, upon kal_process_channel.
+	 *
+	 * ⭐ THIS BECAME POSSIBLE IN openkal 0.8 AND WAS NOT BEFORE. A pipe is a
+	 * pair of streams of which one end is meant to cross a spawn, which is
+	 * exactly what that interface provides and what openkal previously had no
+	 * way to express. Until then `pipe` belonged with the facilities the port
+	 * withholds; now it is supplied like any other.
+	 *
+	 * ⚠️ AND THE CLOSURE SAID SO BEFORE THE REASONING DID. Withholding it broke
+	 * `faccessat`, which forks and reports its answer back through a pipe:
+	 *
+	 *     ld64.lld: error: undefined symbol: pipe2
+	 *     >>> referenced by faccessat.c:45
+	 *
+	 * An exclusion that takes an ordinary function with it is the wrong
+	 * exclusion, and that was the first evidence that this one had become so.
+	 *
+	 * The two ends are bound as ordinary stream descriptors, so read, write,
+	 * close, dup and poll reach them through the paths they already take. */
+	case SYS_pipe:
+	case SYS_pipe2: {
+		int* out = (int*)a1;
+		const int flags = (n == SYS_pipe2) ? (int)a2 : 0;
+		if (!out) return -EFAULT;
+		/* O_DIRECT would ask for packet boundaries, which a stream does not
+		 * have. Refusing is the honest answer; silently ignoring it would give
+		 * a caller a byte stream where it asked for messages. */
+		if (flags & ~(O_CLOEXEC | O_NONBLOCK)) return -EINVAL;
+
+		struct kal_stream mine, theirs;
+		const int e = kal_process_channel(&mine, &theirs);
+		if (e != kal_ok) return -okm_errno(e);
+
+		okm_lock();
+		const int rfd = okm_fd_alloc(0);
+		if (rfd < 0) { okm_unlock();
+		               kal_process_channel_close(mine);
+		               kal_process_channel_close(theirs);
+		               return rfd; }
+		struct kal_file nof = { 0 };
+		struct kal_dir  nod = { 0 };
+		okm_fd_bind(rfd, OKM_CHANNEL, mine.h, nof, nod, O_RDONLY | (flags & O_NONBLOCK));
+
+		const int wfd = okm_fd_alloc(0);
+		if (wfd < 0) { okm_unlock();
+		               kal_process_channel_close(theirs);
+		               return wfd; }
+		okm_fd_bind(wfd, OKM_CHANNEL, theirs.h, nof, nod, O_WRONLY | (flags & O_NONBLOCK));
+
+		if (flags & O_CLOEXEC) { okm_fd_cloexec(rfd, 1); okm_fd_cloexec(wfd, 1); }
+		okm_unlock();
+
+		out[0] = rfd;
+		out[1] = wfd;
+		return 0;
+	}
 	case SYS_copy_file_range: {
 		const int fd_in = (int)a1, fd_out = (int)a3;
 		int64_t* off_in  = (int64_t*)a2;
@@ -823,7 +890,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_ioctl: {
 		struct okm_desc* d = okm_desc_of((int)a1);
 		if (!d) return -EBADF;
-		if (d->kind == OKM_STREAM || d->kind == OKM_FILE) {
+		if (d->kind == OKM_STREAM || d->kind == OKM_CHANNEL || d->kind == OKM_FILE) {
 			struct kal_stream s; s.h = d->stream;
 			const int interactive =
 				(d->kind == OKM_STREAM) &&
