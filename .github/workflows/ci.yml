@@ -283,90 +283,63 @@ jobs:
       # consumer's command line — not that one macro no longer collides, which
       # would go green again the moment the package patched that macro while
       # the leak stayed.
-      # A FACILITY WHOSE ABSENCE IS A LINK ERROR STAYS ABSENT, AND ONE THAT IS
-      # NOT WITHHELD STAYS PRESENT.
+      # WHAT IS WITHHELD IS NOT DEFINED BY THIS PACKAGE, AND WHAT IS NOT
+      # WITHHELD IS.
       #
-      # The port withholds five sources so that a program requiring them is
-      # refused when it is built rather than when it runs. The list is short and
-      # the manifest records why: withholding a family only works when nothing
-      # else in musl reaches it, and the network and process families are reached
-      # from the password functions and from the thread implementation.
+      # ⚠️⚠️ THE CRITERION IS THE PACKAGE'S OWN OBJECTS, NOT A PROGRAM'S LINK.
       #
-      # ⚠️ THE MECHANISM ALSO HAS A PRECONDITION THIS PACKAGE MEETS ON ONE TARGET
-      # OF FOUR --- only `cfg(os = "linux")` collects unreferenced sections ---
-      # which is why this check runs on Linux and states that limitation rather
-      # than implying the property holds everywhere.
+      # It was a program's link, and that measured the wrong thing. Under one
+      # toolchain the probe built successfully for symbols this package does not
+      # define at all --- something else on the link line supplied them --- so
+      # the check reported "did not fail at the link" for a facility that had in
+      # fact been withheld. A program's link is closed over this port only when
+      # nothing else answers, and that is a property of the toolchain rather than
+      # of this package.
       #
-      # THE CRITERION IS TWO-DIRECTIONAL AND NEITHER HALF IS SUFFICIENT.
-      # Asserting only the absences would pass for a port that had stopped
-      # linking anything; asserting only the presences would pass for the defect
-      # the withholding exists to prevent.
-      - name: What is withheld is absent, and what is not withheld is present
+      # A definition either is in these objects or is not. That holds under every
+      # toolchain and cannot be satisfied by a host C library.
+      #
+      # ⚠️ AND THE OBJECTS ARE SCOPED TO ONE FINGERPRINT DIRECTORY. `target/`
+      # accumulates one per configuration, so a search across all of them reads
+      # definitions from a build made before the change --- which is how this
+      # check first reported every withheld symbol as still present.
+      - name: What is withheld is not defined, and what is not withheld is
         if: runner.os == 'Linux' && matrix.target == ''
         run: |
           set -euo pipefail
-          probe() {   # name, includes, body -> the undefined symbol, or nothing
-            local d; d="$(mktemp -d)"
-            mkdir -p "$d/src"
-            cat > "$d/mcpp.toml" <<TOML
-          [package]
-          name    = "probe"
-          version = "0.1.0"
-          [dependencies]
-          openkal-musl = { path = "$PWD" }
-          [targets.probe]
-          kind = "bin"
-          main = "src/main.c"
-          [build]
-          cxx_runtime = "host-coupled"
-          TOML
-            sed -i 's/^          //' "$d/mcpp.toml"
-            printf '%s\nint main(void){ %s return 0; }\n' "$2" "$3" > "$d/src/main.c"
-            ( cd "$d" && mcpp build 2>&1 ) \
-              | grep -oE "undefined reference to .[a-z_0-9]+." | head -1 || true
-            rm -rf "$d"
+          fps=$(ls -d target/*/*/ 2>/dev/null | wc -l)
+          [ "$fps" = 1 ] || { echo "::error::expected one fingerprint directory under target/, found $fps"
+                              ls -d target/*/*/ 2>/dev/null | sed 's/^/        /'
+                              exit 1; }
+          objs=$(find target -name '*.o')
+          n=$(printf '%s\n' "$objs" | grep -c . || true)
+          echo "  examining $n objects in $(ls -d target/*/*/)"
+          [ "$n" -gt 100 ] || { echo "::error::only $n objects; nothing was examined"; exit 1; }
+
+          defines() {   # symbol -> the number of definitions in these objects
+            nm $objs 2>/dev/null | grep -cE "^[0-9a-f]+ [TWi] $1\$" || true
           }
 
           fail=0
-
-          # Withheld, and the diagnostic names the symbol.
-          for spec in \
-            "epoll_create1|#include <sys/epoll.h>|int e = epoll_create1(0); (void)e;" \
-            "eventfd|#include <sys/eventfd.h>|int e = eventfd(0,0); (void)e;" \
-            "timerfd_create|#include <sys/timerfd.h>|int t = timerfd_create(0,0); (void)t;" \
-            "inotify_init|#include <sys/inotify.h>|int i = inotify_init(); (void)i;" ; do
-            n="${spec%%|*}"; rest="${spec#*|}"; inc="${rest%%|*}"; body="${rest#*|}"
-            got="$(probe "$n" "$inc" "$body")"
-            case "$got" in
-              *"$n"*) echo "  withheld, absent at the link: $n" ;;
-              *) echo "::error::$n did not fail at the link; got: ${got:-a successful build}"
-                 fail=1 ;;
-            esac
+          for s in epoll_create1 eventfd timerfd_create inotify_init signalfd; do
+            d=$(defines "$s")
+            if [ "$d" = 0 ]; then echo "  withheld, not defined: $s"
+            else echo "::error::$s is withheld and yet defined $d time(s)"; fail=1; fi
           done
 
-          # Not withheld, and therefore present. Without this the check above
-          # would pass for a port that linked nothing at all. `pipe` is here
-          # because openkal 0.8 made it expressible and it moved off the list;
-          # `faccessat` because withholding `pipe` had taken it with it.
-          for spec in \
-            "printf|#include <stdio.h>|printf(\"x\\n\");" \
-            "malloc|#include <stdlib.h>|void* p=malloc(8); free(p);" \
-            "open|#include <fcntl.h>|int f=open(\"x\",0); (void)f;" \
-            "pipe|#include <unistd.h>|int f[2]; pipe(f);" \
-            "faccessat|#include <unistd.h>|faccessat(AT_FDCWD,\".\",F_OK,0);" \
-            "chmod|#include <sys/stat.h>|chmod(\"x\",0644);" ; do
-            n="${spec%%|*}"; rest="${spec#*|}"; inc="${rest%%|*}"; body="${rest#*|}"
-            got="$(probe "$n" "$inc" "$body")"
-            if [ -n "$got" ]; then
-              echo "::error::$n stopped linking, which nothing here may do: $got"
-              fail=1
-            else
-              echo "  still linked: $n"
-            fi
+          # The other half. Without it the check above would pass for a package
+          # that had stopped compiling anything at all. `pipe` is here because
+          # openkal 0.8 made it expressible; `socket` and `fork` because their
+          # closures reach the password functions and the thread implementation,
+          # so they are deliberately NOT withheld and the manifest says why.
+          for s in printf malloc open pipe faccessat chmod socket fork; do
+            d=$(defines "$s")
+            if [ "$d" -ge 1 ]; then echo "  defined here: $s"
+            else echo "::error::$s is not withheld and yet is not defined"; fail=1; fi
           done
 
           [ "$fail" = 0 ] || exit 1
-          echo "  ok  what is withheld is absent, and nothing else moved"
+          echo "  ok  the withheld set is exactly what the manifest names"
 
       - name: What this package is built from is not what it publishes
         working-directory: examples/cross-hello
