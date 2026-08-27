@@ -135,9 +135,23 @@ library for it does. It is here rather than beneath because openkal is
 deliberately literal about names: it passes on the name it was given and does
 not know that a program is a kind of file.
 
-`fork` is absent and stays absent. Duplicating a running image is not something
-every environment can produce. `posix_spawn`, and therefore `system` and
-`popen`, are supplied, because musl builds them on starting a program.
+`fork` is **composed here** rather than required beneath, and this paragraph
+used to say it was absent and would stay absent. `openkal.space` starts a
+context in a *copy of the calling address space* and stops there: the started
+context begins at a function the caller names, not at the instruction the caller
+was executing, because that is what can be stated in a C application binary
+interface at all. `fork` returns twice, so the second half is this port's ---
+`setjmp` before the call, `longjmp` in the copy. The specification's own
+`space.h` describes that composition and says in terms that it belongs above the
+line; `port/src/okm_fork.c` is where it is.
+
+⚠️ **A caller can tell two things.** The copy's per-context identity is not
+necessarily the original's --- `kal_task_current()` promises uniqueness among
+contexts running at the same moment and says nothing about a copy, and the two
+implementations answer differently --- so this port rebinds the copy's slot
+before anything reads per-context state. And the copy's view of the table of
+started programs is cleared, because POSIX is explicit that a duplicate has no
+children and the table lives in this port's own memory.
 
 ### The fifteen indirect symbols
 
@@ -210,6 +224,41 @@ that false positive; the linker did.**
 So the whole of what this system supplies to a program built above this package
 is two names, and a stub naming them is eight lines of text. `openkal-macos`
 carries it as `port/libSystem.tbd`.
+
+## Four more, added with the socket, datagram and readiness routes
+
+**`connect` completes before it returns, even upon a non-blocking descriptor.**
+`kal_net_connect` completes or fails; openkal has no form that begins a
+connection and reports its outcome later, and clause 6.3 records readiness
+notification among the mechanisms considered and not adopted. A port that
+returned `EINPROGRESS` would be promising a completion nothing can report: a
+caller would then poll for `POLLOUT`, be told ready, ask `SO_ERROR` and be told
+zero, all of it invented. What a non-blocking caller loses is the overlap, not
+the outcome.
+
+**`POLLOUT` is reported without an enquiry.** openkal has no operation that
+reports whether a write would proceed, and a bounded write bounds the *wait* and
+not the *transfer* --- `openkal/include/openkal/timeout.h` says so in terms. So
+a program that polls for `POLLOUT` to avoid blocking may still block in the
+write. Reporting the descriptor as never writable would be worse: nothing would
+proceed at all.
+
+**`POLLIN` is answered by taking the input and keeping it.** There is no
+non-destructive readiness enquiry to make, so `poll` performs a bounded transfer
+and holds what it produced --- one byte from a stream, one connection from a
+listener, one message from a datagram endpoint --- for the operation that
+follows. A caller can tell in one way: a `read` after a `poll` may report **one
+byte** where a kernel would have given it everything that had arrived. A short
+read is a result every caller of `read` already handles, and this port answers
+`getdents` the same way and for the same reason.
+
+**`O_NONBLOCK` costs one granularity of the environment beneath.** openkal
+spells "no bound" as zero, so a non-blocking operation is expressed as the
+*smallest* bound rather than as none --- one nanosecond, which an environment
+rounds up to what its clock distinguishes (a millisecond on openkal-linux). A
+caller that sets `O_NONBLOCK` and finds nothing to read waits that long rather
+than not at all. Where the environment provides no `openkal.timeout`,
+`O_NONBLOCK` is **refused** rather than accepted and ignored.
 
 ## What the architecture does not decide alone
 
