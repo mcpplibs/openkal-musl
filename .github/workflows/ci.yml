@@ -85,34 +85,6 @@ jobs:
           else
             xlings install "mcpp@$MCPP_VERSION" -y -g
           fi
-          # ⚠️⚠️ TRANSITION: GIVE THE BOOTSTRAP THE glibc ITS BINDING NAMES.
-          #
-          # `xim:glibc`'s `latest` moved from `2.44` to `2.44.2`. A payload
-          # directory is named after the version a request RESOLVED to, while a
-          # RuntimeBinding carries the version that was DECLARED — and the xlings
-          # a released mcpp vendors into its own sandbox still declares `2.44`.
-          # So a clean machine installs `2.44.2`, the toolchain fixup asks for
-          # `2.44`, and the build stops before anything is compiled:
-          #
-          #     error: selected RuntimeBinding glibc@2.44 requires payload
-          #            '…/xpkgs/xim-x-glibc/2.44', but it is not installed
-          #
-          # ⚠️ On every NEW machine and on none that already existed, which is why
-          # it is invisible from a developer's own. Measured on `main` as readily
-          # as on any branch — the index records the same failure verbatim in
-          # `pkgs/g/glibc.lua` and states the rule it broke: "The index is DATA
-          # and the client is a PROGRAM: the consumer ships first."
-          #
-          # ⭐ REMOVE THIS once a released mcpp resolves it. `mcpp 2026.8.27.1`
-          # accepts an installed payload whose version REFINES the requested one
-          # (`payload_dir_for_version`), so a bootstrap from it needs nothing
-          # here. Until then the missing payload is simply installed.
-          if [ -x "$HOME/.mcpp/registry/bin/xlings" ]; then
-            XLINGS_HOME="$HOME/.mcpp/registry" XLINGS_NON_INTERACTIVE=1 \
-              "$HOME/.mcpp/registry/bin/xlings" install glibc@2.44 -y -g \
-              >/dev/null 2>&1 || true
-            echo "glibc payloads present: $(ls "$HOME/.mcpp/registry/data/xpkgs/xim-x-glibc" 2>/dev/null | tr '\n' ' ')"
-          fi
           mcpp --version
           mcpp self config --mirror GLOBAL
           # ⭐⭐ CROSS-VALIDATION: BUILD THE mcpp UNDER REVIEW AND USE THAT ONE.
@@ -286,6 +258,83 @@ jobs:
       # consumer's command line — not that one macro no longer collides, which
       # would go green again the moment the package patched that macro while
       # the leak stayed.
+      # WHAT openkal WILL NEVER HAVE IS A LINK ERROR, NOT A RUN-TIME ONE.
+      #
+      # A backend that does not provide openkal.fs makes `open` fail at run
+      # time, and that is correct: another backend does provide it. `socket` is
+      # not like that --- no openkal implementation provides one, because the
+      # specification has no interface that would carry it. Reporting a
+      # permanent fact as a run-time condition made it discoverable only by
+      # running: mcpplibs/tinyhttps built successfully against this port and
+      # failed at its twenty-seventh test.
+      #
+      # THE CRITERION IS TWO-DIRECTIONAL AND NEITHER HALF IS OPTIONAL. Asserting
+      # only that `socket` fails would pass for a port that had stopped linking
+      # anything at all; asserting only that ordinary programs link would pass
+      # for the defect this replaced.
+      - name: A facility openkal will never have is absent at the link
+        if: runner.os == 'Linux' && matrix.target == ''
+        run: |
+          set -euo pipefail
+          probe() {   # name, includes, body -> prints the undefined symbol, or nothing
+            local d; d="$(mktemp -d)"
+            mkdir -p "$d/src"
+            cat > "$d/mcpp.toml" <<TOML
+          [package]
+          name    = "probe"
+          version = "0.1.0"
+          [dependencies]
+          openkal-musl = { path = "$PWD" }
+          [targets.probe]
+          kind = "bin"
+          main = "src/main.c"
+          [build]
+          cxx_runtime = "host-coupled"
+          TOML
+            sed -i 's/^          //' "$d/mcpp.toml"
+            printf '%s\nint main(void){ %s return 0; }\n' "$2" "$3" > "$d/src/main.c"
+            ( cd "$d" && mcpp build 2>&1 ) \
+              | grep -oE "undefined reference to .[a-z_0-9]+." | head -1 || true
+            rm -rf "$d"
+          }
+
+          fail=0
+
+          # Absent, and the diagnostic names the symbol.
+          for spec in \
+            "socket|#include <sys/socket.h>|int s = socket(AF_INET, SOCK_STREAM, 0); (void)s;" \
+            "fork|#include <unistd.h>|if (fork()==0) return 1;" \
+            "poll|#include <poll.h>|struct pollfd p={0,1,0}; poll(&p,1,0);" \
+            "pipe|#include <unistd.h>|int f[2]; pipe(f);" \
+            "chmod|#include <sys/stat.h>|chmod(\"x\",0644);" ; do
+            n="${spec%%|*}"; rest="${spec#*|}"; inc="${rest%%|*}"; body="${rest#*|}"
+            got="$(probe "$n" "$inc" "$body")"
+            case "$got" in
+              *"$n"*) echo "  absent at the link: $n" ;;
+              *) echo "::error::$n did not fail at the link; got: ${got:-a successful build}"
+                 fail=1 ;;
+            esac
+          done
+
+          # And the reverse: an ordinary program is unaffected. Without this the
+          # check above would pass for a port that linked nothing.
+          for spec in \
+            "printf|#include <stdio.h>|printf(\"x\\n\");" \
+            "malloc|#include <stdlib.h>|void* p=malloc(8); free(p);" \
+            "open|#include <fcntl.h>|int f=open(\"x\",0); (void)f;" ; do
+            n="${spec%%|*}"; rest="${spec#*|}"; inc="${rest%%|*}"; body="${rest#*|}"
+            got="$(probe "$n" "$inc" "$body")"
+            if [ -n "$got" ]; then
+              echo "::error::$n stopped linking, which this change must not do: $got"
+              fail=1
+            else
+              echo "  still linked: $n"
+            fi
+          done
+
+          [ "$fail" = 0 ] || exit 1
+          echo "  ok  a permanent absence is a link error, and nothing else moved"
+
       - name: What this package is built from is not what it publishes
         working-directory: examples/cross-hello
         run: |

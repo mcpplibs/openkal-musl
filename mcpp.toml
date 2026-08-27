@@ -148,6 +148,56 @@ sources = [
   # What the file provides is `__riscv_flush_icache`, which a program above
   # openkal reaches through openkal.exec instead.
   "!musl/src/linux/cache.c",
+
+  # --- WHAT openkal WILL NEVER HAVE, EXPRESSED AS A LINK ERROR ---------------
+  #
+  # Below this line the exclusions answer a different question from the ones
+  # above. Those replace a source this port supplies itself. These withhold a
+  # source whose facility openkal does not have and is not going to have.
+  #
+  # THE TWO WERE BEING ANSWERED WITH ONE ENOSYS, AND THEY ARE NOT THE SAME FACT.
+  # A backend that does not provide `openkal.fs` makes `open` fail at run time,
+  # and that is correct: another backend does provide it, so the condition is a
+  # property of this deployment. `socket` is not like that. No openkal
+  # implementation provides a socket, because the specification has no interface
+  # that would carry one; the fact is permanent and independent of the backend.
+  #
+  # Reporting a permanent fact as a run-time condition made it discoverable only
+  # by running. `mcpplibs/tinyhttps` --- a package in mcpp's own index --- BUILT
+  # SUCCESSFULLY against this port and failed at its twenty-seventh test. Clause
+  # 6.2 states the remedy: the absence of an operation is expressed by the
+  # absence of its definition, so that a program requiring one is refused when
+  # it is built.
+  #
+  # ⓘ The granularity is exact because of two flags this package already sets:
+  # `-ffunction-sections` with `-Wl,--gc-sections` means a definition nobody
+  # references is discarded rather than demanded. A program that does not call
+  # `socket` links as it did before; one that calls it does not link at all, and
+  # the diagnostic names the symbol.
+  "!musl/src/network/*.c",
+  "!musl/src/select/*.c",
+  "!musl/src/process/fork.c",
+  "!musl/src/process/vfork.c",
+  "!musl/src/process/_Fork.c",
+  "!musl/src/unistd/pipe.c",
+  "!musl/src/unistd/pipe2.c",
+  "!musl/src/stat/chmod.c",
+  "!musl/src/stat/fchmod.c",
+  "!musl/src/stat/fchmodat.c",
+  "!musl/src/unistd/symlink.c",
+  "!musl/src/unistd/symlinkat.c",
+  "!musl/src/unistd/link.c",
+  "!musl/src/unistd/linkat.c",
+  # ⚠️ WITH `select`, NOT BESIDE IT. A descriptor that is created and never
+  # becomes ready is worse than one that cannot be created: a program waiting on
+  # it waits for ever with nothing to report, whereas a refused creation is a
+  # failure at a line the author wrote.
+  "!musl/src/linux/timerfd.c",
+  "!musl/src/linux/eventfd.c",
+  "!musl/src/linux/signalfd.c",
+  "!musl/src/linux/inotify.c",
+  "!musl/src/linux/epoll.c",
+
   "port/src/*.c",
   "port/src/*.S",
 ]

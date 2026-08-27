@@ -385,8 +385,6 @@ static syscall_arg_t do_wait4(int pid, int* status, int options, void* rusage)
 syscall_arg_t __okm_task_exit(int code);          /* okm_thread.c */
 syscall_arg_t __okm_futex(const int* addr, int op, int val, const struct timespec* t);
 
-static unsigned g_umask = 022;
-
 syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
                             syscall_arg_t a3, syscall_arg_t a4, syscall_arg_t a5,
                             syscall_arg_t a6)
@@ -435,6 +433,90 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		okm_fd_release((int)a1);
 		okm_unlock();
 		return 0;
+	}
+	/* copy_file_range, as a read-and-write loop.
+	 *
+	 * ONLY THIS ONE, AND NOT sendfile. libc++'s std::filesystem::copy_file
+	 * tries copy_file_range first and falls back on a list of errors that
+	 * INCLUDES ENOSYS; its fallback from sendfile accepts only EINVAL. So an
+	 * implementation providing neither reaches the stream fallback through the
+	 * first call, and one providing sendfile alone never gets there. Providing
+	 * this one is therefore both necessary and sufficient, and providing
+	 * sendfile as well would be unreachable code.
+	 *
+	 * A SHORT WRITE IS NOT A RESULT THIS RETURNS. openkal transfers a whole
+	 * buffer or reports what prevented it, so the loop below writes everything
+	 * it read before advancing, and a failure part-way is reported with the
+	 * count that had already been copied --- which is what the caller needs to
+	 * resume, and what the operation's own contract states.
+	 *
+	 * The offsets are optional and, when given, are updated rather than the
+	 * descriptors' own positions. Both forms occur: std::filesystem passes
+	 * offsets, and a caller copying sequentially passes none. */
+	case SYS_copy_file_range: {
+		const int fd_in = (int)a1, fd_out = (int)a3;
+		int64_t* off_in  = (int64_t*)a2;
+		int64_t* off_out = (int64_t*)a4;
+		size_t   want    = (size_t)a5;
+		const unsigned flags = (unsigned)a6;
+
+		if (flags != 0) return -EINVAL;   /* none are defined */
+		if (want == 0) return 0;
+
+		struct okm_desc* di = okm_desc_of(fd_in);
+		struct okm_desc* dobj = okm_desc_of(fd_out);
+		if (!di || !dobj) return -EBADF;
+		if (di->kind != OKM_FILE || dobj->kind != OKM_FILE) return -EINVAL;
+
+		/* When an offset is given the descriptor's own position is not to
+		 * move, so it is saved and put back. Seeking to learn it is the only
+		 * way to ask, which is why this is done once rather than per block. */
+		uint64_t keep_in = 0, keep_out = 0;
+		if (off_in) {
+			if (okm_fs_seek(di->file, 0, SEEK_CUR, &keep_in) != kal_ok) return -EIO;
+			if (okm_fs_seek(di->file, *off_in, SEEK_SET, &(uint64_t){0}) != kal_ok) return -EIO;
+		}
+		if (off_out) {
+			if (okm_fs_seek(dobj->file, 0, SEEK_CUR, &keep_out) != kal_ok) return -EIO;
+			if (okm_fs_seek(dobj->file, *off_out, SEEK_SET, &(uint64_t){0}) != kal_ok) return -EIO;
+		}
+
+		char block[8192];
+		size_t done = 0;
+		syscall_arg_t failure = 0;
+
+		while (done < want) {
+			size_t chunk = want - done;
+			if (chunk > sizeof block) chunk = sizeof block;
+
+			const syscall_arg_t got = do_read(fd_in, block, chunk);
+			if (got < 0) { failure = got; break; }
+			if (got == 0) break;                 /* end of input */
+
+			const syscall_arg_t put = do_write(fd_out, block, (size_t)got);
+			if (put < 0) { failure = put; break; }
+			done += (size_t)put;
+			if (put < got) { failure = -EIO; break; }
+		}
+
+		if (off_in) {
+			uint64_t now = 0;
+			okm_fs_seek(di->file, 0, SEEK_CUR, &now);
+			*off_in += (int64_t)done;
+			okm_fs_seek(di->file, (int64_t)keep_in, SEEK_SET, &now);
+		}
+		if (off_out) {
+			uint64_t now = 0;
+			okm_fs_seek(dobj->file, 0, SEEK_CUR, &now);
+			*off_out += (int64_t)done;
+			okm_fs_seek(dobj->file, (int64_t)keep_out, SEEK_SET, &now);
+		}
+
+		/* A failure after some bytes moved reports the bytes, not the failure:
+		 * the caller resumes from there, and reporting the error would lose
+		 * what had already been written. */
+		if (done > 0) return (syscall_arg_t)done;
+		return failure ? failure : 0;
 	}
 	case SYS_lseek: {
 		struct okm_desc* d = okm_desc_of((int)a1);
@@ -963,7 +1045,24 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * which takes a different path when privileged takes the ordinary one. */
 	case SYS_getuid: case SYS_geteuid: case SYS_getgid: case SYS_getegid:
 		return 1000;
-	case SYS_umask: { const syscall_arg_t old = g_umask; g_umask = (unsigned)a1 & 0777u; return old; }
+	/* SYS_umask is deliberately absent and falls to the default below.
+	 *
+	 * IT USED TO BE ANSWERED, AND THE ANSWER WAS A FICTION. A stored word was
+	 * updated and returned, and nothing else in this port ever read it: the
+	 * variable was written by this case and read by this case, and by nothing
+	 * else. openkal's kal_fs_open takes no mode argument, so there is no
+	 * creation for a mask to apply to.
+	 *
+	 * A caller therefore set a mask, was told the previous one, and observed
+	 * the next file it created ignore both. That is the one outcome okm_opt.h
+	 * forbids in terms: nothing here reports success having done nothing. It
+	 * is a harder defect than a wrong permission bit, because a wrong bit can
+	 * be argued about and an effect that does not exist cannot.
+	 *
+	 * Falling through means musl's umask() now reports ENOSYS. Most callers do
+	 * not check it, which is correct: the success they were getting was false,
+	 * and a program whose security rests upon a mask is better stopped by a
+	 * visible failure than served by one that does nothing. */
 	case SYS_uname: {
 		struct utsname* u = (struct utsname*)a1;
 		static const char* const parts[] = { "openkal", "openkal", "0.5.0", "openkal", 0 };
