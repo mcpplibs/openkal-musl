@@ -209,10 +209,32 @@ jobs:
       - name: An optional interface is referenced weakly
         if: runner.os == 'Linux'
         run: |
-          obj="$(find target -name okm_syscall.o | head -1)"
-          test -n "$obj" || { echo "::error::okm_syscall.o was not built"; exit 1; }
+          set -euo pipefail
+          # ⚠️ ONE FINGERPRINT DIRECTORY, ASSERTED BEFORE ANYTHING IS READ.
+          # `target/` accumulates one per configuration, and a search across all
+          # of them answers for a build that is not this one. The step that
+          # checks the withheld set already learned this; the assertion is made
+          # here for the same reason and not by reference to that one.
+          fps=$(ls -d target/*/*/ 2>/dev/null | wc -l)
+          [ "$fps" = 1 ] || { echo "::error::expected one fingerprint directory under target/, found $fps"
+                              ls -d target/*/*/ 2>/dev/null | sed 's/^/        /'
+                              exit 1; }
+
+          # ⚠️⚠️ AND THIS PACKAGE'S OWN OBJECTS, WHICH IS NOT WHAT A SEARCH UNDER
+          # `target/` FINDS. Measured while this step was extended: a search of
+          # everything under `target/` reported `kal_net_accept` and
+          # `kal_datagram_recv_from` as undefined STRONG references and the other
+          # nine as weak — because the DEPENDENCY's objects are there too, under
+          # `obj/mcpplibs_*`, and openkal-linux's `kal_timeout_accept` refers to
+          # its own `kal_net_accept` strongly. That is correct for an
+          # implementation and says nothing about this port.
+          objs=$(find target/*/*/obj -maxdepth 1 -name '*.o')
+          n=$(printf '%s\n' "$objs" | grep -c . || true)
+          echo "  examining $n of this package's own objects"
+          [ "$n" -gt 100 ] || { echo "::error::only $n objects; nothing was examined"; exit 1; }
+
           nm="$(command -v llvm-nm || command -v nm)"
-          "$nm" "$obj" > syms.txt
+          "$nm" $objs > syms.txt 2>/dev/null || true
 
           # The control: a required interface must still be a strong reference,
           # so that a backend failing to provide one is still a link error.
@@ -223,7 +245,39 @@ jobs:
           grep -qE '^ *w kal_random_fill$' syms.txt \
             || { echo "::error::kal_random_fill is not a weak reference; an optional interface has been made mandatory"
                  grep kal_random syms.txt; exit 1; }
-          echo "  ok  kal_random_fill is weak, kal_time_sleep is strong"
+
+          # ⭐⭐ AND THE SAME FOR EVERY INTERFACE THE 0.8 ROUTES REACH, WHICH IS
+          # WHY THIS STEP IS NOT A SINGLE ASSERTION ANY MORE.
+          #
+          # `openkal.net`, `openkal.datagram`, `openkal.timeout` and
+          # `openkal.space` are optional in exactly the sense `openkal.random`
+          # is, and openkal-opensbi and openkal-uefi decline all four. A strong
+          # reference to any one of them would make a bare-metal program that
+          # never opens a socket fail to link — which is the defect this step
+          # already exists because of, arriving through a different name.
+          #
+          # ⚠️ THE SYMBOL IS SOUGHT ACROSS THE PORT'S OBJECTS RATHER THAN IN ONE,
+          # because the routes are spread over three sources: okm_net.c,
+          # okm_poll.c and okm_fork.c. Naming one file would assert a property of
+          # that file and report nothing about the others.
+
+          weakfail=0
+          for name in kal_net_connect kal_net_listen kal_net_accept kal_net_close \
+                      kal_datagram_open kal_datagram_recv_from \
+                      kal_timeout_read kal_timeout_write kal_timeout_accept \
+                      kal_space_start kal_process_channel; do
+            if grep -qE "^ *U $name\$" syms.txt; then
+              echo "::error::$name is an undefined STRONG reference; an interface a backend may decline has been made mandatory"
+              weakfail=1
+            elif grep -qE "^ *w $name\$" syms.txt; then
+              echo "  weak: $name"
+            else
+              echo "::error::$name is referenced nowhere; the route that was added does not call it"
+              weakfail=1
+            fi
+          done
+          [ "$weakfail" = 0 ] || exit 1
+          echo "  ok  every optional interface is referenced weakly, and kal_time_sleep is strong"
 
       # ⭐⭐ ASKING WHETHER A STREAM IS A TERMINAL GETS THE RIGHT ANSWER.
       #
