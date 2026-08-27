@@ -19,7 +19,16 @@
 set -euo pipefail
 
 dir="${1:?the example directory}"
-name="${2:?the program's name}"
+# ⚠️ NO APOSTROPHE IN THIS MESSAGE, AND THAT IS NOT STYLE. Bash parses `${2:?...}`
+# with quoting active, so "the program's name" opens a single quote that never
+# closes --- and the report arrives thirty lines later as
+#
+#     tools/run-probe.sh: line 53: syntax error near unexpected token `('
+#
+# naming a line that is correct. Measured on the first run of this script in
+# continuous integration, on all four rows at once: nothing local had run it,
+# because the probes were being run by hand as binaries.
+name="${2:?the name of the program}"
 shift 2
 
 cd "$dir"

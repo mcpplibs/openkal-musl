@@ -37,10 +37,16 @@ static int sum(int hidden, int weak, int weak_alias)
 
 int main(void)
 {
+	setbuf(stdout, NULL);
 	const int total = sum(hidden, weak, weak_alias);
 	printf("hidden+weak+weak_alias = %d\n", total);
 	/* 41, and the value is printed rather than merely computed so that a
 	 * reader of the log sees the three names carried a value of the program's
 	 * own choosing rather than an attribute. */
-	return total == 41 ? 0 : 1;
+	const int failures = (total == 41) ? 0 : 1;
+	if (failures) printf("FAIL: the three names did not carry their values\n");
+	/* The same last line every probe in this repository prints, so that one
+	 * runner reads all four. tools/run-probe.sh asserts both directions of it. */
+	printf("-- failures: %d --\n", failures);
+	return failures ? 1 : 0;
 }

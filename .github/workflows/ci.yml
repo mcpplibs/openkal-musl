@@ -481,16 +481,8 @@ jobs:
         env:
           MCPP_TARGET: ${{ matrix.target }}
         run: |
-          set -euo pipefail
-          extra=''
-          [ -n "${MCPP_TARGET:-}" ] && extra="--target $MCPP_TARGET"
-          cd examples/identifiers
-          mcpp build $extra
-          binary="$(find target -type f \( -name identifiers -o -name identifiers.exe \) | head -1)"
-          [ -n "$binary" ] || { echo "::error::the identifiers probe did not build"; exit 1; }
-          "./$binary" | tee run.log
-          grep -q 'hidden+weak+weak_alias = 41' run.log
-          echo "  ok  hidden, weak and weak_alias are the program's to use"
+          bash tools/run-probe.sh examples/identifiers identifiers
+          grep -q 'hidden+weak+weak_alias = 41' examples/identifiers/run.log
 
       # ⭐⭐ THE ROUTES openkal 0.8 MADE POSSIBLE, EXERCISED THROUGH POSIX.
       #
