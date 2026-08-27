@@ -71,8 +71,17 @@ int main(int argc, char** argv)
 		if (kid > 0) {
 			int status = 0;
 			check(waitpid(kid, &status, 0) == kid, "the copy is awaited");
-			check(WIFEXITED(status) && WEXITSTATUS(status) == 23,
-			      "and it reported the status it was written to report");
+			const int ok = WIFEXITED(status) && WEXITSTATUS(status) == 23;
+			/* ⚠️ THE RAW STATUS IS PRINTED WHEN IT IS WRONG, and only then. A
+			 * line reading "it did not report the status it was written to
+			 * report" names a fault and not a place: a copy that ended on a
+			 * signal and one that returned the wrong number are different
+			 * failures, and the number is what tells them apart. */
+			if (!ok)
+				printf("   status=0x%x exited=%d code=%d signalled=%d signal=%d\n",
+				       (unsigned)status, WIFEXITED(status), WEXITSTATUS(status),
+				       WIFSIGNALED(status), WTERMSIG(status));
+			check(ok, "and it reported the status it was written to report");
 		} else {
 			failures += 2;
 		}

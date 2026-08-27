@@ -45,6 +45,14 @@
 
 #include <errno.h>
 #include <setjmp.h>
+#include <stdint.h>
+
+/* okm_context.c --- where the state belonging to one execution context is kept,
+ * keyed on the identity openkal gives that context. */
+uintptr_t __okm_get_tp(void);
+void      __okm_set_tp(uintptr_t);
+void*     __okm_get_self(void);
+void      __okm_set_self(void*);
 
 /* Weak, by the rule okm_net.c states: `openkal.space' is optional --- no
  * bare-metal backend has a second address space to make --- and a strong
@@ -67,6 +75,42 @@ int __okm_child_record(struct kal_process h);   /* okm_syscall.c */
  * first descriptor it touched. */
 static jmp_buf g_resume;
 
+/* ⚠️⚠️ WHAT THE COPY CARRIES AND WHAT IT DOES NOT: THE IDENTITY IS NOT CARRIED.
+ *
+ * okm_context.c keeps this library's per-context state --- its error value, its
+ * locale, its thread record --- in a table keyed on `kal_task_current()'. The
+ * specification says that identity is "unique among contexts running at the same
+ * moment and may be reused after one ends". It says NOTHING about a copy of the
+ * address space, and two implementations answer differently:
+ *
+ *     openkal-linux   caches `gettid' in a thread-local, so the COPY of the
+ *                     cache answers the parent's value and the lookup succeeds
+ *     openkal-macos   asks `thread_selfid' every time, so the started context
+ *                     is a NEW thread of a NEW process and answers a value the
+ *                     table has never seen
+ *
+ * ⇒ The second is not a defect. It is the honest answer to the question the
+ * interface asks, and the assumption that a copy keeps its identity was this
+ * port's.
+ *
+ * ⭐ MEASURED, AND THE PORT'S OWN DIAGNOSTIC NAMED IT. On the macOS row the
+ * copy stopped with
+ *
+ *     openkal-musl: this execution context has no per-context state --- the
+ *     implementation's kal_task_current did not answer the same value here as
+ *     it did when the context started
+ *
+ * which is the message `__okm_get_tp' has carried since it was written, for
+ * exactly this condition. Without it the report would have been a copy that
+ * ended on a signal, four layers from the cause.
+ *
+ * ⇒ The started context REBINDS ITS SLOT before anything reads per-context
+ * state. The values are read here, in the original, and are globals because a
+ * local written between `setjmp' and `longjmp' is indeterminate in the resumed
+ * context. */
+static volatile uintptr_t g_carried_tp;
+static void* volatile     g_carried_self;
+
 /* A stack for the entry function, used only by an implementation that honours
  * the argument. All it holds is one call to `longjmp'. */
 static char g_entry_stack[8192] __attribute__((aligned(16)));
@@ -85,11 +129,19 @@ syscall_arg_t __okm_fork(void)
 
 	okm_lock();
 
+	g_carried_tp   = __okm_get_tp();
+	g_carried_self = __okm_get_self();
+
 	/* ⚠️ NOTHING BELOW THIS LINE MAY READ A LOCAL VARIABLE THAT WAS WRITTEN
 	 * AFTER IT. A variable modified between `setjmp' and `longjmp' and not
 	 * declared volatile is indeterminate in the resumed context; the child path
-	 * therefore reads nothing at all and returns a constant. */
+	 * therefore reads nothing but the two globals above and returns a constant. */
 	if (setjmp(g_resume) != 0) {
+		/* ⚠️ THIS IS THE FIRST THING THE COPY DOES, AND THE ORDER IS THE POINT.
+		 * `okm_unlock' is an atomic store and touches no per-context state;
+		 * everything after it does. */
+		__okm_set_tp(g_carried_tp);
+		__okm_set_self(g_carried_self);
 		okm_unlock();
 		return 0;                     /* the child */
 	}
