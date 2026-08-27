@@ -54,6 +54,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # WHAT IS COMMITTED NAMES NO DIRECTORY OF ANYBODY'S MACHINE.
+      #
+      # tools/working-trees.sh rewrites this manifest to name working trees and
+      # deliberately does not restore it: the rewrite must survive for the rest
+      # of the job. A run by hand therefore leaves the manifest naming absolute
+      # paths, and committing that publishes them --- a consumer resolving from
+      # the index is handed a manifest pointing at a directory that exists
+      # nowhere.
+      #
+      # ⚠️ THAT HAS HAPPENED. This step runs BEFORE the rewrite, so what it
+      # examines is what the commit contains rather than what the job has done
+      # to it.
+      - name: The committed manifest names no local directory
+        run: |
+          set -euo pipefail
+          bad=$(grep -nE '^[a-z-]+ = \{[^}]*path = "(/|[A-Za-z]:)' mcpp.toml || true)
+          if [ -n "$bad" ]; then
+            echo "::error::the committed manifest names an absolute path"
+            printf '%s\n' "$bad" | sed 's/^/        /'
+            echo "        tools/working-trees.sh rewrites these and does not restore them;"
+            echo "        run 'git checkout -- mcpp.toml' after using it by hand."
+            exit 1
+          fi
+          echo "  ok  every dependency is named by version or by a relative path"
+
       - name: The specification and the implementation for this system
         run: |
           bash tools/working-trees.sh '${{ github.head_ref || github.ref_name }}' \

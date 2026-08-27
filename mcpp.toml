@@ -15,7 +15,7 @@ authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-musl"
 
 [dependencies]
-openkal = { path = "/home/speak/workspace/github/mcpplibs/openkal" }
+openkal = "0.8.0"
 
 # An ordinary consumer of openkal declares the specification and leaves the
 # choice of implementation to whoever builds the program, which is what the
@@ -30,7 +30,7 @@ openkal = { path = "/home/speak/workspace/github/mcpplibs/openkal" }
 #
 # The consequence for a program is that it names this package and nothing else.
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = { path = "/home/speak/workspace/github/mcpplibs/openkal-linux", features = ["standalone"] }
+openkal-linux = { version = "0.6.0", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
 openkal-macos = { version = "0.4.0", features = ["standalone"] }
