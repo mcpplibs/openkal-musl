@@ -749,9 +749,38 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			/* The only question a C library asks through this call is whether
 			 * the stream is a terminal, and openkal answers it. Everything a
 			 * terminal can be asked to do beyond that is not an operation
-			 * openkal has. */
+			 * openkal has.
+			 *
+			 * ⚠️⚠️ AND THE REQUEST IT ASKS IT WITH IS NOT THE ONE THIS BRANCH
+			 * FIRST RECOGNISED. `TCGETS' is the request a C library uses to
+			 * READ a terminal's settings; the one it uses to ASK WHETHER
+			 * something is a terminal is musl's own `isatty':
+			 *
+			 *     struct winsize wsz;
+			 *     r = syscall(SYS_ioctl, fd, TIOCGWINSZ, &wsz);
+			 *     if (r == 0) return 1;
+			 *
+			 * So every `isatty' over this port answered 0 --- for a real
+			 * terminal as readily as for a pipe. Measured 2026-08-27 against a
+			 * native control under one harness:
+			 *
+			 *                       pipe   pseudo-terminal
+			 *     native glibc        0            1
+			 *     this port           0            0
+			 *
+			 * ⇒ `std::print' never took its terminal path, and any program
+			 * that decides on colour or on line buffering by asking decided
+			 * wrongly and in silence.
+			 *
+			 * ⭐ THE SIZE IS REPORTED AS UNKNOWN RATHER THAN GUESSED. openkal
+			 * has no operation that answers it, and `winsize' is already
+			 * zeroed by the caller; a fabricated 80x24 would be this file's one
+			 * forbidden shape --- reporting success having done nothing.
+			 * A caller that wants the size reads zero, which is what a serial
+			 * line reports too. */
 			if (!interactive) return -ENOTTY;
-			if ((unsigned long)a2 == TCGETS) return 0;
+			if ((unsigned long)a2 == TCGETS)     return 0;
+			if ((unsigned long)a2 == TIOCGWINSZ) return 0;
 			return -ENOTTY;
 		}
 		return -ENOTTY;

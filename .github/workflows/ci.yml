@@ -190,6 +190,61 @@ jobs:
                  grep kal_random syms.txt; exit 1; }
           echo "  ok  kal_random_fill is weak, kal_time_sleep is strong"
 
+      # ⭐⭐ ASKING WHETHER A STREAM IS A TERMINAL GETS THE RIGHT ANSWER.
+      #
+      # musl's `isatty' asks with TIOCGWINSZ; this port answered only TCGETS,
+      # so every `isatty' returned 0 — for a real terminal as readily as for a
+      # pipe. Nothing failed: `std::print' simply never took its terminal path,
+      # and a program deciding on colour or on line buffering decided wrongly
+      # and in silence.
+      #
+      # ⭐ THE CRITERION IS A RELATION, NOT A VALUE. `isatty` under a pipe and
+      # under a pseudo-terminal must DIFFER, and must differ the same way the
+      # system's own C library does. A test asserting "0 in a pipe" alone would
+      # have passed throughout the defect.
+      - name: Asking whether a stream is a terminal is answered, not refused
+        if: runner.os == 'Linux' && matrix.target == ''
+        run: |
+          d="$(mktemp -d)"; mkdir -p "$d/src"
+          cat > "$d/mcpp.toml" <<TOML
+          [package]
+          name    = "isattyprobe"
+          version = "0.1.0"
+
+          [dependencies]
+          openkal-musl = { path = "$PWD" }
+
+          [targets.isattyprobe]
+          kind = "bin"
+          main = "src/main.c"
+
+          [build]
+          cxx_runtime = "host-coupled"
+          TOML
+          sed -i 's/^          //' "$d/mcpp.toml"
+          printf '#include <unistd.h>\n#include <stdio.h>\nint main(void){ printf("%%d\\n", isatty(1)); return 0; }\n' > "$d/src/main.c"
+          ( cd "$d" && "$MCPP" build --toolchain '${{ matrix.toolchain }}' )
+          bin="$(find "$d/target" -name isattyprobe -type f | head -1)"
+          test -n "$bin" || { echo "::error::the probe did not build"; exit 1; }
+
+          # The control: the system's own C library, through the same harness.
+          # Without it a `script` that fails to allocate a pty would make the
+          # port look broken.
+          printf '#include <unistd.h>\n#include <stdio.h>\nint main(void){ printf("%%d\\n", isatty(1)); return 0; }\n' > "$d/ctrl.c"
+          cc "$d/ctrl.c" -o "$d/ctrl"
+          ctrl_pipe="$("$d/ctrl" | cat | tr -d '\r')"
+          ctrl_tty="$(script -qec "$d/ctrl" /dev/null | tr -d '\r' | head -1)"
+          [ "$ctrl_pipe" = 0 ] && [ "$ctrl_tty" = 1 ] \
+            || { echo "::error::the harness cannot tell a pty from a pipe (control gave $ctrl_pipe/$ctrl_tty) — this check would prove nothing"
+                 exit 1; }
+
+          port_pipe="$("$bin" | cat | tr -d '\r')"
+          port_tty="$(script -qec "$bin" /dev/null | tr -d '\r' | head -1)"
+          echo "  control: pipe=$ctrl_pipe tty=$ctrl_tty    port: pipe=$port_pipe tty=$port_tty"
+          [ "$port_pipe" = "$ctrl_pipe" ] && [ "$port_tty" = "$ctrl_tty" ] \
+            || { echo "::error::isatty over this port disagrees with the system's own C library"; exit 1; }
+          echo "  ok  isatty answers the same as the system's own C library"
+
       # ⭐⭐ THE INTERNAL OVERLAY STOPS AT THIS PACKAGE'S BOUNDARY.
       #
       # musl reaches its own declarations through `src/include`, whose headers
