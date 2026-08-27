@@ -31,7 +31,7 @@
  * operation that made it, so the test below can never fail in a program that has
  * one. */
 #include <openkal/process.h>
-extern __typeof(kal_process_channel_close) kal_process_channel_close __attribute__((weak));
+extern __typeof(kal_process_channel_close) kal_process_channel_close __attribute__((__weak__));
 #include "okm_opt.h"
 
 #include <errno.h>
@@ -114,9 +114,13 @@ static void desc_release(int d)
 		struct kal_stream s; s.h = p->stream;
 		kal_process_channel_close(s);
 	}
+	/* A socket's own release is the one openkal operation that depends on which
+	 * of the four states it reached, so it is performed where those states are
+	 * known rather than reproduced here. */
+	else if (p->kind == OKM_SOCKET) okm_sock_release(p->sock);
 	if (p->path_slot >= 0) g_dirpath_used[p->path_slot] = 0;
 	p->kind = OKM_FREE; p->iter = 0; p->iter_open = 0; p->path_slot = -1;
-	p->pending = 0;
+	p->pending = 0; p->sock = -1; p->ahead = 0; p->ahead_eof = 0;
 }
 
 int okm_fd_alloc(int from)
@@ -153,6 +157,7 @@ int okm_fd_bind(int fd, int kind, kal_uintptr stream,
 	p->kind = kind; p->flags = flags; p->stream = stream;
 	p->file = file; p->dir = dir; p->iter = 0; p->iter_open = 0;
 	p->path_slot = -1; p->pending = 0;
+	p->sock = -1; p->ahead = 0; p->ahead_eof = 0;
 	if (g_fd[fd].desc >= 0) desc_release(g_fd[fd].desc);
 	g_fd[fd].desc = d;
 	g_fd[fd].cloexec = (flags & O_CLOEXEC) ? 1 : 0;
@@ -220,7 +225,7 @@ static size_t copy_str(char* dst, const char* src, size_t n, size_t cap)
 void okm_table_init(void)
 {
 	for (int i = 0; i < OKM_MAX_FD; i++) { g_fd[i].desc = -1; g_fd[i].cloexec = 0; }
-	for (int i = 0; i < OKM_MAX_DESC; i++) g_desc[i].path_slot = -1;
+	for (int i = 0; i < OKM_MAX_DESC; i++) { g_desc[i].path_slot = -1; g_desc[i].sock = -1; }
 
 	/* The program's own three streams are descriptors 0, 1 and 2, which is
 	 * what every program above this library assumes without saying so. They

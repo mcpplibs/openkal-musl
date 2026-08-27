@@ -82,6 +82,7 @@
 
 #define OKM_MAX_FD    1024
 #define OKM_MAX_DESC  512
+#define OKM_MAX_SOCK  128
 #define OKM_MAX_PATH  4096
 #define OKM_MAX_DIRS  64
 #define OKM_DIR_PATH  512
@@ -98,6 +99,11 @@ enum okm_kind {
 	OKM_CHANNEL,    /* an OWNED stream, obtained from openkal.process */
 	OKM_FILE,       /* an owned file obtained from openkal.fs     */
 	OKM_DIR,        /* an owned directory                          */
+	/* A socket. Its state lives in the table in okm_net.c rather than here,
+	 * because a socket passes through four states that no other descriptor has
+	 * and carries two endpoints that no other descriptor needs. `sock' below is
+	 * the index. */
+	OKM_SOCKET,
 };
 
 /* An open file description, in the POSIX sense: what a descriptor refers to,
@@ -120,6 +126,28 @@ struct okm_desc {
 	int          pending;
 	int          pending_kind;
 	char         pending_name[256];
+	int          sock;           /* OKM_SOCKET: the slot in okm_net.c, else -1 */
+	/* ⭐ ONE BYTE READ AHEAD, WHICH IS HOW A READINESS ENQUIRY IS ANSWERED.
+	 *
+	 * openkal has no operation that reports whether a transfer would proceed.
+	 * `openkal.timeout' bounds the transfer itself, and clause 6.3 records
+	 * readiness notification among the mechanisms considered and NOT adopted:
+	 * an interface reporting readiness would oblige every implementation to
+	 * maintain a set and a context of its own.
+	 *
+	 * So `poll' is answered by attempting the transfer under a bound and
+	 * keeping what it produced. A byte that arrived is a byte the descriptor
+	 * has, which is what POLLIN asserts; holding it here is what makes the
+	 * assertion true for the read that follows rather than merely true at the
+	 * moment it was made. okm_desc already holds a directory entry for the same
+	 * reason and by the same means.
+	 *
+	 * ⚠️ ONE BYTE AND NOT A BUFFER. A short read is a result every caller of
+	 * `read' already handles, and a larger read-ahead would turn this into a
+	 * second layer of buffering underneath stdio's. */
+	int           ahead;          /* a byte is held                            */
+	int           ahead_eof;      /* the bounded read reported end of input    */
+	unsigned char ahead_byte;
 };
 
 /* The lock. Every operation upon the table is short, and contention is between
@@ -177,6 +205,79 @@ int okm_chdir(int dirfd, const char* path);
  * program written for Linux expects. The mapping is a table; it does not
  * reconstruct a namespace. */
 int okm_errno(int kal_error_value);
+
+/* --- sockets, in okm_net.c -------------------------------------------------
+ *
+ * ⚠️ BSD SEPARATES `socket' FROM `connect' AND `bind'; openkal DOES NOT.
+ * `kal_net_connect' produces a connection and there is no unbound socket to
+ * produce first. So a descriptor made by `socket' holds nothing but the three
+ * numbers it was given, and the openkal operation happens later --- at
+ * `connect', or at `listen' once `bind' has recorded where. That deferral is
+ * the whole of the adaptation, and it lives in one file.
+ *
+ * Every one of these returns 0 or a count, or a negated errno value, which is
+ * the convention the dispatcher in okm_syscall.c passes straight through. */
+int  okm_sock_open   (int domain, int type, int protocol);
+int  okm_sock_bind   (int fd, const void* addr, unsigned len);
+int  okm_sock_listen (int fd, int backlog);
+int  okm_sock_accept (int fd, void* addr, unsigned* len, int flags);
+int  okm_sock_connect(int fd, const void* addr, unsigned len);
+int  okm_sock_name   (int fd, void* addr, unsigned* len, int peer);
+int  okm_sock_shutdown(int fd, int how);
+long okm_sock_send   (int fd, const void* buf, unsigned long len, int flags,
+                      const void* addr, unsigned alen);
+long okm_sock_recv   (int fd, void* buf, unsigned long len, int flags,
+                      void* addr, unsigned* alen);
+int  okm_sock_setopt (int fd, int level, int opt, const void* val, unsigned len);
+int  okm_sock_getopt (int fd, int level, int opt, void* val, unsigned* len);
+
+/* Released with the description that held it. Called from okm_fd.c, which is
+ * the one place a description's lifetime ends. */
+void okm_sock_release(int slot);
+
+/* Waits up to `ns' for a socket to have a connection to accept or a message to
+ * receive, and keeps what arrived so that the operation which follows finds it.
+ * 1 ready, 0 the bound expired, negative a negated errno value. */
+int  okm_sock_wait_in(struct okm_desc* d, kal_u64 ns);
+
+/* Which of three shapes a socket descriptor has, so that the readiness code can
+ * ask without knowing the socket table. A connected socket is a stream and
+ * takes the same path a pipe takes; a listener and a datagram endpoint are
+ * neither, and each waits in its own way. */
+#define OKM_SOCK_SHAPE_IDLE   0   /* nothing can arrive on it yet             */
+#define OKM_SOCK_SHAPE_STREAM 1   /* connected: the read-ahead applies        */
+#define OKM_SOCK_SHAPE_OWN    2   /* a listener or a datagram endpoint        */
+int  okm_sock_shape(struct okm_desc* d);
+
+/* --- readiness and bounded transfer, in okm_poll.c ------------------------- */
+
+/* The read-ahead a readiness enquiry left, delivered to a caller of `read'.
+ *
+ *   > 0             the count placed in the buffer
+ *   0               nothing was held; the caller performs its own transfer
+ *   OKM_AHEAD_EOF   an end of input the enquiry already observed. The read is
+ *                   complete with zero bytes, and the mark is cleared: a
+ *                   terminal may deliver more after one, and a pipe reports
+ *                   the same end again at once, so neither is lost by
+ *                   forgetting it. */
+#define OKM_AHEAD_EOF (-1L)
+long okm_take_ahead(struct okm_desc* d, void* buf, unsigned long len);
+
+/* A transfer bounded in time. `ns' of zero is openkal's spelling of "no bound"
+ * and is not what a non-blocking descriptor wants; `OKM_NOW_NS' is the smallest
+ * bound there is, and an environment with a coarse clock rounds it up to its
+ * own granularity rather than refusing it. Both report -ENOSYS where the
+ * environment beneath provides no `openkal.timeout'. */
+#define OKM_NOW_NS ((kal_u64)1)
+long okm_timed_read (kal_uintptr stream, void* buf, unsigned long len, kal_u64 ns);
+long okm_timed_write(kal_uintptr stream, const void* buf, unsigned long len, kal_u64 ns);
+
+/* Whether the environment beneath can bound an operation at all. `O_NONBLOCK'
+ * is refused where it cannot, rather than accepted and ignored. */
+int  okm_can_bound(void);
+
+/* poll(2) over a set, and the whole of what `select' is expressed as. */
+long okm_poll(void* fds, unsigned long n, int timeout_ms);
 
 /* The preopened directories, read once. */
 int okm_preopen_count(void);

@@ -21,3 +21,8 @@ Thumbs.db
 # What the examples write while they run.
 sample.txt
 *.tmp
+
+# What tools/run-probe.sh writes beside an example it is running.
+run.log
+out.log
+crash.log

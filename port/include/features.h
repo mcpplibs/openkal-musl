@@ -159,20 +159,59 @@
  *                defined breaks any consumer that writes
  *                `__attribute__((weak_alias(...)))' of its own. LLVM's
  *                libunwind does, in fifteen places, and reported
- *                `use of undeclared identifier __weak__'. */
+ *                `use of undeclared identifier __weak__'.
+ *
+ * ⚠️⚠️ THE FOUR DO NOT ALL COME FROM THE SAME PLACE, WHICH IS WHY THEY ARE NO
+ * LONGER TREATED THE SAME. Reported as mcpplibs/openkal-musl#13: a program
+ * above this library could not declare `static int hidden = 7;'.
+ *
+ *   `restrict' is written by musl's PUBLIC headers. <stdio.h> declares
+ *   `fprintf(FILE *restrict, const char *restrict, ...)', so a C++ consumer
+ *   needs the spelling whether or not the internal overlay is anywhere near
+ *   its command line. It stays unconditional, and the name it costs a C++
+ *   program is a property of musl's public headers rather than of this port.
+ *
+ *   `hidden', `weak' and `weak_alias' are written by the INTERNAL OVERLAY and
+ *   by nothing else. Measured: `grep -w' over musl/include --- the whole of
+ *   what a consumer reads --- finds `hidden' zero times and `weak' zero times.
+ *   Nothing a consumer includes needs any of the three to be defined at all.
+ *
+ * ⇒ THE TEST IS THE OVERLAY'S OWN DEFINITION. src/include/features.h is what
+ * defines the three, and it is reached from here by `#include_next' only when
+ * that directory is on the command line. So `#ifdef hidden' below asks exactly
+ * the question this block was always trying to ask --- "did the overlay get
+ * included" --- rather than the question it used to ask, which was "is this
+ * unit musl's" and which answered the wrong way for every consumer.
+ *
+ * ⚠️ THE COMPILER-RT CASE STILL HOLDS, and it is the reason the block is scoped
+ * rather than deleted. A board building compiler-rt here compiles C that is not
+ * musl's WITH the overlay on its line --- `private_include_dirs' does not reach
+ * it, because it is not a consumer of this package's public interface but a
+ * build this package's own directories were handed to. `#ifdef hidden' is true
+ * there, and the three are neutralised there, exactly as before.
+ *
+ * ⇒ Two consumers, two answers, one test:
+ *
+ *     ordinary consumer   overlay absent   `hidden' is the program's to use
+ *     compiler-rt         overlay present  `hidden' neutralised, as measured */
 #  ifdef __cplusplus
 #    if !defined(restrict)
 #      define restrict __restrict
 #    endif
-#    undef hidden
-#    define hidden extern "C"
-#  else
-#    undef hidden
-#    define hidden
 #  endif
-#  undef weak
-#  define weak
-#  undef weak_alias
+
+#  ifdef hidden
+#    ifdef __cplusplus
+#      undef hidden
+#      define hidden extern "C"
+#    else
+#      undef hidden
+#      define hidden
+#    endif
+#    undef weak
+#    define weak
+#    undef weak_alias
+#  endif  /* hidden --- the internal overlay is on this command line */
 
 #endif  /* !OKM_MUSL_INTERNAL */
 
