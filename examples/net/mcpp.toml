@@ -1,0 +1,16 @@
+[package]
+name    = "net"
+version = "0.1.0"
+
+[dependencies]
+openkal-musl = { path = "../.." }
+
+[targets.net]
+kind = "bin"
+main = "src/main.c"
+
+# What a program above this package must say, and why it is one line. The same
+# statement examples/posix makes, for the same reason: a program above this
+# package carries no other runtime, so the build tool must embed none.
+[build]
+cxx_runtime = "host-coupled"

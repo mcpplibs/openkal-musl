@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.4.0"
+version     = "0.5.0"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 
@@ -176,6 +176,15 @@ sources = [
   # The fork closure terminates at the THREAD implementation and the network
   # closure at the password functions. Withholding either takes an essential or
   # an ordinary facility with it, so neither is withheld.
+  #
+  # ⭐ THREE OF THOSE FOUR ROWS ARE NOW MOOT, AND FOR THE RIGHT REASON: the
+  # facilities arrived rather than the exclusions being relaxed. openkal 0.8
+  # added `net', `datagram', `timeout' and `space'; port/src/okm_net.c,
+  # okm_poll.c and okm_fork.c route them, so `select', the network family and
+  # `fork' are not facilities this port lacks and had to reason about keeping ---
+  # they work. `epoll' and the four descriptor-shaped notifications below stay
+  # withheld, because a readiness SET held by the environment is a facility of
+  # one kernel rather than a capability, and openkal has none to express.
   #
   # ⚠️ AND THE MECHANISM HAS A PRECONDITION THIS PACKAGE MEETS ON ONE TARGET OF
   # FOUR. `-ffunction-sections` with `-Wl,--gc-sections` is what makes an

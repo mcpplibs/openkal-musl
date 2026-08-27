@@ -43,12 +43,12 @@
  * which is the row that has nothing to fall back on. The same rule is already
  * applied to `kal_random_fill' below, and it is the second time this port has
  * had to learn it. */
-extern __typeof(kal_process_channel) kal_process_channel __attribute__((weak));
-extern __typeof(kal_process_channel_close) kal_process_channel_close __attribute__((weak));
+extern __typeof(kal_process_channel) kal_process_channel __attribute__((__weak__));
+extern __typeof(kal_process_channel_close) kal_process_channel_close __attribute__((__weak__));
 /* Weak, for the reason given at SYS_getrandom below: the interface is
  * optional, and an implementation that does not provide it is absent as a
  * definition rather than present and refusing. */
-extern __typeof(kal_random_fill) kal_random_fill __attribute__((weak));
+extern __typeof(kal_random_fill) kal_random_fill __attribute__((__weak__));
 
 #include <errno.h>
 #include <fcntl.h>
@@ -65,6 +65,8 @@ extern __typeof(kal_random_fill) kal_random_fill __attribute__((weak));
 #include <poll.h>
 #include <termios.h>
 #include <sys/ioctl.h>
+#include <sys/select.h>
+#include <sys/socket.h>
 #include <spawn.h>
 #include "kstat.h"
 
@@ -86,6 +88,14 @@ static syscall_arg_t stream_of(int fd, kal_uintptr* out)
 	if (d->kind == OKM_STREAM || d->kind == OKM_CHANNEL || d->kind == OKM_FILE) {
 		*out = d->stream; return 0;
 	}
+	/* A CONNECTION IS A STREAM AND `openkal.net' ADDS NO TRANSFER OF ITS OWN.
+	 * The interface says so: `kal_stream_read' and `kal_stream_write' are the
+	 * operations that move a connection's bytes. A socket that is not connected
+	 * has no stream, and `d->stream' is zero there. */
+	if (d->kind == OKM_SOCKET) {
+		if (d->stream == 0) return -ENOTCONN;
+		*out = d->stream; return 0;
+	}
 	return -EISDIR;
 }
 
@@ -95,6 +105,8 @@ static syscall_arg_t do_write(int fd, const void* buf, size_t len)
 	const syscall_arg_t r = stream_of(fd, &s);
 	if (r) return r;
 	if (len == 0) return 0;
+	struct okm_desc* d = okm_desc_of(fd);
+	if (d->flags & O_NONBLOCK) return okm_timed_write(s, buf, len, OKM_NOW_NS);
 	struct kal_stream st; st.h = s;
 	const struct kal_io_result io = kal_stream_write(st, buf, len);
 	/* openkal transfers the whole buffer or reports what prevented it, so a
@@ -111,6 +123,18 @@ static syscall_arg_t do_read(int fd, void* buf, size_t len)
 	const syscall_arg_t r = stream_of(fd, &s);
 	if (r) return r;
 	if (len == 0) return 0;
+
+	struct okm_desc* d = okm_desc_of(fd);
+	/* ⭐ WHAT A READINESS ENQUIRY TOOK IS DELIVERED HERE, and delivering it is
+	 * what made that enquiry's answer true rather than momentary. okm_poll.c
+	 * states why openkal leaves no other way to answer one. A short read is a
+	 * result every caller of `read' already handles. */
+	const long held = okm_take_ahead(d, buf, len);
+	if (held == OKM_AHEAD_EOF) return 0;
+	if (held) return (syscall_arg_t)held;
+
+	if (d->flags & O_NONBLOCK) return okm_timed_read(s, buf, len, OKM_NOW_NS);
+
 	struct kal_stream st; st.h = s;
 	const struct kal_io_result io = kal_stream_read(st, buf, len);
 	if (io.e != kal_ok) return -okm_errno(io.e);
@@ -412,6 +436,32 @@ static syscall_arg_t do_wait4(int pid, int* status, int options, void* rusage)
 
 syscall_arg_t __okm_task_exit(int code);          /* okm_thread.c */
 syscall_arg_t __okm_futex(const int* addr, int op, int val, const struct timespec* t);
+syscall_arg_t __okm_fork(void);                   /* okm_fork.c   */
+
+/* What kind of socket a descriptor is, asked through the same path a program
+ * would ask through. The two message calls need it and nothing else does, so
+ * the socket table is not opened up for them. */
+static int sock_type_of(int fd)
+{
+	int t = 0;
+	unsigned l = sizeof t;
+	if (okm_sock_getopt(fd, SOL_SOCKET, SO_TYPE, &t, &l) < 0) return -1;
+	return t;
+}
+
+/* The bound `ppoll' and `pselect' state as a timespec, in the milliseconds
+ * `poll' states it in. A bound shorter than a millisecond is rounded UP to one
+ * rather than down to none: rounding down would turn a wait into a poll, and
+ * the interface beneath already rounds a bound up to its own granularity. */
+static int ms_of_timespec(const struct timespec* ts)
+{
+	if (!ts) return -1;
+	if (ts->tv_sec == 0 && ts->tv_nsec == 0) return 0;
+	long long ms = (long long)ts->tv_sec * 1000 + ts->tv_nsec / 1000000;
+	if (ms == 0) ms = 1;
+	if (ms > 0x7fffffffLL) ms = 0x7fffffffLL;
+	return (int)ms;
+}
 
 syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
                             syscall_arg_t a3, syscall_arg_t a4, syscall_arg_t a5,
@@ -519,6 +569,13 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * have. Refusing is the honest answer; silently ignoring it would give
 		 * a caller a byte stream where it asked for messages. */
 		if (flags & ~(O_CLOEXEC | O_NONBLOCK)) return -EINVAL;
+		/* ⚠️ AND `O_NONBLOCK' USED TO BE ACCEPTED AND CARRIED NO FURTHER. The
+		 * flag was stored in the description and nothing read it, so a caller
+		 * asked for a pipe that would not wait, was told it had one, and waited.
+		 * That is the one shape the head of this file forbids. It is expressed
+		 * now --- as the smallest bound `openkal.timeout' offers --- and refused
+		 * where that interface is absent. */
+		if ((flags & O_NONBLOCK) && !okm_can_bound()) return -ENOSYS;
 
 		/* A backend that provides no `openkal.process' provides no channel,
 		 * and this is where a program learns that a pipe is not available
@@ -912,9 +969,21 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		case F_GETFD: return okm_fd_get_cloexec((int)a1) ? FD_CLOEXEC : 0;
 		case F_SETFD: return okm_fd_cloexec((int)a1, ((int)a3 & FD_CLOEXEC) ? 1 : 0);
 		case F_GETFL: return d->flags;
-		case F_SETFL: d->flags = (d->flags & ~(O_APPEND | O_NONBLOCK))
-		                       | ((int)a3 & (O_APPEND | O_NONBLOCK));
-		              return 0;
+		case F_SETFL: {
+			const int want = (int)a3;
+			/* ⚠️ REFUSED WHERE IT CANNOT BE HONOURED, AND ONLY WHEN IT IS BEING
+			 * ASKED FOR. A descriptor that was asked to be non-blocking and is
+			 * not would make every subsequent transfer wait where the caller
+			 * arranged not to. `O_NONBLOCK' is expressed here as the smallest
+			 * bound `openkal.timeout' offers, so a backend that declines that
+			 * interface cannot express it at all --- and a caller CLEARING the
+			 * flag is asking for what such a backend always gives. */
+			if ((want & O_NONBLOCK) && !(d->flags & O_NONBLOCK) && !okm_can_bound())
+				return -ENOSYS;
+			d->flags = (d->flags & ~(O_APPEND | O_NONBLOCK))
+			         | (want & (O_APPEND | O_NONBLOCK));
+			return 0;
+		}
 		case F_SETLK: case F_SETLKW: case F_GETLK: return 0;
 		default: return -EINVAL;
 		}
@@ -1136,6 +1205,206 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 #endif
+
+	/* --- duplicating the calling image -------------------------------------- */
+	/* ⭐ `fork' IS COMPOSED ABOVE `openkal.space' AND THE SPECIFICATION SAYS SO.
+	 * okm_fork.c carries the composition and the header it quotes. What reaches
+	 * here is musl's `_Fork', which issues this call with a termination signal
+	 * and no stack; every other shape asks for a context that SHARES the
+	 * caller's address space, which is `openkal.task' and reaches this library
+	 * through `__clone' rather than through this seam. */
+	/* ⚠️ TWO NUMBERS AND NOT ONE, AND THE SECOND IS THE ONE THAT MATTERED.
+	 * musl's `_Fork' issues `SYS_fork' where the architecture has it and
+	 * `SYS_clone' where it does not, so an implementation of the second alone
+	 * is reached on aarch64 and riscv64 and never on x86_64. Measured: the
+	 * probe reported `the calling image is duplicated (errno=38)' on the one
+	 * architecture that has both. */
+#ifdef SYS_fork
+	case SYS_fork: return __okm_fork();
+#endif
+	case SYS_clone: {
+		const unsigned long flags = (unsigned long)a1;
+		if ((flags & ~0xffUL) != 0 || (void*)a2 != 0) return -ENOSYS;
+		return __okm_fork();
+	}
+
+	/* --- the network -------------------------------------------------------- */
+	/* Every one of these is okm_net.c's, which holds the whole of the deferral
+	 * that BSD's `socket' and openkal's `kal_net_connect' differ by. */
+	case SYS_socket:  return okm_sock_open((int)a1, (int)a2, (int)a3);
+	case SYS_bind:    return okm_sock_bind((int)a1, (const void*)a2, (unsigned)a3);
+	case SYS_listen:  return okm_sock_listen((int)a1, (int)a2);
+	case SYS_accept:  return okm_sock_accept((int)a1, (void*)a2, (unsigned*)a3, 0);
+	case SYS_accept4: return okm_sock_accept((int)a1, (void*)a2, (unsigned*)a3, (int)a4);
+	case SYS_connect: return okm_sock_connect((int)a1, (const void*)a2, (unsigned)a3);
+	case SYS_getsockname: return okm_sock_name((int)a1, (void*)a2, (unsigned*)a3, 0);
+	case SYS_getpeername: return okm_sock_name((int)a1, (void*)a2, (unsigned*)a3, 1);
+	case SYS_shutdown:    return okm_sock_shutdown((int)a1, (int)a2);
+	case SYS_setsockopt:
+		return okm_sock_setopt((int)a1, (int)a2, (int)a3, (const void*)a4, (unsigned)a5);
+	case SYS_getsockopt:
+		return okm_sock_getopt((int)a1, (int)a2, (int)a3, (void*)a4, (unsigned*)a5);
+	case SYS_sendto:
+		return okm_sock_send((int)a1, (const void*)a2, (size_t)a3, (int)a4,
+		                     (const void*)a5, (unsigned)a6);
+	case SYS_recvfrom:
+		return okm_sock_recv((int)a1, (void*)a2, (size_t)a3, (int)a4,
+		                     (void*)a5, (unsigned*)a6);
+
+	/* The two calls that carry a vector of buffers and a place for ancillary
+	 * data. openkal has no ancillary data --- there is no operation that passes
+	 * a handle along a connection --- so a request carrying any is refused
+	 * rather than performed without it. */
+	case SYS_sendmsg: {
+		const struct msghdr* m = (const struct msghdr*)a2;
+		if (!m) return -EFAULT;
+		if (m->msg_controllen != 0) return -ENOSYS;
+		const int t = sock_type_of((int)a1);
+		if (t < 0) return -ENOTSOCK;
+
+		if (t == SOCK_DGRAM) {
+			/* A MESSAGE IS SENT WHOLE OR NOT AT ALL, which openkal.datagram
+			 * states. Gathering several buffers into one message would need a
+			 * buffer this port has no place for, so a vector with more than one
+			 * occupied entry is refused instead of being sent as several
+			 * messages --- which is a different thing from what the caller
+			 * asked for and would look like success. */
+			int used = 0, idx = 0;
+			for (int i = 0; i < (int)m->msg_iovlen; i++)
+				if (m->msg_iov[i].iov_len) { used++; idx = i; }
+			if (used > 1) return -ENOSYS;
+			return okm_sock_send((int)a1,
+			                     used ? m->msg_iov[idx].iov_base : 0,
+			                     used ? m->msg_iov[idx].iov_len : 0,
+			                     (int)a3, m->msg_name, m->msg_namelen);
+		}
+
+		syscall_arg_t total = 0;
+		for (int i = 0; i < (int)m->msg_iovlen; i++) {
+			if (m->msg_iov[i].iov_len == 0) continue;
+			const syscall_arg_t r = okm_sock_send((int)a1, m->msg_iov[i].iov_base,
+			                                      m->msg_iov[i].iov_len, (int)a3, 0, 0);
+			if (r < 0) return total ? total : r;
+			total += r;
+			if ((size_t)r < m->msg_iov[i].iov_len) break;
+		}
+		return total;
+	}
+	case SYS_recvmsg: {
+		struct msghdr* m = (struct msghdr*)a2;
+		if (!m) return -EFAULT;
+		if (m->msg_controllen != 0) return -ENOSYS;
+		m->msg_flags = 0;
+		const int t = sock_type_of((int)a1);
+		if (t < 0) return -ENOTSOCK;
+
+		if (t == SOCK_DGRAM) {
+			int used = 0, idx = 0;
+			for (int i = 0; i < (int)m->msg_iovlen; i++)
+				if (m->msg_iov[i].iov_len) { used++; idx = i; }
+			if (used > 1) return -ENOSYS;
+			return okm_sock_recv((int)a1,
+			                     used ? m->msg_iov[idx].iov_base : 0,
+			                     used ? m->msg_iov[idx].iov_len : 0,
+			                     (int)a3, m->msg_name, &m->msg_namelen);
+		}
+
+		if (m->msg_name) m->msg_namelen = 0;
+		syscall_arg_t total = 0;
+		for (int i = 0; i < (int)m->msg_iovlen; i++) {
+			if (m->msg_iov[i].iov_len == 0) continue;
+			const syscall_arg_t r = okm_sock_recv((int)a1, m->msg_iov[i].iov_base,
+			                                      m->msg_iov[i].iov_len, (int)a3, 0, 0);
+			if (r < 0) return total ? total : r;
+			total += r;
+			if ((size_t)r < m->msg_iov[i].iov_len) break;
+		}
+		return total;
+	}
+
+	/* --- readiness ---------------------------------------------------------- */
+	/* okm_poll.c holds the whole of what openkal permits here, and the reason
+	 * `epoll' is still withheld: a readiness SET is a facility of one kernel,
+	 * and asking each descriptor in turn is what an interface without one
+	 * offers. */
+#ifdef SYS_poll
+	case SYS_poll: return okm_poll((void*)a1, (unsigned long)a2, (int)a3);
+#endif
+	case SYS_ppoll:
+		return okm_poll((void*)a1, (unsigned long)a2,
+		                ms_of_timespec((const struct timespec*)a3));
+
+	/* `select', which musl expresses as this call and this port expresses as
+	 * `poll'. The two describe the same question in two shapes and openkal
+	 * answers one of them. */
+#ifdef SYS_select
+	case SYS_select:
+#endif
+	case SYS_pselect6: {
+		const int nfds = (int)a1;
+		fd_set* rd = (fd_set*)a2;
+		fd_set* wr = (fd_set*)a3;
+		fd_set* ex = (fd_set*)a4;
+		if (nfds < 0 || nfds > FD_SETSIZE) return -EINVAL;
+
+		/* ⚠️ A BOUND ON THE SET, STATED RATHER THAN SILENT. Each descriptor in
+		 * the set costs one bounded operation per round, and the set has to be
+		 * held somewhere while that happens. A larger one is refused; it is not
+		 * truncated, because a `select' that watched some of what it was given
+		 * would report the others as never ready. */
+		enum { OKM_SELECT_MAX = 128 };
+		struct pollfd p[OKM_SELECT_MAX];
+		int watched = 0;
+		for (int fd = 0; fd < nfds; fd++) {
+			short ev = 0;
+			if (rd && FD_ISSET(fd, rd)) ev |= POLLIN;
+			if (wr && FD_ISSET(fd, wr)) ev |= POLLOUT;
+			/* An exceptional condition is out-of-band data, which openkal does
+			 * not have. A descriptor named only there can never be reported
+			 * ready, and is therefore not watched. */
+			if (!ev) continue;
+			if (watched == OKM_SELECT_MAX) return -EINVAL;
+			p[watched].fd      = fd;
+			p[watched].events  = ev;
+			p[watched].revents = 0;
+			watched++;
+		}
+
+		/* ⚠️ THE TWO CALLS STATE THE BOUND IN DIFFERENT STRUCTURES, and which
+		 * one was written is decided by the number rather than by the machine:
+		 * `select' passes a `timeval' and `pselect6' a `timespec'. Reading one
+		 * as the other would misread the fractional field by a factor of a
+		 * thousand, in silence. */
+		int ms;
+#ifdef SYS_select
+		if (n == SYS_select) {
+			const struct timeval* tv = (const struct timeval*)a5;
+			struct timespec conv;
+			if (!tv) ms = -1;
+			else {
+				conv.tv_sec  = tv->tv_sec;
+				conv.tv_nsec = (long)tv->tv_usec * 1000;
+				ms = ms_of_timespec(&conv);
+			}
+		} else
+#endif
+		ms = ms_of_timespec((const struct timespec*)a5);
+
+		const long r = okm_poll(p, (unsigned long)watched, ms);
+		if (r < 0) return r;
+
+		if (rd) FD_ZERO(rd);
+		if (wr) FD_ZERO(wr);
+		if (ex) FD_ZERO(ex);
+		long count = 0;
+		for (int i = 0; i < watched; i++) {
+			if (rd && (p[i].revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL)))
+				{ FD_SET(p[i].fd, rd); count++; }
+			if (wr && (p[i].revents & (POLLOUT | POLLERR | POLLNVAL)))
+				{ FD_SET(p[i].fd, wr); count++; }
+		}
+		return count;
+	}
 
 	/* --- identity ---------------------------------------------------------- */
 	/* openkal describes a boundary between a program and its environment and

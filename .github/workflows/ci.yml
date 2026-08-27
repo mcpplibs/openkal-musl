@@ -44,10 +44,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: 'linux, gcc',    os: ubuntu-24.04, toolchain: 'gcc@16.1.0',  target: '' }
-          - { name: 'linux, llvm',   os: ubuntu-24.04, toolchain: 'llvm@22.1.8', target: '' }
-          - { name: 'macos, llvm',   os: macos-14,     toolchain: 'llvm@20.1.7', target: '' }
-          - { name: 'windows, gcc',  os: windows-2022, toolchain: 'gcc@16.1.0',  target: 'x86_64-windows-gnu' }
+          # ⭐ `net`, `fork` and `shell` STATE WHAT THE BACKEND BENEATH THIS ROW
+          # PROVIDES, and they are part of the criterion rather than a
+          # convenience. openkal permits an implementation to decline an
+          # interface in whole (clause 3), so "the probe was not run" and "the
+          # probe was run and the refusal was the expected answer" are
+          # different outcomes, and only the second is evidence.
+          - { name: 'linux, gcc',    os: ubuntu-24.04, toolchain: 'gcc@16.1.0',  target: '',                   net: 'yes', fork: '--fork',    shell: '--shell'    }
+          - { name: 'linux, llvm',   os: ubuntu-24.04, toolchain: 'llvm@22.1.8', target: '',                   net: 'yes', fork: '--fork',    shell: '--shell'    }
+          - { name: 'macos, llvm',   os: macos-14,     toolchain: 'llvm@20.1.7', target: '',                   net: 'yes', fork: '--fork',    shell: '--shell'    }
+          # ⚠️ openkal-windows declines `openkal.space`: this system has no
+          # primitive that copies an address space and starts a context in the
+          # copy, and inventing one would be the simulation clause 3.1
+          # forbids. `--no-fork` asserts the refusal.
+          - { name: 'windows, gcc',  os: windows-2022, toolchain: 'gcc@16.1.0',  target: 'x86_64-windows-gnu', net: 'yes', fork: '--no-fork', shell: '--no-shell' }
     defaults:
       run:
         shell: bash
@@ -395,66 +405,66 @@ jobs:
       # A program above this package names one package. It does not name
       # openkal, it does not name an implementation, and it says nothing about
       # the platform.
+      #
+      # ⚠️ FOUR PROBES, ONE RUNNER. tools/run-probe.sh holds the watchdog, the
+      # report of where a program that stopped was, and the two readings of the
+      # output. Four copies of that would be four places for one of them to fall
+      # behind.
       - name: The posix probe
-        working-directory: examples/posix
+        env:
+          MCPP_TARGET: ${{ matrix.target }}
+        run: bash tools/run-probe.sh examples/posix posix
+
+      # ⭐ THE NAMES THIS LIBRARY MUST NOT TAKE FROM A PROGRAM ABOVE IT.
+      #
+      # Reported as openkal-musl#13. This one is a COMPILE-TIME criterion: the
+      # source declares `hidden`, `weak` and `weak_alias` as ordinary
+      # identifiers, and if any of the three is a macro again the file does not
+      # compile. It is run as well as built so that something links afterwards,
+      # which is what distinguishes a source that compiles from a package that
+      # works.
+      - name: A program may use the names the internal overlay defines
+        env:
+          MCPP_TARGET: ${{ matrix.target }}
         run: |
+          set -euo pipefail
           extra=''
-          [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
+          [ -n "${MCPP_TARGET:-}" ] && extra="--target $MCPP_TARGET"
+          cd examples/identifiers
           mcpp build $extra
-          binary="$(find target -type f \( -name 'posix' -o -name 'posix.exe' \) | head -1)"
+          binary="$(find target -type f \( -name identifiers -o -name identifiers.exe \) | head -1)"
+          [ -n "$binary" ] || { echo "::error::the identifiers probe did not build"; exit 1; }
+          "./$binary" | tee run.log
+          grep -q 'hidden+weak+weak_alias = 41' run.log
+          echo "  ok  hidden, weak and weak_alias are the program's to use"
 
-          # A watchdog, because a program that does not return is as much a
-          # failure as one that returns wrongly, and the job would otherwise
-          # spend its whole timeout finding that out. Written out rather than
-          # taken from `timeout', which two of the three systems have and one
-          # does not.
-          watch() {   # watch <seconds> <command>...
-            local seconds="$1"; shift
-            "$@" & local pid=$!
-            ( sleep "$seconds"; kill -9 "$pid" 2> /dev/null ) & local guard=$!
-            wait "$pid"; local status=$?
-            kill "$guard" 2> /dev/null || true
-            return $status
-          }
+      # ⭐⭐ THE ROUTES openkal 0.8 MADE POSSIBLE, EXERCISED THROUGH POSIX.
+      #
+      # `socket`, `bind`, `listen`, `accept`, `connect`, `sendto`, `recvfrom`,
+      # `poll` and `select` reached this port's default arm and returned ENOSYS
+      # until `openkal.net`, `openkal.datagram` and `openkal.timeout` existed to
+      # route them onto (openkal-linux#13). The probe names no openkal symbol:
+      # a probe that called `kal_net_connect` to check that `connect` works
+      # would be checking the wrong thing.
+      #
+      # ⚠️ `matrix.net` DECIDES WHETHER THE ROW RUNS IT, and the value is a
+      # property of the BACKEND rather than of the system. A backend that
+      # declines `openkal.net` is behaving correctly; a row that expected it and
+      # silently did not get it is what this must not read as a pass.
+      - name: The network probe
+        if: matrix.net == 'yes'
+        env:
+          MCPP_TARGET: ${{ matrix.target }}
+        run: bash tools/run-probe.sh examples/net net
 
-          if watch 120 sh -c "\"$binary\" > run.log 2>&1"; then
-            cat run.log
-          else
-            status=$?
-            echo "--- what the program printed before it stopped (status $status) ---"
-            cat run.log
-
-            # A program that stopped and a program that did not return need
-            # different questions asked of them, and "exit code 139" and "the
-            # job timed out" answer neither. The debugger is for the first; a
-            # stack sample of a program that is still running is for the second,
-            # and a debugger asked to run a program that hangs hangs with it.
-            if [ "$status" -eq 137 ]; then
-              echo "--- it did not return; where it was ---"
-              "$binary" > /dev/null 2>&1 & hung=$!
-              sleep 5
-              if command -v sample > /dev/null 2>&1; then
-                sample "$hung" 3 -mayDie 2>&1 | head -80 || true
-              elif command -v eu-stack > /dev/null 2>&1; then
-                eu-stack -p "$hung" 2>&1 | head -60 || true
-              fi
-              kill -9 "$hung" 2> /dev/null || true
-            elif command -v lldb > /dev/null 2>&1; then
-              watch 90 lldb --batch -o run \
-                   -k 'thread backtrace all' -k 'register read' -k quit \
-                   -- "$binary" > crash.log 2>&1 || true
-              cat crash.log
-            elif command -v gdb > /dev/null 2>&1; then
-              watch 90 gdb -batch -ex run -ex 'bt' --args "$binary" > crash.log 2>&1 || true
-              cat crash.log
-            fi
-            exit 1
-          fi
-          # Both directions: that the program reported, and that nothing it
-          # observed failed to hold. Asserting only the first would pass for a
-          # program that printed its failures.
-          grep -qE '^-- failures: 0 --$' run.log
-          ! grep -q '^FAIL:' run.log
+      # Another program, started three ways. ⭐ WHAT IS EXPECTED IS PASSED IN
+      # RATHER THAN INFERRED: `--no-fork` requires that duplicating the calling
+      # image be REFUSED, so a system whose backend declines `openkal.space` is
+      # asserted to decline it rather than merely not asked.
+      - name: The subprocess probe
+        env:
+          MCPP_TARGET: ${{ matrix.target }}
+        run: bash tools/run-probe.sh examples/subprocess subprocess ${{ matrix.fork }} ${{ matrix.shell }}
 
       - name: The same program, built the ordinary way, as a control
         run: |
