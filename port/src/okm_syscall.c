@@ -28,6 +28,23 @@
 /* For pipe and pipe2, which are kal_process_channel. Included here rather than
  * through okm.h because this is the only source that reaches for it. */
 #include <openkal/process.h>
+/* ⚠️⚠️ WEAK, OR AN INTERFACE A BACKEND MAY DECLINE BECOMES ONE IT MUST PROVIDE.
+ *
+ * Clause 6.1 expresses an interface an implementation does not provide as the
+ * absence of a definition, and a bare-metal backend provides no `openkal.process'
+ * at all --- it has no second image to start. A strong reference from this port
+ * would therefore make every program above it fail to link, whether or not it
+ * ever asked for a pipe:
+ *
+ *     ld.lld: error: undefined symbol: kal_process_channel
+ *     >>> referenced by okm_syscall.c:407
+ *
+ * ⚠️ Measured on openkal-opensbi through openkal-llvm-runtime's bare-metal row,
+ * which is the row that has nothing to fall back on. The same rule is already
+ * applied to `kal_random_fill' below, and it is the second time this port has
+ * had to learn it. */
+extern __typeof(kal_process_channel) kal_process_channel __attribute__((weak));
+extern __typeof(kal_process_channel_close) kal_process_channel_close __attribute__((weak));
 /* Weak, for the reason given at SYS_getrandom below: the interface is
  * optional, and an implementation that does not provide it is absent as a
  * definition rather than present and refusing. */
@@ -502,6 +519,12 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * have. Refusing is the honest answer; silently ignoring it would give
 		 * a caller a byte stream where it asked for messages. */
 		if (flags & ~(O_CLOEXEC | O_NONBLOCK)) return -EINVAL;
+
+		/* A backend that provides no `openkal.process' provides no channel,
+		 * and this is where a program learns that a pipe is not available
+		 * here. ENOSYS is the same answer the default branch gives for
+		 * everything else openkal does not have. */
+		if (!kal_process_channel) return -ENOSYS;
 
 		struct kal_stream mine, theirs;
 		const int e = kal_process_channel(&mine, &theirs);
