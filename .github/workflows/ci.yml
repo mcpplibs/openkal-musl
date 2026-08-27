@@ -330,8 +330,7 @@ jobs:
             "socket|#include <sys/socket.h>|int s = socket(AF_INET, SOCK_STREAM, 0); (void)s;" \
             "fork|#include <unistd.h>|if (fork()==0) return 1;" \
             "poll|#include <poll.h>|struct pollfd p={0,1,0}; poll(&p,1,0);" \
-            "pipe|#include <unistd.h>|int f[2]; pipe(f);" \
-            "chmod|#include <sys/stat.h>|chmod(\"x\",0644);" ; do
+            "_Fork|#include <unistd.h>|_Fork();" ; do
             n="${spec%%|*}"; rest="${spec#*|}"; inc="${rest%%|*}"; body="${rest#*|}"
             got="$(probe "$n" "$inc" "$body")"
             case "$got" in
@@ -346,7 +345,9 @@ jobs:
           for spec in \
             "printf|#include <stdio.h>|printf(\"x\\n\");" \
             "malloc|#include <stdlib.h>|void* p=malloc(8); free(p);" \
-            "open|#include <fcntl.h>|int f=open(\"x\",0); (void)f;" ; do
+            "open|#include <fcntl.h>|int f=open(\"x\",0); (void)f;" \
+            "pipe|#include <unistd.h>|int f[2]; pipe(f);" \
+            "chmod|#include <sys/stat.h>|chmod(\"x\",0644);" ; do
             n="${spec%%|*}"; rest="${spec#*|}"; inc="${rest%%|*}"; body="${rest#*|}"
             got="$(probe "$n" "$inc" "$body")"
             if [ -n "$got" ]; then

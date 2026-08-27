@@ -191,13 +191,32 @@ sources = [
   "!musl/src/process/fork.c",
   "!musl/src/process/vfork.c",
   "!musl/src/process/_Fork.c",
-  "!musl/src/stat/chmod.c",
-  "!musl/src/stat/fchmod.c",
-  "!musl/src/stat/fchmodat.c",
-  "!musl/src/unistd/symlink.c",
-  "!musl/src/unistd/symlinkat.c",
-  "!musl/src/unistd/link.c",
-  "!musl/src/unistd/linkat.c",
+  # ⚠️ `chmod`, `link` AND `symlink` ARE NOT ON THIS LIST, AND THEY WERE.
+  #
+  # openkal defines no permissions and no links --- clause 11 records both as
+  # settled rather than deferred --- so by the reasoning above they belong here.
+  # The closure does not permit it. musl's own sources reach them from functions
+  # that are ordinary:
+  #
+  #     lchmod.c   -> fchmodat
+  #     sem_open.c -> link
+  #
+  # ⚠️ AND THE BREAKAGE IS PER TARGET, WHICH IS WHY IT PASSED HERE AND FAILED
+  # THERE. With `--gc-sections` a definition nobody references is discarded, so
+  # on a target where nothing reaches `lchmod` the exclusion is invisible; on one
+  # whose link model keeps it, the build stops. A criterion that holds on the
+  # host and not on the other three is not a criterion.
+  #
+  # ⭐ THE VALUE WAS NEVER EVENLY SPREAD ACROSS THE LIST. What motivated this was
+  # `mcpplibs/tinyhttps` building against this port and failing at its
+  # twenty-seventh test, and what it used was sockets. The network and process
+  # families carry that value; a program is not misled for long about `chmod`,
+  # which fails at its first call and says so.
+  #
+  # So the list is what openkal will never have AND what can be withheld without
+  # taking an ordinary function with it. The second half is a property of musl
+  # rather than of openkal, and it is why this list is shorter than the argument
+  # for it would suggest.
   # ⚠️ WITH `select`, NOT BESIDE IT. A descriptor that is created and never
   # becomes ready is worse than one that cannot be created: a program waiting on
   # it waits for ever with nothing to report, whereas a refused creation is a

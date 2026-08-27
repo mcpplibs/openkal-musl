@@ -483,10 +483,20 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 *
 	 * The two ends are bound as ordinary stream descriptors, so read, write,
 	 * close, dup and poll reach them through the paths they already take. */
+	/* ⚠️ `SYS_pipe` DOES NOT EXIST EVERYWHERE. The architectures that gained
+	 * their numbering after pipe2 have only the later call, so naming the older
+	 * one unconditionally does not compile there:
+	 *
+	 *     error: use of undeclared identifier 'SYS_pipe'
+	 *
+	 * The guard is on the NUMBER being defined and not on the architecture,
+	 * because what varies is the kernel's table rather than the machine. */
+#ifdef SYS_pipe
 	case SYS_pipe:
+#endif
 	case SYS_pipe2: {
 		int* out = (int*)a1;
-		const int flags = (n == SYS_pipe2) ? (int)a2 : 0;
+		const int flags = (n == SYS_pipe2) ? (int)a2 : 0;   /* the older call takes none */
 		if (!out) return -EFAULT;
 		/* O_DIRECT would ask for packet boundaries, which a stream does not
 		 * have. Refusing is the honest answer; silently ignoring it would give
