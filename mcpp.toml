@@ -149,78 +149,52 @@ sources = [
   # openkal reaches through openkal.exec instead.
   "!musl/src/linux/cache.c",
 
-  # --- WHAT openkal WILL NEVER HAVE, EXPRESSED AS A LINK ERROR ---------------
+  # --- FACILITIES WITHHELD SO THAT THEIR ABSENCE IS A LINK ERROR -----------
   #
   # Below this line the exclusions answer a different question from the ones
   # above. Those replace a source this port supplies itself. These withhold a
-  # source whose facility openkal does not have and is not going to have.
+  # source whose facility openkal does not have and is not going to have, so that
+  # a program requiring it is refused when it is BUILT rather than when it runs.
   #
-  # THE TWO WERE BEING ANSWERED WITH ONE ENOSYS, AND THEY ARE NOT THE SAME FACT.
-  # A backend that does not provide `openkal.fs` makes `open` fail at run time,
-  # and that is correct: another backend does provide it, so the condition is a
-  # property of this deployment. `socket` is not like that. No openkal
-  # implementation provides a socket, because the specification has no interface
-  # that would carry one; the fact is permanent and independent of the backend.
+  # Clause 6.2 states the principle: the absence of an operation is expressed by
+  # the absence of its definition. `mcpplibs/tinyhttps` --- a package in mcpp's
+  # own index --- built successfully against this port and failed at its
+  # twenty-seventh test, which is what a run-time refusal costs.
   #
-  # Reporting a permanent fact as a run-time condition made it discoverable only
-  # by running. `mcpplibs/tinyhttps` --- a package in mcpp's own index --- BUILT
-  # SUCCESSFULLY against this port and failed at its twenty-seventh test. Clause
-  # 6.2 states the remedy: the absence of an operation is expressed by the
-  # absence of its definition, so that a program requiring one is refused when
-  # it is built.
+  # ⚠️⚠️ THE LIST IS MUCH SHORTER THAN THE PRINCIPLE, AND THE REASON IS MEASURED
+  # RATHER THAN CONSERVATIVE.
   #
-  # ⓘ The granularity is exact because of two flags this package already sets:
-  # `-ffunction-sections` with `-Wl,--gc-sections` means a definition nobody
-  # references is discarded rather than demanded. A program that does not call
-  # `socket` links as it did before; one that calls it does not link at all, and
-  # the diagnostic names the symbol.
-  # ⓘ `pipe` IS NOT ON THIS LIST, AND WAS, UNTIL openkal 0.8. A pipe is exactly
-  # what `kal_process_channel` provides --- a pair of streams of which one end
-  # crosses a spawn --- so it is no longer a facility openkal will never have,
-  # and the port supplies it from that interface rather than withholding it.
+  # Withholding a family only works when nothing else in musl reaches it. Each
+  # candidate was checked for consumers outside its own directory:
   #
-  # ⚠️ The closure said so before the reasoning did. Excluding it broke
-  # `faccessat`, which forks and reports the answer back through a pipe:
+  #     timerfd eventfd signalfd inotify epoll     0 consumers   withheld
+  #     select                                     1: network/res_msend.c
+  #     network        syslog.c, nscd_query.c, mq_notify.c   -> getpwnam
+  #     fork           forkpty.c, wordexp.c, daemon.c,
+  #                    linux/clone.c                         -> pthread_create
   #
-  #     ld64.lld: error: undefined symbol: pipe2
-  #     >>> referenced by faccessat.c:45
+  # The fork closure terminates at the THREAD implementation and the network
+  # closure at the password functions. Withholding either takes an essential or
+  # an ordinary facility with it, so neither is withheld.
   #
-  # An exclusion that takes an ordinary function with it is the wrong exclusion.
-  "!musl/src/network/*.c",
-  "!musl/src/select/*.c",
-  "!musl/src/process/fork.c",
-  "!musl/src/process/vfork.c",
-  "!musl/src/process/_Fork.c",
-  # ⚠️ `chmod`, `link` AND `symlink` ARE NOT ON THIS LIST, AND THEY WERE.
+  # ⚠️ AND THE MECHANISM HAS A PRECONDITION THIS PACKAGE MEETS ON ONE TARGET OF
+  # FOUR. `-ffunction-sections` with `-Wl,--gc-sections` is what makes an
+  # unreferenced definition cost nothing, and only `cfg(os = "linux")` sets those
+  # ldflags. On the mingw target the objects are kept, so `daemon` and `wordexp`
+  # took the build down while the same list passed here:
   #
-  # openkal defines no permissions and no links --- clause 11 records both as
-  # settled rather than deferred --- so by the reasoning above they belong here.
-  # The closure does not permit it. musl's own sources reach them from functions
-  # that are ordinary:
+  #     musl/src/legacy/daemon.c:18: undefined reference to `fork'
   #
-  #     lchmod.c   -> fchmodat
-  #     sem_open.c -> link
+  # ⭐ SO WITHHOLDING THE NETWORK FAMILY IS NOT REFUSED, IT IS NOT YET POSSIBLE.
+  # It becomes possible once every target collects unreferenced sections ---
+  # `--gc-sections` for the ELF and PE linkers, `-dead_strip` for this system's
+  # --- and that is a change to the link line of three targets, testable on its
+  # own, rather than something to attach here.
   #
-  # ⚠️ AND THE BREAKAGE IS PER TARGET, WHICH IS WHY IT PASSED HERE AND FAILED
-  # THERE. With `--gc-sections` a definition nobody references is discarded, so
-  # on a target where nothing reaches `lchmod` the exclusion is invisible; on one
-  # whose link model keeps it, the build stops. A criterion that holds on the
-  # host and not on the other three is not a criterion.
-  #
-  # ⭐ THE VALUE WAS NEVER EVENLY SPREAD ACROSS THE LIST. What motivated this was
-  # `mcpplibs/tinyhttps` building against this port and failing at its
-  # twenty-seventh test, and what it used was sockets. The network and process
-  # families carry that value; a program is not misled for long about `chmod`,
-  # which fails at its first call and says so.
-  #
-  # So the list is what openkal will never have AND what can be withheld without
-  # taking an ordinary function with it. The second half is a property of musl
-  # rather than of openkal, and it is why this list is shorter than the argument
-  # for it would suggest.
-  # ⚠️ WITH `select`, NOT BESIDE IT. A descriptor that is created and never
-  # becomes ready is worse than one that cannot be created: a program waiting on
-  # it waits for ever with nothing to report, whereas a refused creation is a
-  # failure at a line the author wrote.
+  # What remains withheld are the five whose closure is empty on every target.
+  # ⚠️ THEY GO TOGETHER WITH THEIR REASON: a descriptor that is created and never
+  # becomes ready is worse than one that cannot be created, because a program
+  # waiting on it waits for ever with nothing to report.
   "!musl/src/linux/timerfd.c",
   "!musl/src/linux/eventfd.c",
   "!musl/src/linux/signalfd.c",

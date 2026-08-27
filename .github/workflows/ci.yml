@@ -283,25 +283,29 @@ jobs:
       # consumer's command line — not that one macro no longer collides, which
       # would go green again the moment the package patched that macro while
       # the leak stayed.
-      # WHAT openkal WILL NEVER HAVE IS A LINK ERROR, NOT A RUN-TIME ONE.
+      # A FACILITY WHOSE ABSENCE IS A LINK ERROR STAYS ABSENT, AND ONE THAT IS
+      # NOT WITHHELD STAYS PRESENT.
       #
-      # A backend that does not provide openkal.fs makes `open` fail at run
-      # time, and that is correct: another backend does provide it. `socket` is
-      # not like that --- no openkal implementation provides one, because the
-      # specification has no interface that would carry it. Reporting a
-      # permanent fact as a run-time condition made it discoverable only by
-      # running: mcpplibs/tinyhttps built successfully against this port and
-      # failed at its twenty-seventh test.
+      # The port withholds five sources so that a program requiring them is
+      # refused when it is built rather than when it runs. The list is short and
+      # the manifest records why: withholding a family only works when nothing
+      # else in musl reaches it, and the network and process families are reached
+      # from the password functions and from the thread implementation.
       #
-      # THE CRITERION IS TWO-DIRECTIONAL AND NEITHER HALF IS OPTIONAL. Asserting
-      # only that `socket` fails would pass for a port that had stopped linking
-      # anything at all; asserting only that ordinary programs link would pass
-      # for the defect this replaced.
-      - name: A facility openkal will never have is absent at the link
+      # ⚠️ THE MECHANISM ALSO HAS A PRECONDITION THIS PACKAGE MEETS ON ONE TARGET
+      # OF FOUR --- only `cfg(os = "linux")` collects unreferenced sections ---
+      # which is why this check runs on Linux and states that limitation rather
+      # than implying the property holds everywhere.
+      #
+      # THE CRITERION IS TWO-DIRECTIONAL AND NEITHER HALF IS SUFFICIENT.
+      # Asserting only the absences would pass for a port that had stopped
+      # linking anything; asserting only the presences would pass for the defect
+      # the withholding exists to prevent.
+      - name: What is withheld is absent, and what is not withheld is present
         if: runner.os == 'Linux' && matrix.target == ''
         run: |
           set -euo pipefail
-          probe() {   # name, includes, body -> prints the undefined symbol, or nothing
+          probe() {   # name, includes, body -> the undefined symbol, or nothing
             local d; d="$(mktemp -d)"
             mkdir -p "$d/src"
             cat > "$d/mcpp.toml" <<TOML
@@ -325,33 +329,36 @@ jobs:
 
           fail=0
 
-          # Absent, and the diagnostic names the symbol.
+          # Withheld, and the diagnostic names the symbol.
           for spec in \
-            "socket|#include <sys/socket.h>|int s = socket(AF_INET, SOCK_STREAM, 0); (void)s;" \
-            "fork|#include <unistd.h>|if (fork()==0) return 1;" \
-            "poll|#include <poll.h>|struct pollfd p={0,1,0}; poll(&p,1,0);" \
-            "_Fork|#include <unistd.h>|_Fork();" ; do
+            "epoll_create1|#include <sys/epoll.h>|int e = epoll_create1(0); (void)e;" \
+            "eventfd|#include <sys/eventfd.h>|int e = eventfd(0,0); (void)e;" \
+            "timerfd_create|#include <sys/timerfd.h>|int t = timerfd_create(0,0); (void)t;" \
+            "inotify_init|#include <sys/inotify.h>|int i = inotify_init(); (void)i;" ; do
             n="${spec%%|*}"; rest="${spec#*|}"; inc="${rest%%|*}"; body="${rest#*|}"
             got="$(probe "$n" "$inc" "$body")"
             case "$got" in
-              *"$n"*) echo "  absent at the link: $n" ;;
+              *"$n"*) echo "  withheld, absent at the link: $n" ;;
               *) echo "::error::$n did not fail at the link; got: ${got:-a successful build}"
                  fail=1 ;;
             esac
           done
 
-          # And the reverse: an ordinary program is unaffected. Without this the
-          # check above would pass for a port that linked nothing.
+          # Not withheld, and therefore present. Without this the check above
+          # would pass for a port that linked nothing at all. `pipe` is here
+          # because openkal 0.8 made it expressible and it moved off the list;
+          # `faccessat` because withholding `pipe` had taken it with it.
           for spec in \
             "printf|#include <stdio.h>|printf(\"x\\n\");" \
             "malloc|#include <stdlib.h>|void* p=malloc(8); free(p);" \
             "open|#include <fcntl.h>|int f=open(\"x\",0); (void)f;" \
             "pipe|#include <unistd.h>|int f[2]; pipe(f);" \
+            "faccessat|#include <unistd.h>|faccessat(AT_FDCWD,\".\",F_OK,0);" \
             "chmod|#include <sys/stat.h>|chmod(\"x\",0644);" ; do
             n="${spec%%|*}"; rest="${spec#*|}"; inc="${rest%%|*}"; body="${rest#*|}"
             got="$(probe "$n" "$inc" "$body")"
             if [ -n "$got" ]; then
-              echo "::error::$n stopped linking, which this change must not do: $got"
+              echo "::error::$n stopped linking, which nothing here may do: $got"
               fail=1
             else
               echo "  still linked: $n"
@@ -359,7 +366,7 @@ jobs:
           done
 
           [ "$fail" = 0 ] || exit 1
-          echo "  ok  a permanent absence is a link error, and nothing else moved"
+          echo "  ok  what is withheld is absent, and nothing else moved"
 
       - name: What this package is built from is not what it publishes
         working-directory: examples/cross-hello
