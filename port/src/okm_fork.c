@@ -59,7 +59,8 @@ void      __okm_set_self(void*);
  * reference would make a program that never calls `fork' fail to link. */
 extern __typeof(kal_space_start) kal_space_start __attribute__((__weak__));
 
-int __okm_child_record(struct kal_process h);   /* okm_syscall.c */
+int  __okm_child_record(struct kal_process h);   /* okm_syscall.c */
+void __okm_forget_children(void);               /* okm_syscall.c */
 
 /* The context the started child resumes into.
  *
@@ -142,6 +143,10 @@ syscall_arg_t __okm_fork(void)
 		 * everything after it does. */
 		__okm_set_tp(g_carried_tp);
 		__okm_set_self(g_carried_self);
+		/* The entries in the child table name programs the ORIGINAL started,
+		 * and POSIX is explicit that a duplicate has no children. okm_syscall.c
+		 * records what keeping them would cost. */
+		__okm_forget_children();
 		okm_unlock();
 		return 0;                     /* the child */
 	}

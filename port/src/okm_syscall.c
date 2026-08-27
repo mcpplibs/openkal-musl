@@ -408,6 +408,22 @@ int __okm_child_record(struct kal_process h)
 	return -EAGAIN;
 }
 
+/* ⚠️ A COPY OF THE CALLING IMAGE INHERITS THIS TABLE AND MUST NOT KEEP IT.
+ *
+ * The entries name programs the ORIGINAL started, and POSIX is explicit that a
+ * duplicate has no children. Left in place they are worse than useless: a copy
+ * that called `wait' would be told about a program it did not start and cannot
+ * wait for, and `system' inside a copy --- which waits for the child it just
+ * started --- could be handed one of the original's instead.
+ *
+ * Called from okm_fork.c, in the started context, before anything reads the
+ * table. The handles are not released: they belong to the original, which is
+ * still holding them. */
+void __okm_forget_children(void)
+{
+	for (int i = 0; i < OKM_MAX_CHILD; i++) g_child[i].used = 0;
+}
+
 static int child_index(int pid)
 {
 	for (int i = 0; i < OKM_MAX_CHILD; i++)
