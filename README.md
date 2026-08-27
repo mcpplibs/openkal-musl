@@ -149,7 +149,7 @@ bridge a difference in shape:
 
 | | lines |
 | --- | --- |
-| the system-call correspondence (`okm_syscall.c`) | 1480 |
+| the system-call correspondence (`okm_syscall.c`) | 1496 |
 | sockets and datagrams (`okm_net.c`) | 788 |
 | descriptors and name resolution (`okm_fd.c`) | 463 |
 | `setjmp` and its relatives (`okm_setjmp.S`) | 316 |
@@ -159,10 +159,10 @@ bridge a difference in shape:
 | execution contexts and the suspension primitive (`okm_thread.c`) | 203 |
 | starting another program (`okm_spawn.c`) | 164 |
 | where per-context state is kept (`okm_context.c`) | 162 |
-| duplicating the calling image (`okm_fork.c`) | 109 |
+| duplicating the calling image (`okm_fork.c`) | 166 |
 | what two object formats do not provide (`okm_format.c`) | 105 |
 | mapping, the working directory, program headers, the architecture seams, the one file each of two object formats needs | 398 |
-| **total** | **5014** |
+| **total** | **5087** |
 
 Against 1345 musl sources compiled unmodified. The ratio is the measurement: if
 openkal's decomposition were wrong, the port layer would be where the difference
@@ -172,7 +172,7 @@ every one of those is about an object format or a naming convention rather than
 about a kernel — which is the shape of the result rather than a qualification of
 it.
 
-**⚠️ It grew by 2221 more when the socket, datagram, readiness and image-copying
+**⚠️ It grew by 2294 more when the socket, datagram, readiness and image-copying
 routes were added, and that number deserves a reading rather than a footnote.**
 Roughly half of it is comment; of the code, the largest single piece is the
 state machine in `okm_net.c`, and what that machine bridges is one difference in
