@@ -26,3 +26,7 @@ sample.txt
 run.log
 out.log
 crash.log
+
+# What the object-level checks in continuous integration write beside the
+# sources they examine.
+syms.txt

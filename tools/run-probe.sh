@@ -31,6 +31,11 @@ dir="${1:?the example directory}"
 name="${2:?the name of the program}"
 shift 2
 
+# ⚠️ RESOLVED BEFORE THE `cd' BELOW. `BASH_SOURCE' is the path this script was
+# invoked by, which is relative in every caller here, and a relative path stops
+# naming this directory the moment the working directory moves.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 cd "$dir"
 
 extra=''
@@ -38,11 +43,9 @@ extra=''
 # shellcheck disable=SC2086
 mcpp build $extra
 
-# ⚠️ THE BINARY IS IDENTIFIED BY NAME AND BY BOTH SPELLINGS. One of the three
-# systems appends a suffix, and a search for the bare name there finds nothing
-# and reports it as a build that did not happen.
-binary="$(find target -type f \( -name "$name" -o -name "$name.exe" \) | head -1)"
-[ -n "$binary" ] || { echo "::error::$name did not build in $dir"; exit 1; }
+# ⚠️ THE ARTEFACT OF THE BUILD THAT JUST RAN. tools/one-artifact.sh records what
+# a search across an accumulating `target/` answers instead, and what it cost.
+binary="$(bash "$here/one-artifact.sh" "$name")"
 
 # Written out rather than taken from `timeout', which two of the three systems
 # have and one does not.

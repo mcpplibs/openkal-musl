@@ -50,14 +50,32 @@ jobs:
           # interface in whole (clause 3), so "the probe was not run" and "the
           # probe was run and the refusal was the expected answer" are
           # different outcomes, and only the second is evidence.
-          - { name: 'linux, gcc',    os: ubuntu-24.04, toolchain: 'gcc@16.1.0',  target: '',                   net: 'yes', fork: '--fork',    shell: '--shell'    }
-          - { name: 'linux, llvm',   os: ubuntu-24.04, toolchain: 'llvm@22.1.8', target: '',                   net: 'yes', fork: '--fork',    shell: '--shell'    }
-          - { name: 'macos, llvm',   os: macos-14,     toolchain: 'llvm@20.1.7', target: '',                   net: 'yes', fork: '--fork',    shell: '--shell'    }
+          #
+          # ⭐⭐ `abort` NAMES WHAT EACH BACKEND'S `kal_abort` PRODUCES, AND IT IS
+          # THREE DIFFERENT THINGS ON PURPOSE.
+          #
+          # Until 0.6.0 `abort` did not end the program at all: musl's `raise` is
+          # `tkill`, this port had no case for it, and `abort` fell through to
+          # musl's own `a_crash()` --- `hlt` on x86_64 --- so every uncaught
+          # exception and every `assert` reported a segmentation fault. A row
+          # asserting only "the end was not an ordinary one" would have passed
+          # throughout that, because a fault is not an ordinary end either. So
+          # each row asserts the PARTICULAR end its implementation produces:
+          #
+          #   --abort-signal      SIGABRT: openkal-linux raises it with tgkill
+          #   --abort-status      exit 134: openkal-macos ends with a status no
+          #                       program returns
+          #   --abort-terminated  a termination rather than a return: Windows
+          #                       fail-fasts, and the fault this replaces was
+          #                       reported there as an exit
+          - { name: 'linux, gcc',    os: ubuntu-24.04, toolchain: 'gcc@16.1.0',  target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-signal'     }
+          - { name: 'linux, llvm',   os: ubuntu-24.04, toolchain: 'llvm@22.1.8', target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-signal'     }
+          - { name: 'macos, llvm',   os: macos-14,     toolchain: 'llvm@20.1.7', target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-status'     }
           # ⚠️ openkal-windows declines `openkal.space`: this system has no
           # primitive that copies an address space and starts a context in the
           # copy, and inventing one would be the simulation clause 3.1
           # forbids. `--no-fork` asserts the refusal.
-          - { name: 'windows, gcc',  os: windows-2022, toolchain: 'gcc@16.1.0',  target: 'x86_64-windows-gnu', net: 'yes', fork: '--no-fork', shell: '--no-shell' }
+          - { name: 'windows, gcc',  os: windows-2022, toolchain: 'gcc@16.1.0',  target: 'x86_64-windows-gnu', net: 'yes', fork: '--no-fork', shell: '--no-shell', abort: '--abort-terminated' }
     defaults:
       run:
         shell: bash
@@ -265,6 +283,7 @@ jobs:
           for name in kal_net_connect kal_net_listen kal_net_accept kal_net_close \
                       kal_datagram_open kal_datagram_recv_from \
                       kal_timeout_read kal_timeout_write kal_timeout_accept \
+                      kal_timeout_wait_process \
                       kal_space_start kal_process_channel; do
             if grep -qE "^ *U $name\$" syms.txt; then
               echo "::error::$name is an undefined STRONG reference; an interface a backend may decline has been made mandatory"
@@ -278,6 +297,29 @@ jobs:
           done
           [ "$weakfail" = 0 ] || exit 1
           echo "  ok  every optional interface is referenced weakly, and kal_time_sleep is strong"
+
+          # ⚠️⚠️ AND ONE OF THEM IS AN OBJECT, WHICH IS NOT TESTED THE WAY THE
+          # ELEVEN ABOVE ARE.
+          #
+          # Every name above is a function, so `if (kal_net_connect)` tests the
+          # ADDRESS and is correct. `kal_process_props` is a capability word:
+          # the same spelling would READ it, and where the definition is absent
+          # the object sits at address zero --- so the test written to prevent a
+          # null dereference would be one. okm_opt.h takes the address, once, and
+          # every caller reaches the word through that.
+          #
+          # ⚠️ WHAT THIS STEP CAN AND CANNOT SEE. That the reference is weak, it
+          # can. That the source takes the address rather than reading the value,
+          # it cannot --- both forms leave a relocation. The rule is stated where
+          # it is used and asserted here only against the failure a link can
+          # produce: a strong reference, which would make a backend that declines
+          # `openkal.process` fail to link every program.
+          case "$(grep -E '^ *[wv] kal_process_props$' syms.txt | wc -l)" in
+            0) echo "::error::kal_process_props is not a weak reference in these objects"
+               grep kal_process_props syms.txt || echo "        (it is referenced nowhere)"
+               exit 1 ;;
+            *) echo "  weak object: kal_process_props" ;;
+          esac
 
       # ⭐⭐ ASKING WHETHER A STREAM IS A TERMINAL GETS THE RIGHT ANSWER.
       #
@@ -510,7 +552,109 @@ jobs:
       - name: The subprocess probe
         env:
           MCPP_TARGET: ${{ matrix.target }}
-        run: bash tools/run-probe.sh examples/subprocess subprocess ${{ matrix.fork }} ${{ matrix.shell }}
+        run: bash tools/run-probe.sh examples/subprocess subprocess ${{ matrix.fork }} ${{ matrix.shell }} ${{ matrix.abort }}
+
+      # ⭐⭐ WHERE A STARTED PROGRAM'S OUTPUT WENT, WHICH THE PROBE CANNOT ASK
+      # ABOUT ITSELF.
+      #
+      # A caller that redirects descriptor 1 and then starts a program used to
+      # get the program's bytes on the stream IT had been started with, and the
+      # file it had redirected onto stayed empty (openkal-linux#13). The probe
+      # asserts the file; it cannot assert the other half, because a program
+      # cannot read its own output. This log is that output.
+      #
+      # ⚠️ BOTH DIRECTIONS, AND THE SECOND IS NOT DECORATION. Requiring only that
+      # the redirected markers are absent would pass for a library that had
+      # stopped letting a started program write anywhere at all; requiring only
+      # that the inherited one is present would pass for the defect. The probe's
+      # own messages are worded so that neither token can appear in one.
+      - name: A started program's output went where the caller sent it
+        working-directory: examples/subprocess
+        run: |
+          set -euo pipefail
+          test -s run.log || { echo "::error::no run.log — nothing to read"; exit 1; }
+          if grep -q 'redirected-bytes' run.log; then
+            echo "::error::a started program's output arrived on the caller's own stream"
+            grep -n 'redirected-bytes' run.log | sed 's/^/        /'
+            exit 1
+          fi
+          grep -q 'inherited-child-bytes' run.log \
+            || { echo "::error::a started program that redirected nothing wrote nowhere; the check above proves nothing"
+                 exit 1; }
+          echo "  ok  redirected output reached the file; inherited output reached the caller"
+
+      # ⭐ AN OPERATION THIS LIBRARY DOES NOT HAVE CAN SAY SO WHEN ASKED.
+      #
+      # The default arm of the dispatcher answers ENOSYS in silence, and the only
+      # way a consumer could learn WHICH operation was missing was to read
+      # port/src/okm_syscall.c. Two rounds of openkal-linux#13 went on that
+      # question.
+      #
+      # ⚠️ THREE OBSERVATIONS, BECAUSE THE INTERESTING FAILURES ARE THE QUIET
+      # ONES: a channel that reports nothing when asked, a channel that reports
+      # when it was not asked, and a channel that reports the same thing once per
+      # attempt so that a reader counting lines concludes it happened once.
+      - name: An absent operation reports which one it was, and only when asked
+        if: runner.os == 'Linux' && matrix.target == ''
+        run: |
+          set -euo pipefail
+          d="$(mktemp -d)"; mkdir -p "$d/src"
+          cat > "$d/mcpp.toml" <<TOML
+          [package]
+          name    = "traceprobe"
+          version = "0.1.0"
+
+          [dependencies]
+          openkal-musl = { path = "$PWD" }
+
+          [targets.traceprobe]
+          kind = "bin"
+          main = "src/main.c"
+
+          [build]
+          cxx_runtime = "host-coupled"
+          TOML
+          sed -i 's/^          //' "$d/mcpp.toml"
+          # ⭐ `symlinkat` IS THE OPERATION AND THE PROBE PRINTS ITS OWN NUMBER.
+          #
+          # openkal has no atom that creates a link --- the manifest and README
+          # both record that --- so it reaches the default arm rather than a case
+          # with a decision of its own. The number is printed by the probe rather
+          # than computed here, so the expectation comes from the same headers
+          # the dispatcher was compiled with; a number worked out on the host
+          # would be answering for the host's C library.
+          printf '%s\n' \
+            '#include <sys/syscall.h>' \
+            '#include <fcntl.h>' \
+            '#include <unistd.h>' \
+            '#include <stdio.h>' \
+            'int main(void) {' \
+            '    for (int i = 0; i < 100; i++) (void)!symlinkat("a", AT_FDCWD, "b");' \
+            '    printf("%ld\n", (long)SYS_symlinkat);' \
+            '    return 0;' \
+            '}' > "$d/src/main.c"
+          ( cd "$d" && mcpp build --toolchain '${{ matrix.toolchain }}' )
+          bin="$(find "$d/target" -name traceprobe -type f | head -1)"
+          test -n "$bin" || { echo "::error::the probe did not build"; exit 1; }
+
+          want="$("$bin" 2> /dev/null)"
+          [ -n "$want" ] || { echo "::error::the probe printed no operation number"; exit 1; }
+
+          quiet="$("$bin" 2>&1 > /dev/null | wc -l)"
+          [ "$quiet" = 0 ] \
+            || { echo "::error::the channel reported $quiet line(s) without being asked"
+                 "$bin" 2>&1 > /dev/null | sed 's/^/        /'; exit 1; }
+
+          asked="$(OPENKAL_MUSL_TRACE=enosys "$bin" 2>&1 > /dev/null)"
+          echo "  what it reported: $asked"
+          n="$(printf '%s\n' "$asked" | grep -c 'no operation for system call' || true)"
+          [ "$n" = 1 ] \
+            || { echo "::error::expected exactly one report for one hundred attempts, got $n"
+                 exit 1; }
+          printf '%s\n' "$asked" | grep -q "no operation for system call $want\$" \
+            || { echo "::error::the report does not name the operation the probe asked for ($want)"
+                 exit 1; }
+          echo "  ok  silent unless asked, one line per operation, and it names the operation"
 
       - name: The same program, built the ordinary way, as a control
         run: |
@@ -533,7 +677,7 @@ jobs:
           [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
           cd examples/cross-hello
           mcpp build $extra
-          binary="$(find target -type f \( -name 'cross-hello' -o -name 'cross-hello.exe' \) | head -1)"
+          binary="$(bash "$GITHUB_WORKSPACE/tools/one-artifact.sh" cross-hello)"
           "./$binary" 2>&1 | tee out.log
           grep -q -- '-- failures: 0 --' out.log
 
@@ -545,7 +689,7 @@ jobs:
           extra=''
           [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
           mcpp build $extra
-          binary="$(find target -type f \( -name 'wordcount' -o -name 'wordcount.exe' \) | head -1)"
+          binary="$(bash "$GITHUB_WORKSPACE/tools/one-artifact.sh" wordcount)"
           WORDCOUNT_VERBOSE=1 "$binary" sample.txt 2>&1 | tee run.log
 
           counts="$(sed -n 's/^lines \([0-9]*\) words \([0-9]*\) bytes \([0-9]*\)$/\1 \2 \3/p' run.log)"

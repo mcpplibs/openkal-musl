@@ -169,6 +169,12 @@ int  okm_fd_cloexec(int fd, int on);
 int  okm_fd_get_cloexec(int fd);
 void okm_table_init(void);
 
+/* The stream descriptor `fd' named when the program began, for fd in [0,3), and
+ * zero otherwise. What a spawn needs in order to tell a descriptor that has been
+ * redirected from one that has not; okm_fd.c records why the question is about
+ * the beginning rather than about the present. */
+kal_uintptr okm_std_stream(int fd);
+
 /* Where a name resolves to. `base' is a directory openkal supplied or one
  * opened beneath it; `rel' is the remainder, in the form openkal accepts:
  * relative, without a leading separator and without a component that ascends. */
@@ -205,6 +211,11 @@ int okm_chdir(int dirfd, const char* path);
  * program written for Linux expects. The mapping is a table; it does not
  * reconstruct a namespace. */
 int okm_errno(int kal_error_value);
+
+/* The other direction of the same kind: a program's open(2) flags said in
+ * openkal's vocabulary. Two callers reach it, `open' and the file action a
+ * spawn may carry, and the table is written once. */
+kal_uintptr okm_open_flags(int open_flags);
 
 /* --- sockets, in okm_net.c -------------------------------------------------
  *

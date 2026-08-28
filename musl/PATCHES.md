@@ -260,6 +260,108 @@ caller that sets `O_NONBLOCK` and finds nothing to read waits that long rather
 than not at all. Where the environment provides no `openkal.timeout`,
 `O_NONBLOCK` is **refused** rather than accepted and ignored.
 
+## Five more, added with the redirection, signal and bounded-wait routes
+
+These were reported by a consumer rather than found here, as
+[openkal-linux#13](https://github.com/mcpplibs/openkal-linux/issues/13), and
+each of the five is a place where the specification already carried the atom and
+this library had no route to it.
+
+**What a started program's three streams are is decided from the descriptor
+table and not from a constant.** `port/src/okm_spawn.c` passed `{0, 0, 0}` and
+let a caller's file actions overwrite it. openkal spells inheritance as a handle
+of zero, and an implementation reads that as the descriptor the CALLING IMAGE
+holds --- which `dup2` cannot change, because it rebinds this library's table and
+there is no operation that replaces one of a running program's own streams. So
+`dup2(fd, 1)` followed by `posix_spawn`, by `system`, or by `fork` and `execve`
+started a program writing to the stream this program had been started with, and
+the file the caller had redirected onto stayed empty. What a caller can tell now
+is nothing: the redirection is carried across, and the three positions that were
+not redirected are still passed as zero so that a backend without
+`KAL_PROCESS_PROP_STREAM_PASSING` still starts every program that does not
+redirect.
+
+**A file action is applied in the order it was added, and used not to be.**
+musl's `posix_spawn_file_actions_add*` PREPEND, so `__actions` names the most
+recent; musl's own `posix_spawn` walks to the tail and follows `prev`. This
+library followed `next` and applied them in reverse. Invisible until two actions
+name one position, which no caller in musl itself produces --- `popen` emits a
+single `adddup2`.
+
+**Closing one of the three standard positions in a started program is refused.**
+`posix_spawn_file_actions_addclose(&fa, 0…2)` reports `ENOSYS`; above position
+two it is performed, because nothing above two is inherited. openkal has no
+value meaning "no stream", and zero --- the value that looks like one --- means
+the opposite. It used to be accepted and not performed, which handed a program
+the standard input its caller had just taken away.
+
+**A signal aimed at this program performs its default action, and `abort` works
+because of it.** `SYS_tkill` and `SYS_tgkill` had no case, so musl's `raise`
+answered `ENOSYS` and `abort` --- which raises, uninstalls, raises again and then
+reaches the line its own comment calls unreachable --- ended in `a_crash()`. On
+x86_64 that is `hlt`, which faults outside ring 0 and is delivered as SIGSEGV.
+Measured on the host kernel 2026-08-28: a program whose entire body is `hlt`
+exits 139 with a core dumped. Every uncaught exception, `assert`,
+`std::terminate` and `__stack_chk_fail` over this port therefore reported a
+segmentation fault. They now reach `kal_abort`, which raises the signal on
+openkal-linux and ends with a distinguished status on the other two.
+
+⚠️ Three numbers are musl's own and must never terminate anything:
+`pthread_impl.h` reserves 32, 33 and 34 for the timer thread, cancellation and
+`synccall`, each sent with this same call. `pthread_cancel` is
+`pthread_kill(t, SIGCANCEL)`, so a table making 33 terminating would end the
+program the first time anything cancelled a thread. They are refused, which is
+what they already got and what musl already handles.
+
+⚠️ And the target is deliberately not examined. A terminating signal's default
+action ends the process rather than the context that was named --- which is true
+on Linux too --- so which context a caller aimed at makes no difference.
+Comparing the identifier against `kal_task_current()` would have been worse than
+useless: a thread created here records `port/src/okm_thread.c`'s own counter
+rather than openkal's identity, so the comparison would have failed for every
+context but the first and `abort` from a thread would have gone back to `hlt`.
+
+**`waitpid(…, WNOHANG)` returns without waiting, and costs one polling interval
+of the environment beneath.** It used to discard its options and block, which is
+the one thing that flag exists to prevent. `kal_timeout_wait_process` has been in
+the specification since 0.8. openkal spells "no bound" as zero, so this asks for
+the smallest bound there is --- the same arrangement `O_NONBLOCK` uses above ---
+and openkal-linux, which has no bounded wait for a child and polls, rounds that
+up to one millisecond. Where the environment provides no `openkal.timeout`,
+`WNOHANG` is refused rather than accepted and ignored.
+
+### And one defect of the criteria rather than of the library
+
+⭐ `tools/run-probe.sh` chose the program to run with `find target … | head -1`.
+`target/` accumulates one directory per configuration --- per toolchain, per
+target, and per version of a dependency, because the version is part of the
+fingerprint --- so after the version moved from 0.5.0 to 0.6.0 the search
+answered with the program built BEFORE the change. Two newly added observations
+did not appear in the output of a run that reported `-- failures: 0 --`. The
+criteria had not failed; they had not run, and nothing said so.
+
+It does not bite in continuous integration, which is why it survived: a fresh
+checkout builds one configuration and there is nothing to choose between. It
+bites on the machine where the change is being written, which is where a
+criterion is trusted most. `tools/one-artifact.sh` now asserts the count before
+anything is read, and the steps that run a program call it.
+
+### One thing the specification reserves in one interface and hands out in another
+
+`kal_spawn_streams` reserves a stream handle of **zero** to mean inheritance.
+`kal_stream` reserves nothing, and openkal-linux answers `kal_stdin()` with zero
+because its streams are the environment's own descriptors. The two agree at
+position zero --- placing standard input at standard input and inheriting it are
+the same act --- and cannot be told apart anywhere else. A caller that redirects
+its OUTPUT onto its own standard input and then starts a program is therefore
+asking for something no argument to `kal_process_spawn` can express.
+
+This library **refuses** that spawn rather than passing the zero on, because
+passing it on would be read as inheritance and would start the program writing to
+the stream the caller had just redirected away from --- the silent wrong answer
+this whole set of changes exists to remove. Reported to the specification; it is
+not a defect this library can fix, and a refusal is one a caller can act upon.
+
 ## What the architecture does not decide alone
 
 `long double`.
