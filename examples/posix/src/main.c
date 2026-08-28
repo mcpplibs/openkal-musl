@@ -303,9 +303,38 @@ int main(int argc, char **argv, char **envp) {
 	/* A value POSIX says cannot fail is not a negated error. */
 	check(getpgrp() > 0, "the process group is a number and not a negated error");
 
-	/* The page is the machine's and not the build's. */
-	check(sysconf(_SC_PAGESIZE) > 0 && (sysconf(_SC_PAGESIZE) & (sysconf(_SC_PAGESIZE) - 1)) == 0,
-	      "the page size is a positive power of two obtained from the environment");
+	/* The page is the machine's and not the build's.
+	 *
+	 * ⚠️⚠️ AND "POSITIVE POWER OF TWO" WAS TRUE OF THE VALUE THAT BROKE IT.
+	 * This library took `kal_memory_granularity()' as its page size, and an
+	 * implementation for a machine with no memory management unit answers ONE
+	 * --- correctly, since nothing there needs rounding. One is positive and
+	 * one is a power of two, so this assertion held while the allocator asked
+	 * the environment for one-byte extents and the program stopped inside the
+	 * first allocation that needed a new one.
+	 *
+	 * ⭐ SO THE CRITERION IS WHAT THE ALLOCATOR REQUIRES, NOT WHAT THE NUMBER
+	 * LOOKS LIKE. A page smaller than this library's own quantum is not a page
+	 * this library can use, whatever openkal reports. */
+	{
+		const long page = sysconf(_SC_PAGESIZE);
+		check(page >= 4096 && (page & (page - 1)) == 0,
+		      "the page size is a power of two no smaller than the allocator's quantum");
+
+		/* And the property the number exists to have. Several pages, written
+		 * end to end: the allocation this library rounds to `page' and the
+		 * memory it hands back are the same memory. */
+		const size_t span = (size_t)page * 4 + 17;
+		unsigned char *big = malloc(span);
+		int whole = big != NULL;
+		if (big) {
+			for (size_t i = 0; i < span; i++) big[i] = (unsigned char)(i * 31u);
+			for (size_t i = 0; i < span; i++)
+				if (big[i] != (unsigned char)(i * 31u)) { whole = 0; break; }
+			free(big);
+		}
+		check(whole, "several pages are obtained in one allocation and every byte of it holds");
+	}
 
 	printf("-- failures: %d --\n", failures);
 	return failures ? 1 : 0;

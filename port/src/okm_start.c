@@ -285,8 +285,37 @@ void __okm_libc_init(void)
 	 *
 	 * openkal 0.9 carries the value because it is a property of the machine the
 	 * program RUNS on and not of the machine it was built for. */
-	const kal_uintptr grain = kal_memory_granularity();
-	libc.page_size = grain ? grain : 4096;
+	/* ⚠️⚠️ AND IT IS NOT THE SAME QUANTITY AS THIS LIBRARY'S PAGE SIZE, WHICH
+	 * IS WHAT ASSIGNING IT DIRECTLY ASSUMED.
+	 *
+	 * openkal's granularity is the coarsest quantum a caller must respect. An
+	 * implementation for a machine with no memory management unit answers ONE,
+	 * correctly: there is no page, and nothing needs rounding.
+	 *
+	 * `libc.page_size' is a different thing wearing the same name. This library
+	 * rounds heap growth to it, reports it as `sysconf(_SC_PAGESIZE)' and as
+	 * `st_blksize', and its allocator's arithmetic assumes a power of two no
+	 * smaller than its own quantum. Given one, the allocator asked for
+	 * one-byte extents and the program stopped inside the first allocation
+	 * large enough to need a new one.
+	 *
+	 * ⭐ MEASURED, AND ONLY ON THE MACHINE THAT ANSWERS THAT WAY. Over
+	 * openkal-opensbi the same-source example printed three of its four lines
+	 * and stopped --- containers, exceptions and unwinding all held, and the
+	 * fourth line was the first to format a string. Over openkal-linux, whose
+	 * answer is 4096, nothing was wrong.
+	 *
+	 * So this takes openkal's answer as a FLOOR TO RESPECT rather than as the
+	 * value: at least what the machine requires, at least what this library
+	 * requires, and a power of two because both assume one. */
+	kal_uintptr grain = kal_memory_granularity();
+	if (grain < 4096) grain = 4096;
+	else if (grain & (grain - 1)) {           /* not a power of two: round up */
+		kal_uintptr p = 4096;
+		while (p && p < grain) p <<= 1;
+		grain = p ? p : 4096;
+	}
+	libc.page_size = grain;
 	fill_random();
 	g_auxv[0] = 6  /* AT_PAGESZ */; g_auxv[1] = libc.page_size;
 	g_auxv[2] = 25 /* AT_RANDOM */; g_auxv[3] = (size_t)(uintptr_t)g_random;
