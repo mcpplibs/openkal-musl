@@ -241,7 +241,11 @@ int okm_fd_get_cloexec(int fd)
 
 /* --- the supplied directories --------------------------------------------- */
 
-static struct { struct kal_dir dir; const char* name; size_t len; } g_pre[16];
+/* The names are held here rather than pointed at. openkal 0.9 copies a name
+ * into the caller's buffer instead of answering with a pointer into its own,
+ * which is what lets this library behave the same whether the implementation is
+ * linked into it, loaded beside it, or across a boundary. */
+static struct { struct kal_dir dir; char name[256]; size_t len; } g_pre[16];
 static int g_npre;
 
 struct kal_dir okm_cwd_dir;
@@ -288,9 +292,16 @@ void okm_table_init(void)
 	const kal_uintptr n = okm_fs_preopen_count();
 	g_npre = 0;
 	for (kal_uintptr i = 0; i < n && g_npre < 16; i++) {
-		struct kal_dir d; const char* nm = 0; kal_uintptr l = 0;
-		if (okm_fs_preopen(i, &d, &nm, &l) != kal_ok) continue;
-		g_pre[g_npre].dir = d; g_pre[g_npre].name = nm; g_pre[g_npre].len = l;
+		struct kal_dir d; kal_uintptr l = 0;
+		/* The name is copied into this layer's own storage. It answered with a
+		 * pointer into the implementation's, which is meaningful only while the
+		 * implementation shares this address space --- and this library is the
+		 * one consumer that must behave the same whichever way it is reached. */
+		if (okm_fs_preopen(i, &d, g_pre[g_npre].name,
+		                   sizeof g_pre[g_npre].name - 1, &l) != kal_ok) continue;
+		if (l >= sizeof g_pre[g_npre].name) continue;
+		g_pre[g_npre].name[l] = 0;
+		g_pre[g_npre].dir = d; g_pre[g_npre].len = l;
 		g_npre++;
 	}
 

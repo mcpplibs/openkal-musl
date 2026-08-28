@@ -45,8 +45,9 @@
 #define okm_fs_preopen_count kal_fs_preopen_count
 #define okm_fs_preopen       kal_fs_preopen
 #define okm_fs_open_dir      kal_fs_open_dir
-#define okm_fs_open_file     kal_fs_open_file
 #define okm_fs_open          kal_fs_open
+#define okm_fs_props         kal_fs_props
+#define okm_fs_max_name      kal_fs_max_name
 #define okm_fs_close_dir     kal_fs_close_dir
 #define okm_fs_close_file    kal_fs_close_file
 #define okm_fs_stream        kal_fs_stream
@@ -61,6 +62,45 @@
 #define okm_fs_list_begin    kal_fs_list_begin
 #define okm_fs_list_next     kal_fs_list_next
 
+/* ⚠️ WEAK, BECAUSE A VOLUME MAY HAVE NO SUCH NODES AND AN IMPLEMENTATION MAY
+ * NOT BE ABLE TO MAKE ONE. These are operations of `openkal.fs' and are present
+ * wherever it is, so the weakness is not about the interface --- it is about a
+ * backend built before they existed. `kal_fs_props' answers, per directory,
+ * whether they can be used, and this port asks before it calls. */
+extern __typeof(kal_fs_link_create) kal_fs_link_create __attribute__((__weak__));
+extern __typeof(kal_fs_link_read)   kal_fs_link_read   __attribute__((__weak__));
+
+/* ⚠️⚠️ AND THEY GO THROUGH THE SEAM LIKE EVERYTHING ELSE, WHICH THEY DID NOT.
+ *
+ * The two call sites named `kal_fs_link_*' directly and tested the weak symbol
+ * themselves. That is correct where `openkal.fs' is present and is not a
+ * declaration at all where it is absent --- the weak declarations above are
+ * inside this branch, so in the OKM_HAS_FS == 0 configuration the names came
+ * from <openkal/fs.h> STRONG, and a backend with no filesystem failed to link:
+ *
+ *     ld.lld: error: undefined symbol: kal_fs_link_read
+ *     >>> referenced by okm_syscall.c:340 ... (do_readlink)
+ *
+ * ⭐ WHICH IS THE FAILURE THIS FILE'S OWN OPENING COMMENT PREDICTS, IN THE
+ * WORDS IT PREDICTS IT IN: "a forty-first added later would be the one that was
+ * missed --- and missed silently, because the way it shows is a link failure on
+ * a target nobody was building at the time". It was found by openkal-opensbi's
+ * bare-metal row, which is the only row that builds this configuration.
+ *
+ * So the null test lives here, once, and the callers name `okm_fs_link_*'. */
+static inline int okm_fs_link_create(struct kal_dir base, const char* name,
+                                     kal_uintptr len, const char* target,
+                                     kal_uintptr target_len, kal_uintptr flags) {
+	if (!kal_fs_link_create) return kal_err_not_supported;
+	return kal_fs_link_create(base, name, len, target, target_len, flags);
+}
+static inline kal_intptr okm_fs_link_read(struct kal_dir base, const char* name,
+                                          kal_uintptr len, char* out,
+                                          kal_uintptr cap) {
+	if (!kal_fs_link_read) return -kal_err_not_supported;
+	return kal_fs_link_read(base, name, len, out, cap);
+}
+
 #else
 
 /* `static inline' and not a macro, so that an argument is still type-checked
@@ -68,12 +108,12 @@
  * configuration that does not use it. A macro expanding to a constant would
  * make this file the one place where a signature change goes unnoticed. */
 static inline kal_uintptr okm_fs_preopen_count(void) { return 0; }
-static inline int okm_fs_preopen(kal_uintptr, struct kal_dir*, const char**,
-                                 kal_uintptr*) { return kal_err_not_supported; }
+static inline int okm_fs_preopen(kal_uintptr, struct kal_dir*, char*,
+                                 kal_uintptr, kal_uintptr*) { return kal_err_not_supported; }
+static inline kal_uintptr okm_fs_props(struct kal_dir) { return 0; }
+static inline kal_uintptr okm_fs_max_name(void) { return 0; }
 static inline int okm_fs_open_dir(struct kal_dir, const char*, kal_uintptr,
                                   struct kal_dir*) { return kal_err_not_supported; }
-static inline int okm_fs_open_file(struct kal_dir, const char*, kal_uintptr, int,
-                                   int, struct kal_file*) { return kal_err_not_supported; }
 static inline int okm_fs_open(struct kal_dir, const char*, kal_uintptr, kal_uintptr,
                               struct kal_file*) { return kal_err_not_supported; }
 /* Releasing a handle that cannot have been obtained. There is nothing to
@@ -84,24 +124,33 @@ static inline void okm_fs_close_file(struct kal_file) {}
  * handle no operation above can have produced. A caller that reaches here has
  * already ignored a failure, and zero is what it then passes to
  * `kal_stream_write', which refuses it. */
-static inline kal_uintptr okm_fs_stream(struct kal_file) { return 0; }
+static inline struct kal_stream okm_fs_stream(struct kal_file) {
+	struct kal_stream s = { 0 };
+	return s;
+}
 static inline int okm_fs_seek(struct kal_file, kal_i64, int,
                               kal_u64*) { return kal_err_not_supported; }
 static inline int okm_fs_truncate(struct kal_file, kal_u64) { return kal_err_not_supported; }
 static inline int okm_fs_info(struct kal_dir, const char*, kal_uintptr,
+                              kal_uintptr, kal_u32,
                               struct kal_node_info*) { return kal_err_not_supported; }
 static inline int okm_fs_mkdir(struct kal_dir, const char*,
                                kal_uintptr) { return kal_err_not_supported; }
+static inline int okm_fs_link_create(struct kal_dir, const char*, kal_uintptr,
+                                     const char*, kal_uintptr,
+                                     kal_uintptr) { return kal_err_not_supported; }
+static inline kal_intptr okm_fs_link_read(struct kal_dir, const char*, kal_uintptr,
+                                          char*, kal_uintptr) { return -kal_err_not_supported; }
 static inline int okm_fs_remove(struct kal_dir, const char*,
                                 kal_uintptr) { return kal_err_not_supported; }
 static inline int okm_fs_rename(struct kal_dir, const char*, kal_uintptr,
                                 struct kal_dir, const char*,
                                 kal_uintptr) { return kal_err_not_supported; }
-static inline int okm_fs_file_info(struct kal_file,
+static inline int okm_fs_file_info(struct kal_file, kal_u32,
                                    struct kal_node_info*) { return kal_err_not_supported; }
 static inline int okm_fs_set_modified(struct kal_file, kal_u64) { return kal_err_not_supported; }
 static inline int okm_fs_list_begin(struct kal_dir, kal_uintptr*) { return kal_err_not_supported; }
-static inline int okm_fs_list_next(struct kal_dir, kal_uintptr*, const char**,
+static inline int okm_fs_list_next(struct kal_dir, kal_uintptr*, char*, kal_uintptr,
                                    kal_uintptr*, int*) { return kal_err_not_supported; }
 
 #endif  /* OKM_HAS_FS */
@@ -113,26 +162,25 @@ static inline int okm_fs_list_next(struct kal_dir, kal_uintptr*, const char**,
 #define okm_process_terminate kal_process_terminate
 #define okm_process_close     kal_process_close
 
-/* ⚠️⚠️ A CAPABILITY WORD IS DATA, AND A WEAK REFERENCE TO DATA IS NOT TESTED THE
- * WAY A WEAK REFERENCE TO A FUNCTION IS.
+/* ⭐⭐ THIS WAS THE ONE WEAK REFERENCE THAT NEEDED A DIFFERENT SPELLING, AND
+ * openkal 0.9 REMOVED THE REASON.
  *
- * The port holds twenty-five weak references and every one of them names a
- * function, so the established form is `if (kal_net_connect) kal_net_connect(…)'
- * --- the name decays to its address and the test is upon that address.
+ * `kal_process_props' was an OBJECT. Every other weak reference in this port
+ * names a function, so the established form is `if (kal_net_connect) …' --- the
+ * name decays to its address and the test is upon that address. Written the
+ * same way for an object, the test READS the object, and where the definition
+ * is absent the object is at address zero: the test intended to prevent a null
+ * dereference WAS one. The address had to be taken, and this file existed in
+ * part to say so.
  *
- * `kal_process_props' is an object. The same spelling would read the object,
- * and where the definition is absent the object is at address zero, so the test
- * intended to prevent a null dereference IS one. The address must be taken.
- *
- * ⭐ This is the defect reported as openkal-linux#13 --- a call through a null
- * stub --- arriving through data rather than through code, and it is stated here
- * once so that no caller has to remember which kind of symbol it is holding. */
-extern const kal_uintptr kal_process_props __attribute__((__weak__));
+ * Version 0.9 makes every report an operation. The two kinds of symbol are one
+ * kind, the special case is gone, and no caller has to remember which it is
+ * holding. */
+extern __typeof(kal_process_props) kal_process_props __attribute__((__weak__));
 
 static inline kal_uintptr okm_process_props(void)
 {
-	if (&kal_process_props == (const kal_uintptr*)0) return 0;
-	return kal_process_props;
+	return kal_process_props ? kal_process_props() : 0;
 }
 
 #else

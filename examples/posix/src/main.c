@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -162,6 +163,177 @@ int main(int argc, char **argv, char **envp) {
 	} else {
 		printf("FAIL: a program is started (posix_spawn returned %d)\n", rc);
 		failures += 2;
+	}
+
+	/* ⭐⭐ THE DISPOSITION OF A SIGNAL IS TOUCHED, WHICH NOTHING HERE DID.
+	 *
+	 * This file had thirty-six observations and three of them were about
+	 * `abort'. It contained no call to `signal' or `sigaction' anywhere --- so
+	 * it examined whether `abort' ENDS the program and never whether a program
+	 * may ASK what a signal is set to. A defect that killed any program doing
+	 * the second passed every one of the thirty-six.
+	 *
+	 * ⚠️ ALL THREE FORMS, AND SIGABRT AMONG THEM. The C library takes a lock for
+	 * any change to that one disposition and blocks signals to take it, so
+	 * SIGABRT reaches code the others do not --- and the enquiry, which changes
+	 * nothing, reached it too. Two of the three forms below would have passed
+	 * while the third killed the process. */
+	{
+		int survived = 1;
+		for (int sig = 1; sig < 32; sig++) {
+			if (sig == SIGKILL || sig == SIGSTOP) continue;
+			struct sigaction seen;
+			memset(&seen, 0, sizeof seen);
+			/* An enquiry, which changes nothing. */
+			const int q = sigaction(sig, NULL, &seen);
+			if (q != 0 && errno != ENOSYS) survived = 0;
+			/* Ignoring, which every environment can express. */
+			errno = 0;
+			signal(sig, SIG_IGN);
+			if (errno != 0 && errno != ENOSYS) survived = 0;
+			/* A handler, which this environment cannot deliver and refuses. */
+			errno = 0;
+			if (signal(sig, SIG_DFL) == SIG_ERR && errno != ENOSYS) survived = 0;
+		}
+		check(survived, "every signal's disposition may be read and written or refused");
+	}
+
+	/* Nodes whose content is another name, where the volume has them. */
+	{
+		/* The names this block uses are its own: the file the earlier
+		 * observations made has been removed by the time this runs, and a probe
+		 * that depended on another probe's leftovers would report an absence as
+		 * a defect. */
+		{ FILE *t = fopen("okm-link-target.tmp", "w"); if (t) { fputs("0123456789", t); fclose(t); } }
+		unlink("okm-probe-link");
+		const int made = symlink("okm-link-target.tmp", "okm-probe-link");
+		if (made == 0) {
+			char target[64] = { 0 };
+			const ssize_t got = readlink("okm-probe-link", target, sizeof target - 1);
+			check(got == (ssize_t)strlen("okm-link-target.tmp")
+			          && strcmp(target, "okm-link-target.tmp") == 0,
+			      "a node's content reads back as it was written");
+
+			/* ⭐ THE OBSERVATION THE PORT MOST NEEDED. Asking resolves and
+			 * opening resolves, so the two agree; asking with the flag reports
+			 * the node itself. They disagreed, and a C++ library above reported
+			 * a link where a caller would have reached a file. */
+			struct stat followed, itself;
+			check(stat("okm-probe-link", &followed) == 0 && S_ISREG(followed.st_mode),
+			      "stat resolves, and reports what the name finally refers to");
+			check(lstat("okm-probe-link", &itself) == 0 && S_ISLNK(itself.st_mode),
+			      "lstat reports the node itself");
+
+			/* ⭐⭐ AND THE THIRD QUESTION, WHICH IS NEITHER OF THOSE TWO.
+			 *
+			 * O_NOFOLLOW does not ask to open the link and does not ask to
+			 * open its target: it asks `is this name a link?' and expects
+			 * ELOOP when it is. openkal offers no opening that declines to
+			 * resolve --- by design --- so this port resolved, and for a link
+			 * to a name that is absent it answered ENOENT.
+			 *
+			 * ⚠️ THAT IS A DIFFERENT ANSWER TO A DIFFERENT QUESTION, AND
+			 * NOTHING NEARBY LOOKED WRONG. Every operation above still held.
+			 * What failed was three layers up: libc++'s `remove_all' descends
+			 * by opening each entry O_DIRECTORY|O_NOFOLLOW and reads ENOENT as
+			 * `it is already gone', so it unlinked nothing and then reported
+			 * ENOTEMPTY for a directory it had just declined to empty. The
+			 * host toolchain removed the same tree.
+			 *
+			 * The answer comes from the enquiry openkal 0.9 added: ask about
+			 * the name itself. Both cases are checked because they fail
+			 * differently --- a live target resolved to a FILE and returned a
+			 * descriptor, which is not an error at all. */
+			int nf = open("okm-probe-link", O_RDONLY | O_NOFOLLOW);
+			check(nf < 0 && errno == ELOOP,
+			      "opening a link with O_NOFOLLOW reports that it is a link");
+			if (nf >= 0) close(nf);
+
+			unlink("okm-probe-target-gone");
+			unlink("okm-probe-dangling");
+			if (symlink("okm-probe-target-gone", "okm-probe-dangling") == 0) {
+				nf = open("okm-probe-dangling", O_RDONLY | O_NOFOLLOW);
+				check(nf < 0 && errno == ELOOP,
+				      "and does so for a link whose target is absent, rather than ENOENT");
+				if (nf >= 0) close(nf);
+				check(unlink("okm-probe-dangling") == 0,
+				      "a link whose target is absent is still removable");
+			}
+
+			unlink("okm-probe-link");
+		} else if (errno == ENOSYS || errno == EPERM) {
+			printf("ok:   this volume has no nodes that name others, which it reported\n");
+		} else {
+			printf("FAIL: making a node that names another (errno %d)\n", errno);
+			failures++;
+		}
+		unlink("okm-link-target.tmp");
+	}
+
+	/* ⚠️ Two different files are two different files. `st_dev' and `st_ino'
+	 * were constants, so every file compared equal to every other and a C++
+	 * library's `equivalent' answered true with no error.
+	 *
+	 * ⚠️⚠️ WHEN THIS FAILS, THE DEFECT IS USUALLY NOT IN THIS PACKAGE. This
+	 * port copies the identity out of `kal_node_info' and puts zero there when
+	 * the implementation does not report one --- which is permitted, and which
+	 * makes every node compare equal to every other. So a failure here says
+	 * "the openkal implementation beneath this one declined to report an
+	 * identity", and the place to look is its `kal_fs_info'.
+	 *
+	 * Measured: it failed on Windows, and openkal-windows was reading a volume
+	 * serial number the object manager had written and then discarding it,
+	 * because the enquiry reported STATUS_BUFFER_OVERFLOW for a volume label
+	 * that did not fit and the implementation read that as a failure. The
+	 * conformance suite could not have said so: an implementation is allowed
+	 * to decline the field, so the suite reports the observation as one it did
+	 * not make. This is the criterion that notices, and it is two packages
+	 * away from the defect. */
+	{
+		struct stat x, y;
+		FILE *fx = fopen("okm-probe-x.tmp", "w"); if (fx) fclose(fx);
+		FILE *fy = fopen("okm-probe-y.tmp", "w"); if (fy) fclose(fy);
+		check(stat("okm-probe-x.tmp", &x) == 0 && stat("okm-probe-y.tmp", &y) == 0
+		          && !(x.st_dev == y.st_dev && x.st_ino == y.st_ino),
+		      "two different files have different identities");
+		unlink("okm-probe-x.tmp");
+		unlink("okm-probe-y.tmp");
+	}
+
+	/* A value POSIX says cannot fail is not a negated error. */
+	check(getpgrp() > 0, "the process group is a number and not a negated error");
+
+	/* The page is the machine's and not the build's.
+	 *
+	 * ⚠️⚠️ AND "POSITIVE POWER OF TWO" WAS TRUE OF THE VALUE THAT BROKE IT.
+	 * This library took `kal_memory_granularity()' as its page size, and an
+	 * implementation for a machine with no memory management unit answers ONE
+	 * --- correctly, since nothing there needs rounding. One is positive and
+	 * one is a power of two, so this assertion held while the allocator asked
+	 * the environment for one-byte extents and the program stopped inside the
+	 * first allocation that needed a new one.
+	 *
+	 * ⭐ SO THE CRITERION IS WHAT THE ALLOCATOR REQUIRES, NOT WHAT THE NUMBER
+	 * LOOKS LIKE. A page smaller than this library's own quantum is not a page
+	 * this library can use, whatever openkal reports. */
+	{
+		const long page = sysconf(_SC_PAGESIZE);
+		check(page >= 4096 && (page & (page - 1)) == 0,
+		      "the page size is a power of two no smaller than the allocator's quantum");
+
+		/* And the property the number exists to have. Several pages, written
+		 * end to end: the allocation this library rounds to `page' and the
+		 * memory it hands back are the same memory. */
+		const size_t span = (size_t)page * 4 + 17;
+		unsigned char *big = malloc(span);
+		int whole = big != NULL;
+		if (big) {
+			for (size_t i = 0; i < span; i++) big[i] = (unsigned char)(i * 31u);
+			for (size_t i = 0; i < span; i++)
+				if (big[i] != (unsigned char)(i * 31u)) { whole = 0; break; }
+			free(big);
+		}
+		check(whole, "several pages are obtained in one allocation and every byte of it holds");
 	}
 
 	printf("-- failures: %d --\n", failures);

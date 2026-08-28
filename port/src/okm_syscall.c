@@ -119,13 +119,12 @@ static syscall_arg_t do_write(int fd, const void* buf, size_t len)
 	struct okm_desc* d = okm_desc_of(fd);
 	if (d->flags & O_NONBLOCK) return okm_timed_write(s, buf, len, OKM_NOW_NS);
 	struct kal_stream st; st.h = s;
-	const struct kal_io_result io = kal_stream_write(st, buf, len);
-	/* openkal transfers the whole buffer or reports what prevented it, so a
-	 * short write cannot be reported as success here and is not. Clause 7.4
-	 * places the loop in the implementation, and this is where the caller's
-	 * copy of that loop would otherwise be. */
-	if (io.e != kal_ok) return io.n ? (syscall_arg_t)io.n : -okm_errno(io.e);
-	return (syscall_arg_t)io.n;
+	/* ⭐ ONE SIGNED WORD, AND THIS IS THE CODE THAT ARGUED FOR IT. openkal
+	 * returned a count and a condition, and every consumer of that pair --- all
+	 * of them here --- collapsed it by hand and by the same rule: report what
+	 * moved, or the condition when nothing did. Version 0.9 returns that. */
+	const kal_intptr n = kal_stream_write(st, buf, len);
+	return n < 0 ? -okm_errno((int)-n) : (syscall_arg_t)n;
 }
 
 static syscall_arg_t do_read(int fd, void* buf, size_t len)
@@ -147,9 +146,8 @@ static syscall_arg_t do_read(int fd, void* buf, size_t len)
 	if (d->flags & O_NONBLOCK) return okm_timed_read(s, buf, len, OKM_NOW_NS);
 
 	struct kal_stream st; st.h = s;
-	const struct kal_io_result io = kal_stream_read(st, buf, len);
-	if (io.e != kal_ok) return -okm_errno(io.e);
-	return (syscall_arg_t)io.n;
+	const kal_intptr n = kal_stream_read(st, buf, len);
+	return n < 0 ? -okm_errno((int)-n) : (syscall_arg_t)n;
 }
 
 /* --- opening --------------------------------------------------------------- */
@@ -161,6 +159,38 @@ static syscall_arg_t do_openat(int dirfd, const char* path, int flags, int mode)
 	syscall_arg_t r = okm_resolve(dirfd, path, &at, 0);
 	if (r) return r;
 	const size_t n = slen(at.rel);
+
+	/* ⭐⭐ O_NOFOLLOW ON A LINK IS `ELOOP', AND ANSWERING `ENOENT' MADE A
+	 * DIRECTORY UNREMOVABLE.
+	 *
+	 * openkal states that opening RESOLVES and offers no form that declines
+	 * to --- deliberately, since a program that opens a link to read its
+	 * bytes is asking what `kal_fs_link_read' answers. So this reached the
+	 * link's target, and for a link whose target is absent that is `ENOENT'.
+	 *
+	 * ⚠️ WHICH IS A DIFFERENT ANSWER TO A DIFFERENT QUESTION. POSIX says
+	 * ELOOP: `the name is a link and you said not to follow one'. ENOENT
+	 * says `there is no such name', and the two are acted upon differently
+	 * by exactly the caller that passes this flag.
+	 *
+	 * ⭐ MEASURED THROUGH THREE LAYERS. libc++'s `remove_all' descends by
+	 * opening each entry O_DIRECTORY|O_NOFOLLOW: on ELOOP or ENOTDIR it
+	 * unlinks the entry, on ENOENT it concludes the entry has already gone
+	 * and moves on. Against this port it moved on, unlinked nothing, and
+	 * then `rmdir' failed --- so `fs::remove_all' returned ENOTEMPTY and
+	 * left the tree standing, while every individual operation it is built
+	 * from behaved correctly. The host toolchain removed the same tree.
+	 *
+	 * The enquiry that answers this is the one openkal 0.9 added: ask about
+	 * the name ITSELF rather than what it refers to. It is one call, on a
+	 * path taken only when the caller passed the flag. */
+	if (flags & O_NOFOLLOW) {
+		struct kal_node_info self = { .self_size = sizeof self };
+		if (okm_fs_info(at.base, at.rel, n, KAL_FS_NO_RESOLVE,
+		                KAL_INFO_KIND, &self) == kal_ok
+		    && self.kind == kal_node_link)
+			return -ELOOP;
+	}
 
 	okm_lock();
 	const int fd = okm_fd_alloc(0);
@@ -197,7 +227,7 @@ static syscall_arg_t do_openat(int dirfd, const char* path, int flags, int mode)
 	}
 	if (e != kal_ok) { okm_unlock(); return -okm_errno(e); }
 	struct kal_dir nod = { 0 };
-	okm_fd_bind(fd, OKM_FILE, okm_fs_stream(f), f, nod, flags);
+	okm_fd_bind(fd, OKM_FILE, okm_fs_stream(f).h, f, nod, flags);
 	okm_unlock();
 	return fd;
 }
@@ -234,19 +264,42 @@ static void fill_kstat(const struct kal_node_info* in, struct kstat* out)
 	out->st_ctime_sec  = out->st_mtime_sec;
 	out->st_ctime_nsec = out->st_mtime_nsec;
 	out->st_uid = 1000; out->st_gid = 1000;
-	out->st_ino = 0; out->st_dev = 1;
+
+	/* ⚠️⚠️ THE IDENTITY WAS A CONSTANT, SO EVERY FILE WAS THE SAME FILE.
+	 *
+	 * `st_ino' was 0 and `st_dev' was 1 for every node, and nothing reported
+	 * that they were not answers. Measured through the C++ library above:
+	 * `std::filesystem::equivalent("a.txt", "b.txt")' answered TRUE for two
+	 * separately created files, with no error --- the one shape this port
+	 * exists to refuse, arriving through a field nobody had thought of as an
+	 * answer.
+	 *
+	 * openkal 0.9 carries it. An implementation that cannot distinguish nodes
+	 * leaves the position clear, and this reports zero for both --- which is
+	 * what a caller must not read as sameness, and is why `st_dev' is left at
+	 * zero as well rather than at a constant that would make two unknowns
+	 * compare equal. */
+	if (in->present & KAL_INFO_IDENTITY) {
+		out->st_dev = (dev_t)in->identity[0];
+		out->st_ino = (ino_t)in->identity[1];
+	} else {
+		out->st_dev = 0;
+		out->st_ino = 0;
+	}
 }
 
 static syscall_arg_t do_fstat(int fd, struct kstat* st)
 {
 	struct okm_desc* d = okm_desc_of(fd);
 	if (!d) return -EBADF;
-	struct kal_node_info info;
+	struct kal_node_info info = { .self_size = sizeof info };
 	if (d->kind == OKM_FILE) {
-		const int e = okm_fs_file_info(d->file, &info);
+		const int e = okm_fs_file_info(d->file, KAL_INFO_ALL, &info);
 		if (e != kal_ok) return -okm_errno(e);
 	} else if (d->kind == OKM_DIR) {
 		for (unsigned i = 0; i < sizeof info; i++) ((char*)&info)[i] = 0;
+		info.self_size = sizeof info;
+		info.present   = KAL_INFO_KIND | KAL_INFO_WRITABLE;
 		info.kind = kal_node_directory;
 		info.writable = 1;
 	} else {
@@ -254,6 +307,8 @@ static syscall_arg_t do_fstat(int fd, struct kstat* st)
 		 * buffering discipline, and what decides that is whether the stream is
 		 * interactive, which openkal reports. */
 		for (unsigned i = 0; i < sizeof info; i++) ((char*)&info)[i] = 0;
+		info.self_size = sizeof info;
+		info.present   = KAL_INFO_KIND | KAL_INFO_WRITABLE;
 		info.kind = kal_node_other;
 		info.writable = 1;
 	}
@@ -272,14 +327,69 @@ static syscall_arg_t do_fstat(int fd, struct kstat* st)
 	return 0;
 }
 
+/* Reads the content of a node that names another.
+ *
+ * POSIX truncates into the caller's buffer and reports what it wrote; openkal
+ * reports the length the content HAS. The two are reconciled here, which is
+ * where the difference belongs: a caller of `readlink' expects the first. */
+static syscall_arg_t do_readlink(int dirfd, const char* path, char* out, size_t cap)
+{
+	struct okm_at at;
+	const syscall_arg_t r = okm_resolve(dirfd, path, &at, 0);
+	if (r) return r;
+
+	/* A name that is not such a node is EINVAL, and one that is absent is
+	 * ENOENT --- two answers `kal_fs_link_read' does not distinguish for us,
+	 * so the enquiry is made first. It declines to resolve, because the
+	 * question is about the node itself. */
+	struct kal_node_info info = { .self_size = sizeof info };
+	const int ie = okm_fs_info(at.base, at.rel, slen(at.rel),
+	                           KAL_FS_NO_RESOLVE, KAL_INFO_KIND, &info);
+	if (ie != kal_ok) return -okm_errno(ie);
+	if (info.kind == kal_node_absent) return -ENOENT;
+	if (info.kind != kal_node_link)   return -EINVAL;
+
+	const kal_intptr n = okm_fs_link_read(at.base, at.rel, slen(at.rel), out, cap);
+	if (n < 0) return -okm_errno((int)-n);
+	return (syscall_arg_t)((size_t)n < cap ? (size_t)n : cap);
+}
+
+/* Makes a node whose content is another name.
+ *
+ * ⚠️ THE CONTENT IS NOT A NAME THIS INTERFACE RESOLVES. It is stored and read
+ * later by whoever follows it, so it is not put through the resolution that
+ * would refuse one that ascends --- and one that ascends is the ordinary case
+ * for a relative target. Only the name being CREATED is resolved. */
+static syscall_arg_t do_symlink(const char* target, int dirfd, const char* path)
+{
+	if (!target || !path) return -EFAULT;
+	struct okm_at at;
+	const syscall_arg_t r = okm_resolve(dirfd, path, &at, 0);
+	if (r) return r;
+	const int e = okm_fs_link_create(at.base, at.rel, slen(at.rel),
+	                                 target, slen(target), 0);
+	return e == kal_ok ? 0 : -okm_errno(e);
+}
+
 static syscall_arg_t do_fstatat(int dirfd, const char* path, struct kstat* st, int flag)
 {
 	if ((flag & AT_EMPTY_PATH) && path && !*path) return do_fstat(dirfd, st);
 	struct okm_at at;
 	const syscall_arg_t r = okm_resolve(dirfd, path, &at, 0);
 	if (r) return r;
-	struct kal_node_info info;
-	const int e = okm_fs_info(at.base, at.rel, slen(at.rel), &info);
+	/* ⭐⭐ `stat' AND `lstat' ARE TWO QUESTIONS AND THIS ANSWERED ONE OF THEM
+	 * TWICE. The flag was ignored, so both asked about the name itself while
+	 * `open' resolved --- a program was told a name referred to a link when
+	 * opening it would have reached a file. Through the C++ library above:
+	 * `is_regular_file' false for a name whose bytes it could read,
+	 * `file_size' refused, `exists' TRUE for a name that finally referred to
+	 * nothing, and one such node made a whole directory tree uncopyable.
+	 *
+	 * openkal 0.9 states which operations resolve, beside each of them, and
+	 * `kal_fs_info' takes the choice. */
+	struct kal_node_info info = { .self_size = sizeof info };
+	const kal_uintptr how = (flag & AT_SYMLINK_NOFOLLOW) ? KAL_FS_NO_RESOLVE : 0;
+	const int e = okm_fs_info(at.base, at.rel, slen(at.rel), how, KAL_INFO_ALL, &info);
 	if (e != kal_ok) return -okm_errno(e);
 	if (info.kind == kal_node_absent) return -ENOENT;
 	fill_kstat(&info, st);
@@ -318,11 +428,15 @@ static syscall_arg_t do_getdents(int fd, void* buf, size_t cap)
 			name = d->pending_name; kind = d->pending_kind;
 			len = slen(d->pending_name);
 		} else {
-			const int e = okm_fs_list_next(d->dir, &d->iter, &name, &len, &kind);
+			/* The name is copied into this layer's own buffer, which is what
+			 * the operation now does directly --- it reports the length the
+			 * name HAS, so one longer than this buffer is skipped rather than
+			 * silently truncated. */
+			const int e = okm_fs_list_next(d->dir, &d->iter, held, sizeof held - 1,
+			                               &len, &kind);
 			if (e != kal_ok) return used ? (syscall_arg_t)used : -okm_errno(e);
-			if (!name) { d->iter = 0; break; }      /* the iterator is spent */
+			if (d->iter == 0) break;                /* the iterator is spent */
 			if (len >= sizeof held) continue;       /* a name this layer cannot carry */
-			for (kal_uintptr i = 0; i < len; i++) held[i] = name[i];
 			held[len] = 0;
 			name = held;
 		}
@@ -391,7 +505,26 @@ static void to_timespec(kal_duration ns, struct timespec* ts)
 
 /* --- processes -------------------------------------------------------------- */
 
-#define OKM_MAX_CHILD 64
+/* ⚠️ THE BOUND IS PART OF THE CONTRACT, AND IT WAS NOT.
+ *
+ * An entry is taken when a program is started and released when it is waited
+ * for, which is what a process table is; a program that starts programs and
+ * never waits for them holds entries for ever, and the next start reports
+ * EAGAIN. That is what POSIX says `fork' does when the table is full, so the
+ * behaviour is right --- what was wrong is that the number was invisible.
+ *
+ * ⭐ Measured: the sixty-fifth `posix_spawn' failed with `Resource temporarily
+ * unavailable' on a program that had started sixty-four and waited for none,
+ * and on one that polled each with WNOHANG once and did not come back --- and a
+ * caller meeting that has an error on an operation with no evident relation to
+ * the ones that caused it. The README now states this bound beside the
+ * descriptor and open-description bounds it already stated, and `sysconf' is
+ * not the place because POSIX has no enquiry that answers it.
+ *
+ * The number is raised because sixty-four is small for a program that manages
+ * others --- which is the kind of program that meets it --- and because each
+ * entry is three words. */
+#define OKM_MAX_CHILD 256
 static struct { int used; int pid; struct kal_process h; } g_child[OKM_MAX_CHILD];
 static int g_next_pid = 1000;
 
@@ -606,12 +739,14 @@ static int trace_wanted(void)
 
 	static const char name[]   = "OPENKAL_MUSL_TRACE";
 	static const char wanted[] = "enosys";
-	kal_uintptr len = 0;
-	const char* v = kal_env_var(name, sizeof name - 1, &len);
+	/* Copied into a buffer of this file's own. Nothing here allocates --- what
+	 * failed may be the operation that the allocator was about to perform. */
+	char v[16];
+	const kal_intptr n = kal_env_var(name, sizeof name - 1, v, sizeof v);
 	want = 0;
-	if (v && len == sizeof wanted - 1) {
+	if (n == (kal_intptr)(sizeof wanted - 1)) {
 		want = 1;
-		for (kal_uintptr i = 0; i < len; i++)
+		for (kal_intptr i = 0; i < n; i++)
 			if (v[i] != wanted[i]) { want = 0; break; }
 	}
 	__atomic_store_n(&g_want, want, __ATOMIC_RELEASE);
@@ -1097,8 +1232,9 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		struct okm_at at;
 		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, &at, 0);
 		if (r) return r;
-		struct kal_node_info info;
-		const int e = okm_fs_info(at.base, at.rel, slen(at.rel), &info);
+		struct kal_node_info info = { .self_size = sizeof info };
+		const int e = okm_fs_info(at.base, at.rel, slen(at.rel), 0,
+		                          KAL_INFO_KIND | KAL_INFO_WRITABLE, &info);
 		if (e != kal_ok) return -okm_errno(e);
 		if (info.kind == kal_node_absent) return -ENOENT;
 		if (((int)a3 & W_OK) && !info.writable) return -EACCES;
@@ -1109,8 +1245,9 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		struct okm_at at;
 		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
 		if (r) return r;
-		struct kal_node_info info;
-		const int e = okm_fs_info(at.base, at.rel, slen(at.rel), &info);
+		struct kal_node_info info = { .self_size = sizeof info };
+		const int e = okm_fs_info(at.base, at.rel, slen(at.rel), 0,
+		                          KAL_INFO_KIND | KAL_INFO_WRITABLE, &info);
 		if (e != kal_ok) return -okm_errno(e);
 		if (info.kind == kal_node_absent) return -ENOENT;
 		if (((int)a2 & W_OK) && !info.writable) return -EACCES;
@@ -1128,32 +1265,22 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_chdir:  return okm_chdir(AT_FDCWD, (const char*)a1);
 	case SYS_fchdir: return okm_chdir((int)a1, 0);
 
-	case SYS_readlinkat: {
-		struct okm_at at;
-		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, &at, 0);
-		if (r) return r;
-		struct kal_node_info info;
-		const int e = okm_fs_info(at.base, at.rel, slen(at.rel), &info);
-		if (e != kal_ok) return -okm_errno(e);
-		if (info.kind == kal_node_absent) return -ENOENT;
-		/* A name that is not a symbolic link is answered as POSIX answers it.
-		 * A name that is one cannot be read: openkal reserves the operations
-		 * upon links to an interface it has not defined, so the honest answer
-		 * is that the operation is unavailable rather than that the link
-		 * points at nothing. */
-		return info.kind == kal_node_link ? -ENOSYS : -EINVAL;
-	}
+	/* ⭐ NODES WHOSE CONTENT IS ANOTHER NAME. openkal 0.9 carries the two
+	 * operations, so these answer rather than refusing.
+	 *
+	 * ⚠️ THE ENQUIRY IS ASKED FIRST AND IT TAKES THE DIRECTORY, which is the
+	 * whole reason these can be operations of `openkal.fs' at all: the same
+	 * implementation succeeds on one volume and fails on another, so a caller
+	 * that could not ask would be left to discover it by the attempt. */
+	case SYS_readlinkat: return do_readlink((int)a1, (const char*)a2,
+	                                        (char*)a3, (size_t)a4);
 #ifdef SYS_readlink
-	case SYS_readlink: {
-		struct okm_at at;
-		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
-		if (r) return r;
-		struct kal_node_info info;
-		const int e = okm_fs_info(at.base, at.rel, slen(at.rel), &info);
-		if (e != kal_ok) return -okm_errno(e);
-		if (info.kind == kal_node_absent) return -ENOENT;
-		return info.kind == kal_node_link ? -ENOSYS : -EINVAL;
-	}
+	case SYS_readlink: return do_readlink(AT_FDCWD, (const char*)a1,
+	                                      (char*)a2, (size_t)a3);
+#endif
+	case SYS_symlinkat: return do_symlink((const char*)a1, (int)a2, (const char*)a3);
+#ifdef SYS_symlink
+	case SYS_symlink:   return do_symlink((const char*)a1, AT_FDCWD, (const char*)a2);
 #endif
 
 	/* --- descriptors ------------------------------------------------------ */
@@ -1656,6 +1783,48 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * which takes a different path when privileged takes the ordinary one. */
 	case SYS_getuid: case SYS_geteuid: case SYS_getgid: case SYS_getegid:
 		return 1000;
+
+	/* ⚠️ `getpgrp' HANDED A NEGATED ERROR TO ITS CALLER AS A PROCESS GROUP.
+	 *
+	 * There was no case for this number, so the default arm answered -ENOSYS
+	 * --- and musl's `getpgrp' is `return __syscall(SYS_getpgid, 0);' WITHOUT
+	 * `__syscall_ret', deliberately, because POSIX says the call cannot fail.
+	 * So a program that asked was told its group was -38: not -1, no errno,
+	 * and nothing to check. Measured.
+	 *
+	 * openkal has no process groups and no sessions --- `kill' resolves
+	 * children only --- so the honest answer for the calling program is the
+	 * identity `getpid' already reports, which is the whole truth here: there
+	 * is one program and it is in its own group. A group that is not this
+	 * program's is a group this environment has no way to name, and is
+	 * refused. `setpgid' and `setsid' remain refused: making a group is not
+	 * the same as being in one, and reporting success for it would be
+	 * reporting an effect that does not exist. */
+	case SYS_getpgid:
+		return (a1 == 0 || a1 == 1) ? 1 : -ESRCH;
+#ifdef SYS_getpgrp
+	case SYS_getpgrp: return 1;
+#endif
+	case SYS_getsid:
+		return (a1 == 0 || a1 == 1) ? 1 : -ESRCH;
+
+	/* ⭐ REFUSED FROM A CASE OF ITS OWN RATHER THAN FROM THE DEFAULT ARM, SO
+	 * THAT THE TRACE DOES NOT REPORT IT.
+	 *
+	 * musl's `pthread_create' calls `__membarrier_init' the first time a
+	 * context is started, and that function is one line whose RESULT IS
+	 * ASSIGNED TO NOTHING --- musl's own comment says the registration is an
+	 * optimisation and failing it costs nothing. Nothing in this port's musl
+	 * ever calls `__membarrier' itself.
+	 *
+	 * ⚠️ It reached the default arm, so `OPENKAL_MUSL_TRACE=enosys' reported it
+	 * beside five operations that a program actually wanted, and the first
+	 * consumer to use that switch had to work out which of the six mattered.
+	 * A trace whose reader must filter it is a trace that costs its reader
+	 * more than it saves. */
+#ifdef SYS_membarrier
+	case SYS_membarrier: return -ENOSYS;
+#endif
 	/* SYS_umask is deliberately absent and falls to the default below.
 	 *
 	 * IT USED TO BE ANSWERED, AND THE ANSWER WAS A FICTION. A stored word was
@@ -1693,15 +1862,61 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * accepted and can never run is exactly the silent wrongness clause 3.1
 	 * names, so the request is refused and the program learns it. */
 	case SYS_rt_sigprocmask: {
-		sigset_t* old = (sigset_t*)a3;
-		if (old) for (unsigned i = 0; i < sizeof *old; i++) ((char*)old)[i] = 0;
+		/* ⚠️⚠️ THE SIZE IS THE CALLER'S, AND TAKING IT FROM THE TYPE INSTEAD
+		 * DESTROYED THE CALLER'S RETURN ADDRESS.
+		 *
+		 * This wrote `sizeof(sigset_t)' --- 128 bytes --- into whatever `a3'
+		 * named. `a4' is the SIGSETSIZE the caller declared, which is the
+		 * kernel's set and is EIGHT on this architecture; the kernel writes
+		 * exactly that many and no more.
+		 *
+		 * Sixteen of musl's seventeen callers pass a 128-byte `sigset_t' and
+		 * saw nothing. The seventeenth is `src/signal/sigaction.c', which
+		 * declares `unsigned long set[_NSIG/(8*sizeof(long))]' --- ONE WORD ---
+		 * and reaches this only when the signal is SIGABRT. That local sits at
+		 * -0x20 in a frame of 0x30, so 120 bytes past it lay the saved frame
+		 * pointer and the return address, and `__sigaction' returned to zero.
+		 *
+		 * ⭐ MEASURED, and the whole of the reproduction is three lines:
+		 *
+		 *     int main(void) { signal(SIGABRT, h); return 0; }
+		 *
+		 * SIGSEGV with the instruction pointer at zero, the stack top zero
+		 * rather than a return address, and every register but one zero ---
+		 * which is a RETURN to a cleared return address and not a call through
+		 * a null pointer, and reads as the second. Every other signal number
+		 * returns SIG_ERR and exits 0.
+		 *
+		 * ⚠️ AND IT WAS NOT ONLY INSTALLING A HANDLER. `signal(SIGABRT, SIG_IGN)'
+		 * and a plain enquiry, `sigaction(SIGABRT, NULL, &old)', died the same
+		 * way: musl takes the lock for any change to that disposition, and
+		 * blocking signals around it is how it takes it. So a program that only
+		 * READ what SIGABRT was set to could not survive doing so --- which a
+		 * terminal-interface library, a test framework's death tests and any
+		 * crash reporter all do before they do anything else. */
+		const kal_uintptr room = (kal_uintptr)a4;
+		if (room > sizeof(sigset_t)) return -EINVAL;
+		char* old = (char*)a3;
+		if (old) for (kal_uintptr i = 0; i < room; i++) old[i] = 0;
 		return 0;
 	}
 	case SYS_rt_sigaction: {
+		/* ⚠️ THE SAME DEFECT'S OTHER HALF, IN THE OTHER DIRECTION. The
+		 * old-action was cleared for the size of a structure declared HERE ---
+		 * three fields --- while `struct k_sigaction' is four, so eight bytes
+		 * of the caller's structure were left holding whatever the stack held
+		 * and were then copied out to the program by `__libc_sigaction'. The
+		 * size is taken from the caller's declared sigsetsize, as the kernel
+		 * takes it, and the layout from the architecture the port is built
+		 * for. */
 		const struct { void* handler; unsigned long flags; void* restorer; }* act = (const void*)a2;
 		if (a3) {
+			/* handler, flags, restorer, and the mask whose width the caller
+			 * declared in a4. */
+			const kal_uintptr mask = (kal_uintptr)a4;
+			if (mask > sizeof(sigset_t)) return -EINVAL;
 			char* old = (char*)a3;
-			for (unsigned i = 0; i < sizeof *act; i++) old[i] = 0;
+			for (kal_uintptr i = 0; i < sizeof *act + mask; i++) old[i] = 0;
 		}
 		if (!act) return 0;
 		const uintptr_t h = (uintptr_t)act->handler;

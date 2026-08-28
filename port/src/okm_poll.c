@@ -66,10 +66,9 @@ long okm_timed_read(kal_uintptr stream, void* buf, unsigned long len, kal_u64 ns
 	if (!kal_timeout_read) return -ENOSYS;
 	if (len == 0) return 0;
 	struct kal_stream s; s.h = stream;
-	const struct kal_io_result io = kal_timeout_read(s, buf, len, ns);
-	if (io.e == kal_err_again) return -EAGAIN;
-	if (io.e != kal_ok) return -okm_errno(io.e);
-	return (long)io.n;
+	const kal_intptr io = kal_timeout_read(s, buf, len, ns);
+	if (io < 0) return io == -kal_err_again ? -EAGAIN : -okm_errno((int)-io);
+	return (long)io;
 }
 
 long okm_timed_write(kal_uintptr stream, const void* buf, unsigned long len, kal_u64 ns)
@@ -77,10 +76,11 @@ long okm_timed_write(kal_uintptr stream, const void* buf, unsigned long len, kal
 	if (!kal_timeout_write) return -ENOSYS;
 	if (len == 0) return 0;
 	struct kal_stream s; s.h = stream;
-	const struct kal_io_result io = kal_timeout_write(s, buf, len, ns);
-	if (io.e == kal_err_again) return io.n ? (long)io.n : -EAGAIN;
-	if (io.e != kal_ok) return io.n ? (long)io.n : -okm_errno(io.e);
-	return (long)io.n;
+	const kal_intptr io = kal_timeout_write(s, buf, len, ns);
+	/* The count, or the condition when nothing moved --- which is what this
+	 * code used to compute from the pair by hand at every site. */
+	if (io < 0) return io == -kal_err_again ? -EAGAIN : -okm_errno((int)-io);
+	return (long)io;
 }
 
 /* --- the read-ahead ---------------------------------------------------------- */
@@ -124,10 +124,10 @@ static int wait_in(struct okm_desc* d, kal_u64 ns)
 
 	unsigned char byte = 0;
 	struct kal_stream s; s.h = d->stream;
-	const struct kal_io_result io = kal_timeout_read(s, &byte, 1, ns);
-	if (io.e == kal_err_again) return 0;
-	if (io.e != kal_ok) return -okm_errno(io.e);
-	if (io.n == 0) {
+	const kal_intptr io = kal_timeout_read(s, &byte, 1, ns);
+	if (io == -kal_err_again) return 0;
+	if (io < 0) return -okm_errno((int)-io);
+	if (io == 0) {
 		/* End of input. A read will return zero without waiting, which is
 		 * exactly what POLLIN asserts, so the descriptor is ready and stays
 		 * ready --- the flag is not cleared by the read that observes it. */

@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.6.0"
+openkal-musl = "0.7.0"
 ```
 
 It names no implementation and no platform: a C library is the one consumer that
@@ -108,8 +108,10 @@ answer that leaves a program wrong without telling it.
 | memory protection | `mprotect` reports `ENOSYS` | openkal has no operation upon a mapping's protection. musl asks for a guard page below a thread's stack and proceeds without one when told this, so the honest answer is also the one it is prepared for. |
 | out-of-band data | `MSG_OOB`, `MSG_PEEK`, and `POLLPRI` are never reported and `recv` refuses the flags | openkal's transfer operations move bytes and have no second channel and no non-destructive read. |
 | readiness *sets* | `epoll` is not built at all, so the link names it | a set held by the environment is a facility of one kernel rather than a capability. `poll` and `select` ask each descriptor in turn, which is what an interface without a set permits. |
-| symbolic links | `symlink` reports `ENOSYS`; `readlink` reports `EINVAL` for a name that is not one and `ENOSYS` for one that is | `SURFACE.txt` has no operation that creates or reads a link. It *does* have `kal_node_link` and `KAL_FS_PROP_LINKS`, so an implementation can report a link it encounters and cannot make one; the asymmetry is the specification's and is recorded rather than worked around. |
-| ownership and permission bits | `chmod` and `chown` report `ENOSYS`; `stat` reports a mode assembled from what openkal knows | `kal_node_info` carries `writable` — one boolean, not a mode word — and `kal_fs_open_file` takes flags rather than a mode. Mapping the owner-write bit onto it would make `chmod(0600)` succeed and `stat` report something else, which is the shape this port exists to avoid. |
+| ~~symbolic links~~ | **answered since 0.7.0** — `symlink`, `readlink`, and `stat`/`lstat` telling the two questions apart | openkal 0.9 carries `kal_fs_link_create` and `kal_fs_link_read` as operations of `openkal.fs`, and `kal_fs_props` takes the directory, so this port asks whether the volume has such nodes before it uses them. Where it does not, the refusal is what the enquiry already said. |
+| permission bits | `chmod` reports `ENOSYS`; `stat` reports a mode assembled from what openkal knows | `kal_node_info` carries `writable` — one boolean, not a mode word — and `kal_fs_open` takes flags rather than a mode. Mapping the owner-write bit onto it would make `chmod(0600)` succeed and `stat` report something else, which is the shape this port exists to avoid. |
+| the identity of a node | `st_dev` and `st_ino` are the implementation's answer where it has one, and **zero for both where it has none** | ⚠️ They were the constants 0 and 1, so every file compared equal to every other: `std::filesystem::equivalent` on two separately created files answered `true` **with no error**. openkal 0.9 carries an identity and reports whether it knows one; a caller must not read two zeroes as sameness, which is why nothing is invented for an implementation that cannot distinguish nodes. |
+| ownership | `chown` reports `ENOSYS`; `stat` reports 1000 for both | as the row above: a capability-oriented environment has no principal for an owner to name. |
 | a mode given at creation | `open(…, O_CREAT, 0600)` and `mkdir(path, 0700)` **succeed** and `stat` afterwards reports 0666 and 0777 | the row above, in the one place where it does not read as a refusal. openkal opens a file for a purpose and not for an audience, so the argument has nowhere to go. Refusing every mode but the one `stat` will report would refuse nearly every program; what a caller can rely on instead is stated below. |
 | entropy | `getrandom` reports `ENOSYS` where the backend declines `openkal.random` | openkal has no source of one to require, and this port does not invent one. The allocator's cookie and the stack canary are derived from the clock and from an address; neither is a security property here. |
 | a signal delivered anywhere | `raise` and `kill` perform a signal's **default action** and nothing else: terminating signals end the program, ignored ones succeed, stopping ones report `ENOSYS`, and musl's own three (32, 33, 34) are refused, so `pthread_cancel` reports `ENOSYS` | there is no delivery, so there is no handler to reach; what remains of a signal is what it does when no handler exists. `abort` reaches `kal_abort`, which raises the signal on Linux and ends with a distinguished status elsewhere — a parent can tell an abnormal end from an ordinary one on every system. |
@@ -141,9 +143,29 @@ was given would not be confined by having been given it. `/a/b/../c` is
 therefore reduced to `/a/c` before openkal sees it, which is what the program
 means in every case except one that passes through a symbolic link.
 
+**`O_NOFOLLOW` is answered by an enquiry, not by an opening.** openkal states
+that opening resolves and offers no form that declines to, deliberately: a
+program that opens a link in order to read its bytes is asking what
+`kal_fs_link_read` answers. So this port asks `kal_fs_info` with
+`KAL_FS_NO_RESOLVE` first and reports `ELOOP` when the name is a link, which is
+what POSIX says and what a caller passing the flag is distinguishing. Answering
+`ENOENT` instead — which is what resolving a link to an absent target produces —
+is a different answer to a different question, and libc++'s `remove_all` reads it
+as "the entry has already gone" and leaves the tree standing.
+
 **The tables are bounded.** A program may hold 1024 descriptors and 512 open
 descriptions; beyond that it is told so. Allocating the tables instead would
 place them on the allocator, and the allocator obtains its memory through them.
+
+⚠️ **And a program may have started 256 programs it has not waited for.** An
+entry is taken when a program is started and released when it is waited for,
+which is what a process table is; a program that never waits holds entries for
+ever, and the next start reports `EAGAIN` — which is what POSIX says `fork`
+does when the table is full. This bound is stated here because it was not, and
+a caller that met it saw a failure on an operation with no evident relation to
+the ones that caused it: measured, the sixty-fifth `posix_spawn` of a program
+that waited for none, and of one that polled each once with `WNOHANG` and did
+not come back.
 
 ## Asking which operation was missing
 

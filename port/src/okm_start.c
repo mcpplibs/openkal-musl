@@ -119,31 +119,49 @@ static char* dup_counted(const char* s, size_t n)
  * other way. */
 void __okm_init_env(void)
 {
+	/* ⭐ EACH VALUE IS COPIED, AND THE LENGTH REPORTED IS THE VALUE'S OWN. It
+	 * was answered with a pointer into the implementation's storage, which is
+	 * meaningful only while the implementation shares this address space --- and
+	 * this library is precisely the consumer that must not depend on which way
+	 * it was reached. A capacity of zero asks for the length; asking twice is
+	 * cheaper than a buffer that might be too small. */
 	const kal_uintptr argc = kal_env_arg_count();
 	g_argc = 0;
 	for (kal_uintptr i = 0; i < argc && g_argc < 255; i++) {
-		kal_uintptr len = 0;
-		const char* a = kal_env_arg(i, &len);
-		if (!a) break;
-		char* p = dup_counted(a, len);
+		const kal_intptr len = kal_env_arg(i, 0, 0);
+		if (len < 0) break;
+		char* p = kal_alloc((kal_uintptr)len + 1, 1);
 		if (!p) break;
+		if (kal_env_arg(i, p, (kal_uintptr)len) != len) break;
+		p[len] = 0;
 		g_argv_store[g_argc++] = p;
 	}
 	g_argv_store[g_argc] = 0;
 
+	/* Enumeration answers a NAME, and the value is then looked up by it. Two
+	 * small operations rather than one that answers both: the one that answered
+	 * both needed two buffers, two capacities and two lengths, and its second
+	 * half was the lookup written again. The set does not change while the
+	 * program runs, so the index holds across the two calls. */
 	int envc = 0;
 	const kal_uintptr n = kal_env_var_count();
 	for (kal_uintptr i = 0; i < n && envc < 511; i++) {
-		kal_uintptr nlen = 0, vlen = 0;
-		const char* value = 0;
-		const char* name = kal_env_var_at(i, &nlen, &value, &vlen);
+		const kal_intptr nlen = kal_env_var_at(i, 0, 0);
+		if (nlen < 0) break;
+		char* name = kal_alloc((kal_uintptr)nlen + 1, 1);
 		if (!name) break;
-		char* p = kal_alloc(nlen + vlen + 2, 1);
+		if (kal_env_var_at(i, name, (kal_uintptr)nlen) != nlen) break;
+		name[nlen] = 0;
+
+		const kal_intptr vlen = kal_env_var(name, (kal_uintptr)nlen, 0, 0);
+		const kal_uintptr have = vlen < 0 ? 0 : (kal_uintptr)vlen;
+		char* p = kal_alloc((kal_uintptr)nlen + have + 2, 1);
 		if (!p) break;
-		for (kal_uintptr k = 0; k < nlen; k++) p[k] = name[k];
+		for (kal_intptr k = 0; k < nlen; k++) p[k] = name[k];
 		p[nlen] = '=';
-		for (kal_uintptr k = 0; k < vlen; k++) p[nlen + 1 + k] = value[k];
-		p[nlen + 1 + vlen] = 0;
+		if (have) kal_env_var(name, (kal_uintptr)nlen, p + nlen + 1, have);
+		p[nlen + 1 + have] = 0;
+		kal_free(name, (kal_uintptr)nlen + 1, 1);
 		g_envp_store[envc++] = p;
 	}
 	g_envp_store[envc] = 0;
@@ -256,9 +274,50 @@ void __okm_libc_init(void)
 	if (g_libc_up) return;
 	g_libc_up = 1;
 
-	libc.page_size = 4096;
+	/* ⚠️⚠️ THE PAGE WAS FIXED WHEN THIS LIBRARY WAS BUILT AND IS NOW ASKED FOR.
+	 *
+	 * It was the constant 4096 here and again in the auxiliary vector below,
+	 * and it is what this library reports as `sysconf(_SC_PAGESIZE)', what it
+	 * rounds a mapping to, and what it reports as `st_blksize'. On a machine
+	 * whose quantum is sixteen or sixty-four kilobytes --- which is what a
+	 * binary that is distributed rather than built in place meets --- every one
+	 * of those was wrong, and nothing reported it.
+	 *
+	 * openkal 0.9 carries the value because it is a property of the machine the
+	 * program RUNS on and not of the machine it was built for. */
+	/* ⚠️⚠️ AND IT IS NOT THE SAME QUANTITY AS THIS LIBRARY'S PAGE SIZE, WHICH
+	 * IS WHAT ASSIGNING IT DIRECTLY ASSUMED.
+	 *
+	 * openkal's granularity is the coarsest quantum a caller must respect. An
+	 * implementation for a machine with no memory management unit answers ONE,
+	 * correctly: there is no page, and nothing needs rounding.
+	 *
+	 * `libc.page_size' is a different thing wearing the same name. This library
+	 * rounds heap growth to it, reports it as `sysconf(_SC_PAGESIZE)' and as
+	 * `st_blksize', and its allocator's arithmetic assumes a power of two no
+	 * smaller than its own quantum. Given one, the allocator asked for
+	 * one-byte extents and the program stopped inside the first allocation
+	 * large enough to need a new one.
+	 *
+	 * ⭐ MEASURED, AND ONLY ON THE MACHINE THAT ANSWERS THAT WAY. Over
+	 * openkal-opensbi the same-source example printed three of its four lines
+	 * and stopped --- containers, exceptions and unwinding all held, and the
+	 * fourth line was the first to format a string. Over openkal-linux, whose
+	 * answer is 4096, nothing was wrong.
+	 *
+	 * So this takes openkal's answer as a FLOOR TO RESPECT rather than as the
+	 * value: at least what the machine requires, at least what this library
+	 * requires, and a power of two because both assume one. */
+	kal_uintptr grain = kal_memory_granularity();
+	if (grain < 4096) grain = 4096;
+	else if (grain & (grain - 1)) {           /* not a power of two: round up */
+		kal_uintptr p = 4096;
+		while (p && p < grain) p <<= 1;
+		grain = p ? p : 4096;
+	}
+	libc.page_size = grain;
 	fill_random();
-	g_auxv[0] = 6  /* AT_PAGESZ */; g_auxv[1] = 4096;
+	g_auxv[0] = 6  /* AT_PAGESZ */; g_auxv[1] = libc.page_size;
 	g_auxv[2] = 25 /* AT_RANDOM */; g_auxv[3] = (size_t)(uintptr_t)g_random;
 	g_auxv[4] = 0;
 	libc.auxv = g_auxv;

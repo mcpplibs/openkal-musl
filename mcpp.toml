@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.6.0"
+version     = "0.7.0"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 
@@ -15,7 +15,7 @@ authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-musl"
 
 [dependencies]
-openkal = "0.8.0"
+openkal = "0.9.0"
 
 # An ordinary consumer of openkal declares the specification and leaves the
 # choice of implementation to whoever builds the program, which is what the
@@ -30,10 +30,10 @@ openkal = "0.8.0"
 #
 # The consequence for a program is that it names this package and nothing else.
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = { version = "0.6.0", features = ["standalone"] }
+openkal-linux = { version = "0.7.0", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
-openkal-macos = { version = "0.5.0", features = ["standalone"] }
+openkal-macos = { version = "0.6.0", features = ["standalone"] }
 
 # ⚠️ FIRST STEP TOWARD A BARE MACHINE, AND NOT THE WHOLE OF IT.
 #
@@ -44,7 +44,7 @@ openkal-macos = { version = "0.5.0", features = ["standalone"] }
 # runtime that receives control, and a C library configured for an environment
 # with no process to exit from. So this declares the implementation and stops.
 [target.'cfg(os = "none")'.dependencies]
-openkal-opensbi = { version = "0.2.0", features = ["standalone"] }
+openkal-opensbi = { version = "0.3.0", features = ["standalone"] }
 
 # ⭐ WHICH OPENKAL INTERFACES THE IMPLEMENTATION BENEATH IS EXPECTED TO PROVIDE.
 #
@@ -69,7 +69,7 @@ openkal-opensbi = { version = "0.2.0", features = ["standalone"] }
 defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
 
 [target.'cfg(windows)'.dependencies]
-openkal-windows = { version = "0.3.0", features = ["standalone"] }
+openkal-windows = { version = "0.4.0", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #

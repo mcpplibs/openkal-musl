@@ -370,7 +370,7 @@ static int adopt(struct kal_net_conn c, int flags)
 
 	struct kal_file nof = { 0 };
 	struct kal_dir  nod = { 0 };
-	okm_fd_bind(fd, OKM_SOCKET, kal_net_stream(c), nof, nod, O_RDWR | flags);
+	okm_fd_bind(fd, OKM_SOCKET, kal_net_stream(c).h, nof, nod, O_RDWR | flags);
 	struct okm_desc* nd = okm_desc_of(fd);
 	nd->sock = slot;
 	g_sock[slot].state = OKM_SOCK_CONN;
@@ -469,7 +469,7 @@ int okm_sock_connect(int fd, const void* addr, unsigned len)
 	s->state = OKM_SOCK_CONN;
 	s->peer = ep;
 	s->have_peer = 1;
-	d->stream = kal_net_stream(s->conn);
+	d->stream = kal_net_stream(s->conn).h;
 	return 0;
 }
 
@@ -566,9 +566,9 @@ long okm_sock_send(int fd, const void* buf, unsigned long len, int flags,
 			if (e != kal_ok) return -okm_errno(e);
 			s->state = OKM_SOCK_DGRAM;
 		}
-		const struct kal_io_result io = kal_datagram_send_to(s->dg, buf, len, &to);
-		if (io.e != kal_ok) return -okm_errno(io.e);
-		return (long)io.n;
+		const kal_intptr io = kal_datagram_send_to(s->dg, buf, len, &to);
+		if (io < 0) return -okm_errno((int)-io);
+		return (long)io;
 	}
 
 	if (s->state != OKM_SOCK_CONN) return -ENOTCONN;
@@ -577,9 +577,9 @@ long okm_sock_send(int fd, const void* buf, unsigned long len, int flags,
 	if (ns) return okm_timed_write(d->stream, buf, len, ns);
 
 	struct kal_stream st; st.h = d->stream;
-	const struct kal_io_result io = kal_stream_write(st, buf, len);
-	if (io.e != kal_ok) return io.n ? (long)io.n : -okm_errno(io.e);
-	return (long)io.n;
+	const kal_intptr io = kal_stream_write(st, buf, len);
+	if (io < 0) return -okm_errno((int)-io);
+	return (long)io;
 }
 
 long okm_sock_recv(int fd, void* buf, unsigned long len, int flags,
@@ -613,16 +613,16 @@ long okm_sock_recv(int fd, void* buf, unsigned long len, int flags,
 			s->pend_msg = 0;
 		} else {
 			const kal_u64 ns = bound_of(d, s, flags, 1);
-			struct kal_io_result io;
+			kal_intptr io;
 			if (ns) {
 				if (!kal_timeout_recv_from) return -ENOSYS;
 				io = kal_timeout_recv_from(s->dg, buf, len, &from, ns);
-				if (io.e == kal_err_again) return -EAGAIN;
+				if (io == -kal_err_again) return -EAGAIN;
 			} else {
 				io = kal_datagram_recv_from(s->dg, buf, len, &from);
 			}
-			if (io.e != kal_ok) return -okm_errno(io.e);
-			got = (unsigned long)io.n;
+			if (io < 0) return -okm_errno((int)-io);
+			got = (unsigned long)io;
 		}
 		if (addr && alen) from_endpoint(&from, addr, alen);
 		return (long)got;
@@ -639,9 +639,9 @@ long okm_sock_recv(int fd, void* buf, unsigned long len, int flags,
 	if (ns) return okm_timed_read(d->stream, buf, len, ns);
 
 	struct kal_stream st; st.h = d->stream;
-	const struct kal_io_result io = kal_stream_read(st, buf, len);
-	if (io.e != kal_ok) return -okm_errno(io.e);
-	return (long)io.n;
+	const kal_intptr io = kal_stream_read(st, buf, len);
+	if (io < 0) return -okm_errno((int)-io);
+	return (long)io;
 }
 
 /* --- options ----------------------------------------------------------------
@@ -774,11 +774,11 @@ int okm_sock_wait_in(struct okm_desc* d, kal_u64 ns)
 			if (!s->buf) return -ENOMEM;
 		}
 		struct kal_endpoint from;
-		const struct kal_io_result io =
+		const kal_intptr io =
 			kal_timeout_recv_from(s->dg, s->buf, OKM_DGRAM_MAX, &from, ns);
-		if (io.e == kal_err_again) return 0;
-		if (io.e != kal_ok) return -okm_errno(io.e);
-		s->pend_len  = (unsigned long)io.n;
+		if (io == -kal_err_again) return 0;
+		if (io < 0) return -okm_errno((int)-io);
+		s->pend_len  = (unsigned long)io;
 		s->pend_from = from;
 		s->pend_msg  = 1;
 		return 1;
