@@ -223,6 +223,43 @@ int main(int argc, char **argv, char **envp) {
 			      "stat resolves, and reports what the name finally refers to");
 			check(lstat("okm-probe-link", &itself) == 0 && S_ISLNK(itself.st_mode),
 			      "lstat reports the node itself");
+
+			/* ⭐⭐ AND THE THIRD QUESTION, WHICH IS NEITHER OF THOSE TWO.
+			 *
+			 * O_NOFOLLOW does not ask to open the link and does not ask to
+			 * open its target: it asks `is this name a link?' and expects
+			 * ELOOP when it is. openkal offers no opening that declines to
+			 * resolve --- by design --- so this port resolved, and for a link
+			 * to a name that is absent it answered ENOENT.
+			 *
+			 * ⚠️ THAT IS A DIFFERENT ANSWER TO A DIFFERENT QUESTION, AND
+			 * NOTHING NEARBY LOOKED WRONG. Every operation above still held.
+			 * What failed was three layers up: libc++'s `remove_all' descends
+			 * by opening each entry O_DIRECTORY|O_NOFOLLOW and reads ENOENT as
+			 * `it is already gone', so it unlinked nothing and then reported
+			 * ENOTEMPTY for a directory it had just declined to empty. The
+			 * host toolchain removed the same tree.
+			 *
+			 * The answer comes from the enquiry openkal 0.9 added: ask about
+			 * the name itself. Both cases are checked because they fail
+			 * differently --- a live target resolved to a FILE and returned a
+			 * descriptor, which is not an error at all. */
+			int nf = open("okm-probe-link", O_RDONLY | O_NOFOLLOW);
+			check(nf < 0 && errno == ELOOP,
+			      "opening a link with O_NOFOLLOW reports that it is a link");
+			if (nf >= 0) close(nf);
+
+			unlink("okm-probe-target-gone");
+			unlink("okm-probe-dangling");
+			if (symlink("okm-probe-target-gone", "okm-probe-dangling") == 0) {
+				nf = open("okm-probe-dangling", O_RDONLY | O_NOFOLLOW);
+				check(nf < 0 && errno == ELOOP,
+				      "and does so for a link whose target is absent, rather than ENOENT");
+				if (nf >= 0) close(nf);
+				check(unlink("okm-probe-dangling") == 0,
+				      "a link whose target is absent is still removable");
+			}
+
 			unlink("okm-probe-link");
 		} else if (errno == ENOSYS || errno == EPERM) {
 			printf("ok:   this volume has no nodes that name others, which it reported\n");

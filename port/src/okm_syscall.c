@@ -160,6 +160,38 @@ static syscall_arg_t do_openat(int dirfd, const char* path, int flags, int mode)
 	if (r) return r;
 	const size_t n = slen(at.rel);
 
+	/* ⭐⭐ O_NOFOLLOW ON A LINK IS `ELOOP', AND ANSWERING `ENOENT' MADE A
+	 * DIRECTORY UNREMOVABLE.
+	 *
+	 * openkal states that opening RESOLVES and offers no form that declines
+	 * to --- deliberately, since a program that opens a link to read its
+	 * bytes is asking what `kal_fs_link_read' answers. So this reached the
+	 * link's target, and for a link whose target is absent that is `ENOENT'.
+	 *
+	 * ⚠️ WHICH IS A DIFFERENT ANSWER TO A DIFFERENT QUESTION. POSIX says
+	 * ELOOP: `the name is a link and you said not to follow one'. ENOENT
+	 * says `there is no such name', and the two are acted upon differently
+	 * by exactly the caller that passes this flag.
+	 *
+	 * ⭐ MEASURED THROUGH THREE LAYERS. libc++'s `remove_all' descends by
+	 * opening each entry O_DIRECTORY|O_NOFOLLOW: on ELOOP or ENOTDIR it
+	 * unlinks the entry, on ENOENT it concludes the entry has already gone
+	 * and moves on. Against this port it moved on, unlinked nothing, and
+	 * then `rmdir' failed --- so `fs::remove_all' returned ENOTEMPTY and
+	 * left the tree standing, while every individual operation it is built
+	 * from behaved correctly. The host toolchain removed the same tree.
+	 *
+	 * The enquiry that answers this is the one openkal 0.9 added: ask about
+	 * the name ITSELF rather than what it refers to. It is one call, on a
+	 * path taken only when the caller passed the flag. */
+	if (flags & O_NOFOLLOW) {
+		struct kal_node_info self = { .self_size = sizeof self };
+		if (okm_fs_info(at.base, at.rel, n, KAL_FS_NO_RESOLVE,
+		                KAL_INFO_KIND, &self) == kal_ok
+		    && self.kind == kal_node_link)
+			return -ELOOP;
+	}
+
 	okm_lock();
 	const int fd = okm_fd_alloc(0);
 	if (fd < 0) { okm_unlock(); return fd; }

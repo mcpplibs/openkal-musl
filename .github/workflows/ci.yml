@@ -615,22 +615,41 @@ jobs:
           cxx_runtime = "host-coupled"
           TOML
           sed -i 's/^          //' "$d/mcpp.toml"
-          # ⭐ `symlinkat` IS THE OPERATION AND THE PROBE PRINTS ITS OWN NUMBER.
+          # ⚠️⚠️ THE OPERATION THIS PROBE NAMES MUST STILL BE ABSENT, AND THE
+          # ONE IT NAMED STOPPED BEING SO.
           #
-          # openkal has no atom that creates a link --- the manifest and README
-          # both record that --- so it reaches the default arm rather than a case
-          # with a decision of its own. The number is printed by the probe rather
-          # than computed here, so the expectation comes from the same headers
-          # the dispatcher was compiled with; a number worked out on the host
-          # would be answering for the host's C library.
+          # It was `symlinkat`, chosen because openkal had no atom that creates a
+          # link. openkal 0.9 added `kal_fs_link_create`, this dispatcher gained
+          # a case for it, and the probe --- unchanged, still green in intent ---
+          # began exercising an operation that now SUCCEEDS. It reported zero
+          # diagnostics for a hundred attempts, which is the same reading a
+          # broken diagnostic channel gives.
+          #
+          # ⭐ SO THE ABSENCE IS NOW ASSERTED RATHER THAN ASSUMED. `mknodat`
+          # creates a device node, which openkal does not express and is not
+          # going to; if a case for it ever appears, the grep below fails and
+          # says to pick another operation --- instead of this step passing
+          # while measuring nothing.
+          if grep -q 'SYS_mknodat' port/src/okm_syscall.c; then
+            echo "::error::the dispatcher now handles mknodat, so this probe no"
+            echo "::error::longer exercises an absent operation. Pick another"
+            echo "::error::operation openkal has no atom for and name it here."
+            exit 1
+          fi
+          # The number is printed by the probe rather than computed here, so the
+          # expectation comes from the same headers the dispatcher was compiled
+          # with; a number worked out on the host would answer for the host's C
+          # library.
           printf '%s\n' \
             '#include <sys/syscall.h>' \
+            '#include <sys/stat.h>' \
             '#include <fcntl.h>' \
             '#include <unistd.h>' \
             '#include <stdio.h>' \
             'int main(void) {' \
-            '    for (int i = 0; i < 100; i++) (void)!symlinkat("a", AT_FDCWD, "b");' \
-            '    printf("%ld\n", (long)SYS_symlinkat);' \
+            '    for (int i = 0; i < 100; i++)' \
+            '        (void)!mknodat(AT_FDCWD, "node", S_IFIFO | 0600, 0);' \
+            '    printf("%ld\n", (long)SYS_mknodat);' \
             '    return 0;' \
             '}' > "$d/src/main.c"
           ( cd "$d" && mcpp build --toolchain '${{ matrix.toolchain }}' )
