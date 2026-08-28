@@ -272,7 +272,23 @@ int main(int argc, char **argv, char **envp) {
 
 	/* ⚠️ Two different files are two different files. `st_dev' and `st_ino'
 	 * were constants, so every file compared equal to every other and a C++
-	 * library's `equivalent' answered true with no error. */
+	 * library's `equivalent' answered true with no error.
+	 *
+	 * ⚠️⚠️ WHEN THIS FAILS, THE DEFECT IS USUALLY NOT IN THIS PACKAGE. This
+	 * port copies the identity out of `kal_node_info' and puts zero there when
+	 * the implementation does not report one --- which is permitted, and which
+	 * makes every node compare equal to every other. So a failure here says
+	 * "the openkal implementation beneath this one declined to report an
+	 * identity", and the place to look is its `kal_fs_info'.
+	 *
+	 * Measured: it failed on Windows, and openkal-windows was reading a volume
+	 * serial number the object manager had written and then discarding it,
+	 * because the enquiry reported STATUS_BUFFER_OVERFLOW for a volume label
+	 * that did not fit and the implementation read that as a failure. The
+	 * conformance suite could not have said so: an implementation is allowed
+	 * to decline the field, so the suite reports the observation as one it did
+	 * not make. This is the criterion that notices, and it is two packages
+	 * away from the defect. */
 	{
 		struct stat x, y;
 		FILE *fx = fopen("okm-probe-x.tmp", "w"); if (fx) fclose(fx);

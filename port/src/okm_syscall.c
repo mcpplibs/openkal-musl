@@ -334,7 +334,6 @@ static syscall_arg_t do_fstat(int fd, struct kstat* st)
  * where the difference belongs: a caller of `readlink' expects the first. */
 static syscall_arg_t do_readlink(int dirfd, const char* path, char* out, size_t cap)
 {
-	if (!kal_fs_link_read) return -ENOSYS;
 	struct okm_at at;
 	const syscall_arg_t r = okm_resolve(dirfd, path, &at, 0);
 	if (r) return r;
@@ -350,7 +349,7 @@ static syscall_arg_t do_readlink(int dirfd, const char* path, char* out, size_t 
 	if (info.kind == kal_node_absent) return -ENOENT;
 	if (info.kind != kal_node_link)   return -EINVAL;
 
-	const kal_intptr n = kal_fs_link_read(at.base, at.rel, slen(at.rel), out, cap);
+	const kal_intptr n = okm_fs_link_read(at.base, at.rel, slen(at.rel), out, cap);
 	if (n < 0) return -okm_errno((int)-n);
 	return (syscall_arg_t)((size_t)n < cap ? (size_t)n : cap);
 }
@@ -363,12 +362,11 @@ static syscall_arg_t do_readlink(int dirfd, const char* path, char* out, size_t 
  * for a relative target. Only the name being CREATED is resolved. */
 static syscall_arg_t do_symlink(const char* target, int dirfd, const char* path)
 {
-	if (!kal_fs_link_create) return -ENOSYS;
 	if (!target || !path) return -EFAULT;
 	struct okm_at at;
 	const syscall_arg_t r = okm_resolve(dirfd, path, &at, 0);
 	if (r) return r;
-	const int e = kal_fs_link_create(at.base, at.rel, slen(at.rel),
+	const int e = okm_fs_link_create(at.base, at.rel, slen(at.rel),
 	                                 target, slen(target), 0);
 	return e == kal_ok ? 0 : -okm_errno(e);
 }

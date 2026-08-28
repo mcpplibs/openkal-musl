@@ -70,6 +70,37 @@
 extern __typeof(kal_fs_link_create) kal_fs_link_create __attribute__((__weak__));
 extern __typeof(kal_fs_link_read)   kal_fs_link_read   __attribute__((__weak__));
 
+/* ⚠️⚠️ AND THEY GO THROUGH THE SEAM LIKE EVERYTHING ELSE, WHICH THEY DID NOT.
+ *
+ * The two call sites named `kal_fs_link_*' directly and tested the weak symbol
+ * themselves. That is correct where `openkal.fs' is present and is not a
+ * declaration at all where it is absent --- the weak declarations above are
+ * inside this branch, so in the OKM_HAS_FS == 0 configuration the names came
+ * from <openkal/fs.h> STRONG, and a backend with no filesystem failed to link:
+ *
+ *     ld.lld: error: undefined symbol: kal_fs_link_read
+ *     >>> referenced by okm_syscall.c:340 ... (do_readlink)
+ *
+ * ⭐ WHICH IS THE FAILURE THIS FILE'S OWN OPENING COMMENT PREDICTS, IN THE
+ * WORDS IT PREDICTS IT IN: "a forty-first added later would be the one that was
+ * missed --- and missed silently, because the way it shows is a link failure on
+ * a target nobody was building at the time". It was found by openkal-opensbi's
+ * bare-metal row, which is the only row that builds this configuration.
+ *
+ * So the null test lives here, once, and the callers name `okm_fs_link_*'. */
+static inline int okm_fs_link_create(struct kal_dir base, const char* name,
+                                     kal_uintptr len, const char* target,
+                                     kal_uintptr target_len, kal_uintptr flags) {
+	if (!kal_fs_link_create) return kal_err_not_supported;
+	return kal_fs_link_create(base, name, len, target, target_len, flags);
+}
+static inline kal_intptr okm_fs_link_read(struct kal_dir base, const char* name,
+                                          kal_uintptr len, char* out,
+                                          kal_uintptr cap) {
+	if (!kal_fs_link_read) return -kal_err_not_supported;
+	return kal_fs_link_read(base, name, len, out, cap);
+}
+
 #else
 
 /* `static inline' and not a macro, so that an argument is still type-checked
@@ -105,6 +136,11 @@ static inline int okm_fs_info(struct kal_dir, const char*, kal_uintptr,
                               struct kal_node_info*) { return kal_err_not_supported; }
 static inline int okm_fs_mkdir(struct kal_dir, const char*,
                                kal_uintptr) { return kal_err_not_supported; }
+static inline int okm_fs_link_create(struct kal_dir, const char*, kal_uintptr,
+                                     const char*, kal_uintptr,
+                                     kal_uintptr) { return kal_err_not_supported; }
+static inline kal_intptr okm_fs_link_read(struct kal_dir, const char*, kal_uintptr,
+                                          char*, kal_uintptr) { return -kal_err_not_supported; }
 static inline int okm_fs_remove(struct kal_dir, const char*,
                                 kal_uintptr) { return kal_err_not_supported; }
 static inline int okm_fs_rename(struct kal_dir, const char*, kal_uintptr,
