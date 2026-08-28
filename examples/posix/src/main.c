@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -163,6 +164,95 @@ int main(int argc, char **argv, char **envp) {
 		printf("FAIL: a program is started (posix_spawn returned %d)\n", rc);
 		failures += 2;
 	}
+
+	/* ⭐⭐ THE DISPOSITION OF A SIGNAL IS TOUCHED, WHICH NOTHING HERE DID.
+	 *
+	 * This file had thirty-six observations and three of them were about
+	 * `abort'. It contained no call to `signal' or `sigaction' anywhere --- so
+	 * it examined whether `abort' ENDS the program and never whether a program
+	 * may ASK what a signal is set to. A defect that killed any program doing
+	 * the second passed every one of the thirty-six.
+	 *
+	 * ⚠️ ALL THREE FORMS, AND SIGABRT AMONG THEM. The C library takes a lock for
+	 * any change to that one disposition and blocks signals to take it, so
+	 * SIGABRT reaches code the others do not --- and the enquiry, which changes
+	 * nothing, reached it too. Two of the three forms below would have passed
+	 * while the third killed the process. */
+	{
+		int survived = 1;
+		for (int sig = 1; sig < 32; sig++) {
+			if (sig == SIGKILL || sig == SIGSTOP) continue;
+			struct sigaction seen;
+			memset(&seen, 0, sizeof seen);
+			/* An enquiry, which changes nothing. */
+			const int q = sigaction(sig, NULL, &seen);
+			if (q != 0 && errno != ENOSYS) survived = 0;
+			/* Ignoring, which every environment can express. */
+			errno = 0;
+			signal(sig, SIG_IGN);
+			if (errno != 0 && errno != ENOSYS) survived = 0;
+			/* A handler, which this environment cannot deliver and refuses. */
+			errno = 0;
+			if (signal(sig, SIG_DFL) == SIG_ERR && errno != ENOSYS) survived = 0;
+		}
+		check(survived, "every signal's disposition may be read and written or refused");
+	}
+
+	/* Nodes whose content is another name, where the volume has them. */
+	{
+		/* The names this block uses are its own: the file the earlier
+		 * observations made has been removed by the time this runs, and a probe
+		 * that depended on another probe's leftovers would report an absence as
+		 * a defect. */
+		{ FILE *t = fopen("okm-link-target.tmp", "w"); if (t) { fputs("0123456789", t); fclose(t); } }
+		unlink("okm-probe-link");
+		const int made = symlink("okm-link-target.tmp", "okm-probe-link");
+		if (made == 0) {
+			char target[64] = { 0 };
+			const ssize_t got = readlink("okm-probe-link", target, sizeof target - 1);
+			check(got == (ssize_t)strlen("okm-link-target.tmp")
+			          && strcmp(target, "okm-link-target.tmp") == 0,
+			      "a node's content reads back as it was written");
+
+			/* ⭐ THE OBSERVATION THE PORT MOST NEEDED. Asking resolves and
+			 * opening resolves, so the two agree; asking with the flag reports
+			 * the node itself. They disagreed, and a C++ library above reported
+			 * a link where a caller would have reached a file. */
+			struct stat followed, itself;
+			check(stat("okm-probe-link", &followed) == 0 && S_ISREG(followed.st_mode),
+			      "stat resolves, and reports what the name finally refers to");
+			check(lstat("okm-probe-link", &itself) == 0 && S_ISLNK(itself.st_mode),
+			      "lstat reports the node itself");
+			unlink("okm-probe-link");
+		} else if (errno == ENOSYS || errno == EPERM) {
+			printf("ok:   this volume has no nodes that name others, which it reported\n");
+		} else {
+			printf("FAIL: making a node that names another (errno %d)\n", errno);
+			failures++;
+		}
+		unlink("okm-link-target.tmp");
+	}
+
+	/* ⚠️ Two different files are two different files. `st_dev' and `st_ino'
+	 * were constants, so every file compared equal to every other and a C++
+	 * library's `equivalent' answered true with no error. */
+	{
+		struct stat x, y;
+		FILE *fx = fopen("okm-probe-x.tmp", "w"); if (fx) fclose(fx);
+		FILE *fy = fopen("okm-probe-y.tmp", "w"); if (fy) fclose(fy);
+		check(stat("okm-probe-x.tmp", &x) == 0 && stat("okm-probe-y.tmp", &y) == 0
+		          && !(x.st_dev == y.st_dev && x.st_ino == y.st_ino),
+		      "two different files have different identities");
+		unlink("okm-probe-x.tmp");
+		unlink("okm-probe-y.tmp");
+	}
+
+	/* A value POSIX says cannot fail is not a negated error. */
+	check(getpgrp() > 0, "the process group is a number and not a negated error");
+
+	/* The page is the machine's and not the build's. */
+	check(sysconf(_SC_PAGESIZE) > 0 && (sysconf(_SC_PAGESIZE) & (sysconf(_SC_PAGESIZE) - 1)) == 0,
+	      "the page size is a positive power of two obtained from the environment");
 
 	printf("-- failures: %d --\n", failures);
 	return failures ? 1 : 0;

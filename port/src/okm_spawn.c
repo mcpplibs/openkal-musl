@@ -115,9 +115,9 @@ static int place(struct kal_spawn_streams* s, int pos, kal_uintptr stream,
 	if (stream == okm_std_stream(pos)) stream = 0;
 	else if (stream == 0)              return ENOSYS;
 	else                               *placed = 1;
-	if      (pos == 0) s->in  = stream;
-	else if (pos == 1) s->out = stream;
-	else               s->err = stream;
+	if      (pos == 0) s->in.h  = stream;
+	else if (pos == 1) s->out.h = stream;
+	else               s->err.h = stream;
 	return 0;
 }
 
@@ -202,7 +202,7 @@ int __posix_spawn(pid_t* restrict res, const char* restrict path,
 	/* The streams the started program receives. Zero means it inherits the
 	 * corresponding stream of its parent, which is what an environment with no
 	 * general mechanism for passing handles can always provide. */
-	struct kal_spawn_streams streams = { 0, 0, 0 };
+	struct kal_spawn_streams streams = { { 0 }, { 0 }, { 0 } };
 	int placed = 0;                 /* a stream of the caller's choosing */
 	int refused = seed(&streams, &placed);
 
@@ -267,7 +267,7 @@ int __posix_spawn(pid_t* restrict res, const char* restrict path,
 				                           okm_open_flags(op->oflag), &f);
 				if (oe != kal_ok) { refused = okm_errno(oe); break; }
 				opened[opened_n++] = f;
-				refused = place(&streams, op->fd, okm_fs_stream(f), &placed);
+				refused = place(&streams, op->fd, okm_fs_stream(f).h, &placed);
 				break;
 			}
 			case FDOP_CLOSE:

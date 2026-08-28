@@ -30,3 +30,8 @@ crash.log
 # What the object-level checks in continuous integration write beside the
 # sources they examine.
 syms.txt
+
+# A working tree of the specification or of an implementation placed beside the
+# sources. No trailing slash: the pattern must match a symbolic link as well.
+.spec
+.impl

@@ -145,6 +145,16 @@ means in every case except one that passes through a symbolic link.
 descriptions; beyond that it is told so. Allocating the tables instead would
 place them on the allocator, and the allocator obtains its memory through them.
 
+⚠️ **And a program may have started 256 programs it has not waited for.** An
+entry is taken when a program is started and released when it is waited for,
+which is what a process table is; a program that never waits holds entries for
+ever, and the next start reports `EAGAIN` — which is what POSIX says `fork`
+does when the table is full. This bound is stated here because it was not, and
+a caller that met it saw a failure on an operation with no evident relation to
+the ones that caused it: measured, the sixty-fifth `posix_spawn` of a program
+that waited for none, and of one that polled each once with `WNOHANG` and did
+not come back.
+
 ## Asking which operation was missing
 
 `ENOSYS` says that a facility is not here. It does not say which one, and until
