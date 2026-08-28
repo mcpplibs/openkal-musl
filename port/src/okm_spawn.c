@@ -70,6 +70,10 @@
 #undef free
 
 #define OKM_SPAWN_MAX 512
+/* How many files one set of file actions may open. Eight rather than three: a
+ * caller may name one position more than once, and every file it opened has to
+ * be released whether or not its stream ended up being the one placed. */
+#define OKM_SPAWN_MAX_OPEN 8
 
 int __okm_child_record(struct kal_process h);
 
@@ -204,9 +208,14 @@ int __posix_spawn(pid_t* restrict res, const char* restrict path,
 
 	/* Files a file action opened. They belong to this call rather than to the
 	 * caller --- the caller asked for a program started upon them, not for a
-	 * file --- so each is released once the spawn has been performed. At most
-	 * three can exist, because there are three positions to place them in. */
-	struct kal_file opened[3];
+	 * file --- so each is released once the spawn has been performed.
+	 *
+	 * ⚠️ THE BOUND IS NOT THREE. Three positions can be placed, and a caller may
+	 * name one of them more than once; POSIX says the last such action decides,
+	 * and the earlier file is still open and still has to be released. The bound
+	 * is stated rather than derived, and a sequence that exceeds it is refused
+	 * rather than silently truncated. */
+	struct kal_file opened[OKM_SPAWN_MAX_OPEN];
 	int opened_n = 0;
 
 	/* Resolving a file action's name needs one of these and it is four kilobytes.
@@ -246,7 +255,7 @@ int __posix_spawn(pid_t* restrict res, const char* restrict path,
 				 * a file through `dup2' --- which is the route openkal-linux#13
 				 * reported as not working. */
 				if (op->fd > 2 || op->fd < 0) { refused = ENOSYS; break; }
-				if (opened_n >= 3) { refused = ENOSYS; break; }
+				if (opened_n >= OKM_SPAWN_MAX_OPEN) { refused = ENOSYS; break; }
 				const long r = okm_resolve(AT_FDCWD, op->path, &fa_at, 0);
 				if (r) { refused = (int)-r; break; }
 				struct kal_file f;

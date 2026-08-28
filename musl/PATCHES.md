@@ -330,6 +330,22 @@ and openkal-linux, which has no bounded wait for a child and polls, rounds that
 up to one millisecond. Where the environment provides no `openkal.timeout`,
 `WNOHANG` is refused rather than accepted and ignored.
 
+### And one defect of the criteria rather than of the library
+
+⭐ `tools/run-probe.sh` chose the program to run with `find target … | head -1`.
+`target/` accumulates one directory per configuration --- per toolchain, per
+target, and per version of a dependency, because the version is part of the
+fingerprint --- so after the version moved from 0.5.0 to 0.6.0 the search
+answered with the program built BEFORE the change. Two newly added observations
+did not appear in the output of a run that reported `-- failures: 0 --`. The
+criteria had not failed; they had not run, and nothing said so.
+
+It does not bite in continuous integration, which is why it survived: a fresh
+checkout builds one configuration and there is nothing to choose between. It
+bites on the machine where the change is being written, which is where a
+criterion is trusted most. `tools/one-artifact.sh` now asserts the count before
+anything is read, and the steps that run a program call it.
+
 ### One thing the specification reserves in one interface and hands out in another
 
 `kal_spawn_streams` reserves a stream handle of **zero** to mean inheritance.

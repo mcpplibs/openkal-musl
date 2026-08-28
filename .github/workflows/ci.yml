@@ -677,7 +677,7 @@ jobs:
           [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
           cd examples/cross-hello
           mcpp build $extra
-          binary="$(find target -type f \( -name 'cross-hello' -o -name 'cross-hello.exe' \) | head -1)"
+          binary="$(bash "$GITHUB_WORKSPACE/tools/one-artifact.sh" cross-hello)"
           "./$binary" 2>&1 | tee out.log
           grep -q -- '-- failures: 0 --' out.log
 
@@ -689,7 +689,7 @@ jobs:
           extra=''
           [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
           mcpp build $extra
-          binary="$(find target -type f \( -name 'wordcount' -o -name 'wordcount.exe' \) | head -1)"
+          binary="$(bash "$GITHUB_WORKSPACE/tools/one-artifact.sh" wordcount)"
           WORDCOUNT_VERBOSE=1 "$binary" sample.txt 2>&1 | tee run.log
 
           counts="$(sed -n 's/^lines \([0-9]*\) words \([0-9]*\) bytes \([0-9]*\)$/\1 \2 \3/p' run.log)"

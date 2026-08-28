@@ -469,6 +469,38 @@ int main(int argc, char** argv)
 		}
 	}
 
+	/* ⭐ AND ANY OF THEM, NOT THE FIRST ONE RECORDED.
+	 *
+	 * `waitpid(-1, …, WNOHANG)` asks after any child. Asking after the first
+	 * recorded one would report "none has finished" while a later one had, which
+	 * is the reading a caller draining its children in a loop acts upon. The
+	 * slow program is started FIRST so that it occupies the earlier slot: a
+	 * library that asked only about that one would answer zero here until the
+	 * slow one finished, and would then name the wrong program. */
+	{
+		pid_t slow = -1, quick = -1;
+		char* sv[] = { (char*)self, (char*)"--child-sleep", (char*)"600", 0 };
+		char* qv[] = { (char*)self, (char*)"--child-sleep", (char*)"1", 0 };
+		const int es = posix_spawn(&slow,  self, NULL, NULL, sv, environ);
+		const int eq = posix_spawn(&quick, self, NULL, NULL, qv, environ);
+		check(es == 0 && eq == 0, "two programs can be running at once");
+		if (es == 0 && eq == 0) {
+			int st = 0;
+			long spins = 0;
+			pid_t r;
+			while ((r = waitpid(-1, &st, WNOHANG)) == 0 && spins < 100000) spins++;
+			if (r != quick)
+				printf("   waitpid(-1, WNOHANG) reported %d; the one that finished"
+				       " first was %d and the other was %d\n",
+				       (int)r, (int)quick, (int)slow);
+			check(r == quick,
+			      "asking after any of them names the one that finished first");
+			wait_for(slow);
+		} else {
+			failures += 1;
+		}
+	}
+
 	if (!expect_shell) {
 		printf("   this system has no shell at /bin/sh; system and popen are not asked\n");
 		printf("-- failures: %d --\n", failures);

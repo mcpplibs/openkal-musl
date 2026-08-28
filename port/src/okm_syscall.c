@@ -535,15 +535,36 @@ static syscall_arg_t do_wait4(int pid, int* status, int options, void* rusage)
 		 * already passes for a non-blocking read.
 		 *
 		 * ⚠️ An implementation rounds a bound up to its own granularity, so
-		 * `WNOHANG' here waits at most one tick of the environment's clock
-		 * rather than not at all. Recorded in musl/PATCHES.md: it is a bound,
-		 * and a bound that could be shorter than the clock would be a promise
-		 * no environment can keep. */
+		 * `WNOHANG' here waits at most one polling interval of the environment
+		 * beneath rather than not at all --- a millisecond on openkal-linux,
+		 * which has no bounded wait for a child and polls. Recorded in
+		 * musl/PATCHES.md: it is a bound, and a bound that could be shorter than
+		 * what the environment distinguishes is a promise it cannot keep. */
 		if (!kal_timeout_wait_process) return -ENOSYS;
-		e = kal_timeout_wait_process(g_child[i].h, OKM_NOW_NS, &st, &terminated);
-		/* The child is still running. `waitpid' says so by reporting that it
-		 * waited for nobody, which is a zero rather than an error. */
-		if (e == kal_err_again) return 0;
+
+		/* ⚠️ EVERY CHILD, WHERE THE CALLER NAMED NONE. `waitpid(-1, …, WNOHANG)'
+		 * asks after ANY child, and asking after the first recorded one would
+		 * report "none has finished" while a later one had --- the reading a
+		 * caller draining its children in a loop acts upon. The blocking form
+		 * has no such choice to make: it waits, and whichever it waits for
+		 * finishes eventually. */
+		int found = -1;
+		if (pid > 0) {
+			e = kal_timeout_wait_process(g_child[i].h, OKM_NOW_NS, &st, &terminated);
+			if (e != kal_err_again) found = i;
+		} else {
+			for (int k = 0; k < OKM_MAX_CHILD && found < 0; k++) {
+				if (!g_child[k].used) continue;
+				e = kal_timeout_wait_process(g_child[k].h, OKM_NOW_NS,
+				                             &st, &terminated);
+				if (e != kal_err_again) found = k;
+			}
+		}
+		/* Nothing has finished. `waitpid' says so by reporting that it waited
+		 * for nobody, which is a zero rather than an error, and it leaves the
+		 * caller's status word alone. */
+		if (found < 0) return 0;
+		i = found;
 	} else {
 		e = okm_process_wait(g_child[i].h, &st, &terminated);
 	}
