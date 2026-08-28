@@ -49,6 +49,16 @@ extern __typeof(kal_process_channel_close) kal_process_channel_close __attribute
  * optional, and an implementation that does not provide it is absent as a
  * definition rather than present and refusing. */
 extern __typeof(kal_random_fill) kal_random_fill __attribute__((__weak__));
+/* ⭐ WHAT `WNOHANG' IS EXPRESSED AS, AND IT WAS ALREADY IN THE SPECIFICATION.
+ *
+ * `waitpid' discarded its options, so a caller polling for a child that had not
+ * finished BLOCKED until it did --- the one thing `WNOHANG' exists to prevent.
+ * `openkal.timeout' has carried `kal_timeout_wait_process' since 0.8 and this
+ * port simply never reached it.
+ *
+ * Weak by the same rule as everything else in that interface: a backend may
+ * bound some of its resources and not others, or decline the interface. */
+extern __typeof(kal_timeout_wait_process) kal_timeout_wait_process __attribute__((__weak__));
 
 #include <errno.h>
 #include <fcntl.h>
@@ -60,6 +70,7 @@ extern __typeof(kal_random_fill) kal_random_fill __attribute__((__weak__));
 #include <sys/syscall.h>
 #include <sys/uio.h>
 #include <sys/utsname.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <dirent.h>
 #include <poll.h>
@@ -167,16 +178,7 @@ static syscall_arg_t do_openat(int dirfd, const char* path, int flags, int mode)
 		return fd;
 	}
 
-	kal_uintptr want = 0;
-	switch (flags & O_ACCMODE) {
-	case O_RDONLY: want = KAL_OPEN_READ; break;
-	case O_WRONLY: want = KAL_OPEN_WRITE; break;
-	default:       want = KAL_OPEN_READ | KAL_OPEN_WRITE; break;
-	}
-	if (flags & O_CREAT)  want |= KAL_OPEN_CREATE;
-	if (flags & O_EXCL)   want |= KAL_OPEN_EXCLUSIVE;
-	if (flags & O_TRUNC)  want |= KAL_OPEN_TRUNCATE;
-	if (flags & O_APPEND) want |= KAL_OPEN_APPEND;
+	const kal_uintptr want = okm_open_flags(flags);
 
 	struct kal_file f;
 	const int e = okm_fs_open(at.base, at.rel, n, want, &f);
@@ -431,21 +433,199 @@ static int child_index(int pid)
 	return -1;
 }
 
+/* --- what a signal aimed at this program means ------------------------------
+ *
+ * ⚠️⚠️ `abort' DID NOT END THE PROGRAM, AND WHAT ENDED IT WAS AN ILLEGAL
+ * INSTRUCTION.
+ *
+ * musl's `raise' is one line --- `syscall(SYS_tkill, self->tid, sig)' --- and
+ * this dispatcher had no case for that number, so it answered ENOSYS and the
+ * program went on. `abort' is written for exactly that possibility: it raises,
+ * uninstalls any handler, raises again, and then reaches the line its own
+ * comment calls unreachable, `a_crash()', which on x86_64 is `hlt'. Executed
+ * outside ring 0 that faults, and the fault is delivered as SIGSEGV.
+ *
+ * Measured 2026-08-28 on the host kernel: a program whose entire body is `hlt'
+ * exits 139 with a core dumped. So every `abort' over this port --- an uncaught
+ * exception, `assert', `std::terminate', `__cxa_pure_virtual',
+ * `__stack_chk_fail' --- reported a segmentation fault, and a consumer reading
+ * 139 was told it had a bad pointer when it had an assertion. Reported as
+ * openkal-linux#13; the report reasoned from the wrong half of it, because 139
+ * looked like the null jump it had also seen.
+ *
+ * ⭐ THE ANSWER IS NOT SYNTHESISED. openkal-linux's `kal_abort' IS
+ * `tgkill(pid, tid, SIGABRT)', so routing `abort' onto it gives a real signal
+ * death: a parent reads WIFSIGNALED and WTERMSIG == SIGABRT, and a core is
+ * written, which is what `abort' means everywhere else. Choosing
+ * `kal_exit(134)' instead would have produced a number that looks the same to a
+ * shell and answers `WIFEXITED' to a program.
+ *
+ * ⭐⭐ AND THE TARGET IS DELIBERATELY NOT EXAMINED, WHICH IS THE OPPOSITE OF
+ * WHAT IT LOOKS LIKE.
+ *
+ * The default action of a terminating signal ends the PROCESS and not the
+ * context that was named --- that is true on Linux too --- so which context a
+ * caller aimed at makes no difference to the outcome. Comparing the identifier
+ * against `kal_task_current()' would have been worse than useless: a thread
+ * created here records the counter in okm_thread.c rather than openkal's
+ * identity, so the comparison would have failed for every context but the
+ * first, and `abort' from a thread would have gone back to `hlt'.
+ *
+ * ⚠️⚠️ THREE NUMBERS ARE MUSL'S OWN AND MUST NOT TERMINATE ANYTHING.
+ * pthread_impl.h reserves 32, 33 and 34 for the timer thread, cancellation and
+ * `synccall', and each is sent with this same call. `pthread_cancel' is
+ * `pthread_kill(t, SIGCANCEL)' --- so a table that made 33 a terminating signal
+ * would end the program the first time anything cancelled a thread. They are
+ * refused, which is what they already got and what musl already handles: this
+ * port delivers no signal, so there is no handler for them to reach. */
+#define OKM_SIG_MUSL_LOW  32   /* SIGTIMER   */
+#define OKM_SIG_MUSL_HIGH 34   /* SIGSYNCCALL */
+
+static syscall_arg_t signal_self(int sig)
+{
+	/* An enquiry rather than a request. POSIX gives it no delivery and no
+	 * default action, and the answer is that this program exists. */
+	if (sig == 0) return 0;
+	if (sig < 0 || sig >= _NSIG) return -EINVAL;
+
+	/* musl's own three. Not deliverable and not terminating. */
+	if (sig >= OKM_SIG_MUSL_LOW && sig <= OKM_SIG_MUSL_HIGH) return -ENOSYS;
+
+	switch (sig) {
+	/* Ignored by default: complete when there is nothing to do, which is the
+	 * one shape this port permits itself to report success for. */
+	case SIGCHLD: case SIGURG: case SIGWINCH:
+		return 0;
+	/* Stopping and continuing. openkal has no operation that suspends a program
+	 * and lets another resume it, and a stop that was accepted and not performed
+	 * would leave a caller waiting for a state the program never entered. */
+	case SIGSTOP: case SIGTSTP: case SIGTTIN: case SIGTTOU: case SIGCONT:
+		return -ENOSYS;
+	case SIGABRT:
+		/* No message. `abort' prints nothing in any C library, and a line of
+		 * this port's own on the stream a program was about to lose would be a
+		 * divergence with nothing to gain: whatever had a diagnosis --- libc++abi,
+		 * `assert' --- has already printed it. */
+		kal_abort((const char*)0, 0);
+		return 0;                      /* not reached */
+	default:
+		break;
+	}
+
+	/* Everything else terminates by default. The status is the form this port
+	 * already hands to a caller of `wait' for a child that died on a signal, a
+	 * few lines below at SYS_execve. */
+	kal_exit(128 + sig);
+	return 0;                          /* not reached */
+}
+
 static syscall_arg_t do_wait4(int pid, int* status, int options, void* rusage)
 {
-	(void)options; (void)rusage;
+	(void)rusage;
 	int i = -1;
 	if (pid > 0) i = child_index(pid);
 	else { for (int k = 0; k < OKM_MAX_CHILD; k++) if (g_child[k].used) { i = k; break; } }
 	if (i < 0) return -ECHILD;
 	int st = 0, terminated = 0;
-	const int e = okm_process_wait(g_child[i].h, &st, &terminated);
+	int e;
+	if (options & WNOHANG) {
+		/* ⚠️ NOT ZERO. openkal spells "no bound" as zero (timeout.h), so a
+		 * caller asking not to wait must ask for the smallest bound there is
+		 * and not for none. `OKM_NOW_NS' is that bound and is what this port
+		 * already passes for a non-blocking read.
+		 *
+		 * ⚠️ An implementation rounds a bound up to its own granularity, so
+		 * `WNOHANG' here waits at most one tick of the environment's clock
+		 * rather than not at all. Recorded in musl/PATCHES.md: it is a bound,
+		 * and a bound that could be shorter than the clock would be a promise
+		 * no environment can keep. */
+		if (!kal_timeout_wait_process) return -ENOSYS;
+		e = kal_timeout_wait_process(g_child[i].h, OKM_NOW_NS, &st, &terminated);
+		/* The child is still running. `waitpid' says so by reporting that it
+		 * waited for nobody, which is a zero rather than an error. */
+		if (e == kal_err_again) return 0;
+	} else {
+		e = okm_process_wait(g_child[i].h, &st, &terminated);
+	}
 	if (e != kal_ok) return -okm_errno(e);
 	okm_process_close(g_child[i].h);
 	const int got = g_child[i].pid;
 	g_child[i].used = 0;
 	if (status) *status = terminated ? (st & 0x7f) : ((st & 0xff) << 8);
 	return got;
+}
+
+/* --- the report of an operation this library does not have ------------------
+ *
+ * ⭐ THE DEFAULT ARM ANSWERS ENOSYS IN SILENCE, AND A CONSUMER CANNOT ACT ON A
+ * SILENCE.
+ *
+ * The answer itself is right --- POSIX has a word for a facility that is not
+ * there and every caller of `open' already handles a failure. What is missing is
+ * WHICH facility, and the only way to learn it has been to read this file. Two
+ * rounds of openkal-linux#13 were spent on exactly that question, and reading a
+ * dispatcher is not a thing a consumer of a C library should have to do.
+ *
+ * ⚠️ NOT ON BY DEFAULT, AND NOT A BUILD OPTION EITHER. A consumer meets this on
+ * a binary it already has; rebuilding the C library to find out what the binary
+ * needed is the cost this is here to remove. So it is a variable of the
+ * environment, read once.
+ *
+ * ⚠️ AND ONLY THIS ARM. `mprotect' and `rt_sigreturn' answer ENOSYS from cases
+ * of their own, and each is a decision with a reason recorded beside it rather
+ * than a gap. Tracing those would report a facility as missing that this port
+ * deliberately does not have, which is a different sentence.
+ */
+static int trace_wanted(void)
+{
+	/* -1 not yet asked. Asked once: a variable is looked up by walking a set. */
+	static int g_want = -1;
+	int want = __atomic_load_n(&g_want, __ATOMIC_ACQUIRE);
+	if (want >= 0) return want;
+
+	static const char name[]   = "OPENKAL_MUSL_TRACE";
+	static const char wanted[] = "enosys";
+	kal_uintptr len = 0;
+	const char* v = kal_env_var(name, sizeof name - 1, &len);
+	want = 0;
+	if (v && len == sizeof wanted - 1) {
+		want = 1;
+		for (kal_uintptr i = 0; i < len; i++)
+			if (v[i] != wanted[i]) { want = 0; break; }
+	}
+	__atomic_store_n(&g_want, want, __ATOMIC_RELEASE);
+	return want;
+}
+
+static void trace_absent(syscall_arg_t n)
+{
+	if (!trace_wanted()) return;
+
+	/* ⚠️ EACH NUMBER ONCE, AND THE DOCUMENTATION SAYS SO. A program that retries
+	 * a refused operation in a loop would otherwise bury the report in copies of
+	 * itself, and a reader counting the lines would conclude it happened once. */
+	if (n >= 0 && n < 8192) {
+		static unsigned char seen[8192 / 8];
+		const unsigned char bit = (unsigned char)(1u << (n & 7));
+		if (__atomic_fetch_or(&seen[n >> 3], bit, __ATOMIC_ACQ_REL) & bit) return;
+	}
+
+	/* ⚠️ WRITTEN TO THE STREAM DIRECTLY, NOT THROUGH THIS LIBRARY'S OWN OUTPUT.
+	 * What failed may be the operation that stdio was about to perform, and a
+	 * report that reaches stdio from inside the failure of stdio is a report
+	 * that arrives as a second failure. Nothing here allocates either. */
+	static const char head[] = "openkal-musl: no operation for system call ";
+	char line[80];
+	unsigned o = 0;
+	for (unsigned i = 0; i < sizeof head - 1; i++) line[o++] = head[i];
+	unsigned long long v = (unsigned long long)(n < 0 ? -n : n);
+	if (n < 0) line[o++] = '-';
+	char digits[24];
+	unsigned d = 0;
+	do { digits[d++] = (char)('0' + (unsigned)(v % 10)); v /= 10; } while (v);
+	while (d) line[o++] = digits[--d];
+	line[o++] = '\n';
+	kal_stream_write(kal_stderr(), line, (kal_uintptr)o);
 }
 
 /* --- the dispatcher --------------------------------------------------------- */
@@ -1215,11 +1395,36 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	}
 #ifdef SYS_kill
 	case SYS_kill: {
-		const int i = child_index((int)a1);
-		if (i < 0) return -ESRCH;
-		const int e = okm_process_terminate(g_child[i].h);
-		return e == kal_ok ? 0 : -okm_errno(e);
+		const int pid = (int)a1, sig = (int)a2;
+		const int i = child_index(pid);
+		if (i >= 0) {
+			/* ⚠️ SIGNAL ZERO IS AN ENQUIRY AND USED TO TERMINATE THE CHILD.
+			 * Every value reached `kal_process_terminate', so the one form of
+			 * `kill' whose whole purpose is to change nothing --- the test that
+			 * a program is still there --- killed it. */
+			if (sig == 0) return 0;
+			const int e = okm_process_terminate(g_child[i].h);
+			return e == kal_ok ? 0 : -okm_errno(e);
+		}
+		/* This program itself. `getpid' answers 1 here and child identifiers
+		 * begin at 1001, so `kill(getpid(), …)' reached neither branch and
+		 * reported ESRCH --- including for SIGABRT. Zero and minus one name
+		 * groups that contain this program, and it is the only member this
+		 * library can reach. */
+		if (pid == 1 || pid == 0 || pid == -1) return signal_self(sig);
+		return -ESRCH;
 	}
+#endif
+
+	/* Aimed at one execution context rather than at the program. musl uses both
+	 * spellings: `raise' and `abort' issue the first, `pthread_kill' the second
+	 * by way of the first. signal_self records why the identifier is not
+	 * examined and which three numbers must never terminate anything. */
+#ifdef SYS_tkill
+	case SYS_tkill:  return signal_self((int)a2);
+#endif
+#ifdef SYS_tgkill
+	case SYS_tgkill: return signal_self((int)a3);
 #endif
 
 	/* --- duplicating the calling image -------------------------------------- */
@@ -1490,7 +1695,9 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	default:
 		/* Everything else openkal does not have. The C library above reports
 		 * the failure to the program in the way the program's author already
-		 * handles, which is the outcome a missing facility should produce. */
+		 * handles, which is the outcome a missing facility should produce ---
+		 * and, when asked, says which one it was. */
+		trace_absent(n);
 		return -ENOSYS;
 	}
 }

@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.5.0"
+openkal-musl = "0.6.0"
 ```
 
 It names no implementation and no platform: a C library is the one consumer that
@@ -110,7 +110,20 @@ answer that leaves a program wrong without telling it.
 | readiness *sets* | `epoll` is not built at all, so the link names it | a set held by the environment is a facility of one kernel rather than a capability. `poll` and `select` ask each descriptor in turn, which is what an interface without a set permits. |
 | symbolic links | `symlink` reports `ENOSYS`; `readlink` reports `EINVAL` for a name that is not one and `ENOSYS` for one that is | `SURFACE.txt` has no operation that creates or reads a link. It *does* have `kal_node_link` and `KAL_FS_PROP_LINKS`, so an implementation can report a link it encounters and cannot make one; the asymmetry is the specification's and is recorded rather than worked around. |
 | ownership and permission bits | `chmod` and `chown` report `ENOSYS`; `stat` reports a mode assembled from what openkal knows | `kal_node_info` carries `writable` — one boolean, not a mode word — and `kal_fs_open_file` takes flags rather than a mode. Mapping the owner-write bit onto it would make `chmod(0600)` succeed and `stat` report something else, which is the shape this port exists to avoid. |
+| a mode given at creation | `open(…, O_CREAT, 0600)` and `mkdir(path, 0700)` **succeed** and `stat` afterwards reports 0666 and 0777 | the row above, in the one place where it does not read as a refusal. openkal opens a file for a purpose and not for an audience, so the argument has nowhere to go. Refusing every mode but the one `stat` will report would refuse nearly every program; what a caller can rely on instead is stated below. |
 | entropy | `getrandom` reports `ENOSYS` where the backend declines `openkal.random` | openkal has no source of one to require, and this port does not invent one. The allocator's cookie and the stack canary are derived from the clock and from an address; neither is a security property here. |
+| a signal delivered anywhere | `raise` and `kill` perform a signal's **default action** and nothing else: terminating signals end the program, ignored ones succeed, stopping ones report `ENOSYS`, and musl's own three (32, 33, 34) are refused, so `pthread_cancel` reports `ENOSYS` | there is no delivery, so there is no handler to reach; what remains of a signal is what it does when no handler exists. `abort` reaches `kal_abort`, which raises the signal on Linux and ends with a distinguished status elsewhere — a parent can tell an abnormal end from an ordinary one on every system. |
+| an immediate answer about a started program | `waitpid(…, WNOHANG)` returns without the program having finished, but may wait up to one polling interval of the implementation beneath (one millisecond on Linux) | `kal_timeout_wait_process` takes a bound and openkal spells "no bound" as zero, so a caller that does not want to wait asks for the smallest bound there is. An environment rounds a bound up to what its clock can distinguish; a bound shorter than the clock is a promise no environment can keep. |
+| closing a standard stream in a program being started | `posix_spawn_file_actions_addclose(&fa, 0…2)` makes the spawn report `ENOSYS`; above position two it is performed, because nothing there is inherited | openkal has no value meaning "no stream", and the value that looks like one — zero — means the opposite: the stream the caller has. Accepting the action and not performing it would hand a program the standard input its caller had just taken away. |
+| starting a program upon a stream whose handle is zero | a caller that redirects its **output** onto its own standard input and then starts a program gets `ENOSYS` | `kal_spawn_streams` reserves zero for inheritance and `kal_stream` reserves nothing, so an implementation whose streams are the environment's own descriptors hands out zero for standard input. The two agree at position zero and cannot be told apart anywhere else. Reported upstream; refused here rather than answered wrongly. |
+
+**⭐ What carries confinement here, since a mode word does not.** A program that
+writes "only I may read this" as a mode is stating it in a vocabulary this
+environment does not have. What it does have is stronger and is not the
+program's to weaken: a program reaches only the directories the environment
+supplied it, and `port/src/okm_fd.c` states the rule — confinement is a property
+of what was supplied, not of the program's cooperation. A caller with that
+requirement expresses it by being started with fewer directories.
 
 **⭐ The permission row is a decision and not an omission.** The alternative was
 to ask the specification for a permission operation. It was declined: a FAT
@@ -132,6 +145,38 @@ means in every case except one that passes through a symbolic link.
 descriptions; beyond that it is told so. Allocating the tables instead would
 place them on the allocator, and the allocator obtains its memory through them.
 
+## Asking which operation was missing
+
+`ENOSYS` says that a facility is not here. It does not say which one, and until
+0.6.0 the only way to find out was to read `port/src/okm_syscall.c` — which is
+not a thing a consumer of a C library should have to do, and two rounds of
+[openkal-linux#13](https://github.com/mcpplibs/openkal-linux/issues/13) were
+spent on exactly that question.
+
+    OPENKAL_MUSL_TRACE=enosys ./your-program
+
+Each operation the dispatcher has no case for is then named on the standard
+error stream, **once**, whatever the number of attempts:
+
+    openkal-musl: no operation for system call 266
+
+Three properties, each of them asserted in continuous integration because each
+of the corresponding failures is quiet:
+
+- **Nothing is reported unless the variable is set.** A diagnostic that appears
+  by itself is one every program above this library has to explain to its users.
+- **Once per operation.** A program that retries in a loop would otherwise bury
+  the report in copies of itself, and a reader counting lines would conclude it
+  happened once.
+- **Only the operations that have no case.** `mprotect` and `rt_sigreturn`
+  answer `ENOSYS` from cases of their own, each a decision with a reason
+  recorded beside it. Reporting those would name a facility as missing that this
+  port deliberately does not have, which is a different sentence.
+
+The report is written to the stream directly rather than through this library's
+own output, because what failed may be the operation that output was about to
+perform.
+
 ## Where POSIX is rebuilt
 
 Two structures live in `port/` that the specification forbids an
@@ -149,20 +194,20 @@ bridge a difference in shape:
 
 | | lines |
 | --- | --- |
-| the system-call correspondence (`okm_syscall.c`) | 1496 |
+| the system-call correspondence (`okm_syscall.c`) | 1703 |
 | sockets and datagrams (`okm_net.c`) | 788 |
-| descriptors and name resolution (`okm_fd.c`) | 463 |
+| descriptors and name resolution (`okm_fd.c`) | 512 |
 | `setjmp` and its relatives (`okm_setjmp.S`) | 316 |
 | how a second name is made (`port/include/features.h`) | 288 |
 | startup and the thread pointer (`okm_start.c`) | 282 |
 | readiness and bounded transfer (`okm_poll.c`) | 256 |
 | execution contexts and the suspension primitive (`okm_thread.c`) | 203 |
-| starting another program (`okm_spawn.c`) | 164 |
+| starting another program (`okm_spawn.c`) | 372 |
 | where per-context state is kept (`okm_context.c`) | 162 |
 | duplicating the calling image (`okm_fork.c`) | 166 |
 | what two object formats do not provide (`okm_format.c`) | 105 |
 | mapping, the working directory, program headers, the architecture seams, the one file each of two object formats needs | 398 |
-| **total** | **5087** |
+| **total** | **5551** |
 
 Against 1345 musl sources compiled unmodified. The ratio is the measurement: if
 openkal's decomposition were wrong, the port layer would be where the difference
@@ -264,7 +309,7 @@ file.
 | --- | --- |
 | `examples/posix` | 32 observations, each written so that it can fail |
 | `examples/net` | 35 over sockets, datagrams and readiness, on the loopback address |
-| `examples/subprocess` | another program started three ways, and a refusal checked as one |
+| `examples/subprocess` | 22 observations: another program started five ways, where its output went in each of them, how an abnormal end is reported, and three refusals checked as refusals |
 | `examples/identifiers` | three names a program above this library may use, asserted by compiling |
 | `examples/wordcount` | the same three counts as the system's own `wc` |
 | [`mcpplibs/sbase`](https://github.com/mcpplibs/sbase) | all 97 suckless base utilities, sources unmodified, 50 comparisons against the system's own tools |

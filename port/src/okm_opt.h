@@ -113,7 +113,32 @@ static inline int okm_fs_list_next(struct kal_dir, kal_uintptr*, const char**,
 #define okm_process_terminate kal_process_terminate
 #define okm_process_close     kal_process_close
 
+/* ⚠️⚠️ A CAPABILITY WORD IS DATA, AND A WEAK REFERENCE TO DATA IS NOT TESTED THE
+ * WAY A WEAK REFERENCE TO A FUNCTION IS.
+ *
+ * The port holds twenty-five weak references and every one of them names a
+ * function, so the established form is `if (kal_net_connect) kal_net_connect(…)'
+ * --- the name decays to its address and the test is upon that address.
+ *
+ * `kal_process_props' is an object. The same spelling would read the object,
+ * and where the definition is absent the object is at address zero, so the test
+ * intended to prevent a null dereference IS one. The address must be taken.
+ *
+ * ⭐ This is the defect reported as openkal-linux#13 --- a call through a null
+ * stub --- arriving through data rather than through code, and it is stated here
+ * once so that no caller has to remember which kind of symbol it is holding. */
+extern const kal_uintptr kal_process_props __attribute__((__weak__));
+
+static inline kal_uintptr okm_process_props(void)
+{
+	if (&kal_process_props == (const kal_uintptr*)0) return 0;
+	return kal_process_props;
+}
+
 #else
+
+/* Nothing is provided, so nothing is claimed. */
+static inline kal_uintptr okm_process_props(void) { return 0; }
 
 static inline int okm_process_spawn(struct kal_dir, const char*, kal_uintptr,
                                     const char**, const kal_uintptr*, kal_uintptr,

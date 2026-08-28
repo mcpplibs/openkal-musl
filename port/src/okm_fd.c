@@ -61,6 +61,30 @@ int okm_errno(int e)
 	}
 }
 
+/* How a program's open(2) flags are said in openkal's vocabulary.
+ *
+ * ⭐ ONE DECISION IN ONE PLACE. Two callers reach it --- `open' itself and the
+ * file action a spawn may carry --- and a second derivation of the same table
+ * would agree with this one until one of them was extended.
+ *
+ * ⚠️ The mode a caller supplies is not among the inputs, and its absence is not
+ * an oversight: `kal_fs_open' takes what a file is opened FOR and not who may
+ * later reach it. README.md records what a program observes as a result. */
+kal_uintptr okm_open_flags(int flags)
+{
+	kal_uintptr want;
+	switch (flags & O_ACCMODE) {
+	case O_RDONLY: want = KAL_OPEN_READ; break;
+	case O_WRONLY: want = KAL_OPEN_WRITE; break;
+	default:       want = KAL_OPEN_READ | KAL_OPEN_WRITE; break;
+	}
+	if (flags & O_CREAT)  want |= KAL_OPEN_CREATE;
+	if (flags & O_EXCL)   want |= KAL_OPEN_EXCLUSIVE;
+	if (flags & O_TRUNC)  want |= KAL_OPEN_TRUNCATE;
+	if (flags & O_APPEND) want |= KAL_OPEN_APPEND;
+	return want;
+}
+
 /* --- the lock ------------------------------------------------------------- */
 
 static volatile int g_lock;
@@ -79,6 +103,28 @@ static struct okm_desc g_desc[OKM_MAX_DESC];
 static struct { int desc; int cloexec; } g_fd[OKM_MAX_FD];
 static char g_dirpath[OKM_MAX_DIRS][OKM_DIR_PATH];
 static int  g_dirpath_used[OKM_MAX_DIRS];
+
+/* ⭐ THE THREE STREAMS THE PROGRAM WAS STARTED WITH, KEPT BECAUSE A LATER
+ * QUESTION IS ABOUT HISTORY RATHER THAN ABOUT THE PRESENT.
+ *
+ * When this library starts another program it must say what that program's
+ * three streams are, and openkal spells "the ones its parent has" as a handle
+ * of zero (process.h). Whether zero is the right answer is not "what does
+ * descriptor 1 name" but "does descriptor 1 STILL name what it named when this
+ * program began" --- because `dup2' rebinds this table and cannot rebind the
+ * environment's own descriptor 1, so the two answers stopped agreeing the
+ * moment a program redirected anything.
+ *
+ * Asking `kal_stdout()' again at the point of the spawn would give the same
+ * value and would be the same question asked of the present. Recording it here
+ * states that the comparison is with the beginning. */
+static kal_uintptr g_std_stream[3];
+
+kal_uintptr okm_std_stream(int fd)
+{
+	if (fd < 0 || fd > 2) return 0;
+	return g_std_stream[fd];
+}
 
 static int desc_alloc(void)
 {
@@ -232,9 +278,12 @@ void okm_table_init(void)
 	 * are borrowed: openkal does not release them and neither does this. */
 	struct kal_file nof = { 0 };
 	struct kal_dir  nod = { 0 };
-	okm_fd_bind(0, OKM_STREAM, kal_stdin().h,  nof, nod, O_RDONLY);
-	okm_fd_bind(1, OKM_STREAM, kal_stdout().h, nof, nod, O_WRONLY);
-	okm_fd_bind(2, OKM_STREAM, kal_stderr().h, nof, nod, O_WRONLY);
+	g_std_stream[0] = kal_stdin().h;
+	g_std_stream[1] = kal_stdout().h;
+	g_std_stream[2] = kal_stderr().h;
+	okm_fd_bind(0, OKM_STREAM, g_std_stream[0], nof, nod, O_RDONLY);
+	okm_fd_bind(1, OKM_STREAM, g_std_stream[1], nof, nod, O_WRONLY);
+	okm_fd_bind(2, OKM_STREAM, g_std_stream[2], nof, nod, O_WRONLY);
 
 	const kal_uintptr n = okm_fs_preopen_count();
 	g_npre = 0;
