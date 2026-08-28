@@ -143,6 +143,16 @@ was given would not be confined by having been given it. `/a/b/../c` is
 therefore reduced to `/a/c` before openkal sees it, which is what the program
 means in every case except one that passes through a symbolic link.
 
+**`O_NOFOLLOW` is answered by an enquiry, not by an opening.** openkal states
+that opening resolves and offers no form that declines to, deliberately: a
+program that opens a link in order to read its bytes is asking what
+`kal_fs_link_read` answers. So this port asks `kal_fs_info` with
+`KAL_FS_NO_RESOLVE` first and reports `ELOOP` when the name is a link, which is
+what POSIX says and what a caller passing the flag is distinguishing. Answering
+`ENOENT` instead — which is what resolving a link to an absent target produces —
+is a different answer to a different question, and libc++'s `remove_all` reads it
+as "the entry has already gone" and leaves the tree standing.
+
 **The tables are bounded.** A program may hold 1024 descriptors and 512 open
 descriptions; beyond that it is told so. Allocating the tables instead would
 place them on the allocator, and the allocator obtains its memory through them.
