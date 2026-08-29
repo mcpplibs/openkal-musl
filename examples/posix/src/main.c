@@ -10,6 +10,7 @@
 #include <pthread.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <spawn.h>
 
@@ -385,6 +386,30 @@ int main(int argc, char **argv, char **envp) {
 			free(big);
 		}
 		check(whole, "several pages are obtained in one allocation and every byte of it holds");
+	}
+
+	/* WHAT VERSION OF THE C LIBRARY THIS PROGRAM HOLDS.
+	 *
+	 * The release field was the string literal "0.5.0" through every release
+	 * after 0.5.0, so a program that asked was given a false answer rather than
+	 * no answer. It now comes from the manifest. This asserts that it is neither
+	 * absent nor the placeholder a build that could not read the manifest would
+	 * leave -- it deliberately does NOT assert a particular number, because the
+	 * number moves at every release and an observation naming one would have to
+	 * be edited by every release rather than checked by it.
+	 *
+	 * The build that DOES check the number is the workflow, which compares this
+	 * line against mcpp.toml. Reported in openkal-linux#13, where two rounds were
+	 * spent establishing which version a consumer had actually built. */
+	{
+		struct utsname un;
+		const int ok = uname(&un) == 0;
+		check(ok, "the system reports its identity");
+		if (ok) {
+			printf("note: release=%s\n", un.release);
+			check(un.release[0] != '\0' && strcmp(un.release, "unknown") != 0,
+			      "the C library reports a version rather than a placeholder");
+		}
 	}
 
 	printf("-- failures: %d --\n", failures);

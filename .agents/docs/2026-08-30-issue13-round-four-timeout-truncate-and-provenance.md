@@ -404,16 +404,44 @@ read.
 So `uname -r` is a *lying* oracle, which is worse than none: a consumer who
 checks it is told a version, and the version is wrong.
 
-Two changes, neither large:
+**Done in 0.9.0**, both halves:
 
-- Derive the `release` field from the package version at build time, so that
-  `uname -r` answers.
-- Have `OPENKAL_MUSL_TRACE` print one line naming the version before anything
-  else, so that a trace pasted into an issue carries its own provenance.
+- The `release` field is derived from the package version. `build.mcpp` reads
+  `mcpp.toml` and defines it, so the number is stated in one place; a manifest
+  it cannot read yields no definition and the field reports `unknown`, which is
+  a true statement rather than a false one.
+- `OPENKAL_MUSL_TRACE=enosys` names the version **before the program runs**, and
+  whether or not anything is missing. That last part is the substance: a run in
+  which nothing was refused printed nothing at all, so "the version is right and
+  nothing is absent", "the variable did not take effect" and "this is not the
+  binary I think it is" were one reading.
 
 The second matters more, because the trace is what a reporter is already asked
-to paste. A report that carries its version is a report that cannot be answered
-against the wrong one, which is the whole of what went wrong this round.
+to paste. A report that carries its version cannot be answered against the wrong
+one, which is the whole of what went wrong this round.
+
+**measured**, and the third observation is the one that protects everybody who
+is not debugging:
+
+```
+  ok  silent unless asked
+  ok  the banner names 0.9.0
+  ok  uname reports 0.9.0
+```
+
+and against the previous behaviour, with the constant put back:
+
+```
+banner:  FAIL  got=[]
+uname:   FAIL  got=[0.5.0]
+```
+
+⚠️ The release field now MOVES AT EVERY RELEASE. Nothing here or in musl reads
+it — `gethostname` and `getdomainname` are musl's only consumers of `uname` and
+both read `nodename` — but a program above that compares it against a fixed
+string will see it change. Recorded in `README.md`'s divergence table. The
+trade was taken because the previous value was not merely uninformative: it was
+wrong, and a consumer who checked it was misled rather than left uncertain.
 
 ---
 

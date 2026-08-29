@@ -68,9 +68,69 @@ std::string env_or_empty(const char* name) {
     return v ? v : "";
 }
 
+// THE VERSION IS READ FROM THE MANIFEST RATHER THAN WRITTEN OUT A SECOND TIME.
+//
+// A program built on this library could not state which version of it it held.
+// The only version-shaped thing it could read was `uname`'s release field,
+// which was the string literal "0.5.0" and had never moved -- so a consumer who
+// checked it was told a version, and the version was wrong. Two rounds of
+// mcpplibs/openkal-linux#13 turned on a question the software gave no way to
+// settle.
+//
+// A `defines` entry in the manifest would state the number a second time, four
+// lines below where it is already stated, and the two would agree until one of
+// them was edited. So it is read from the one place that has it. An unreadable
+// manifest yields no definition at all rather than a wrong one, and the header
+// that consumes this reports "unknown" -- which is a true statement, unlike
+// the constant it replaces.
+std::string package_version() {
+    const std::string dir = env_or_empty("MCPP_MANIFEST_DIR");
+    if (dir.empty()) return "";
+    std::ifstream in(dir + "/mcpp.toml");
+    if (!in) return "";
+
+    // The first `version = "..."` under [package]. Sections after it declare
+    // versions of other things -- dependencies name theirs the same way -- so
+    // reading past the first table would answer about one of those.
+    std::string line;
+    bool in_package = false;
+    while (std::getline(in, line)) {
+        const auto first = line.find_first_not_of(" \t");
+        if (first == std::string::npos || line[first] == '#') continue;
+        if (line[first] == '[') { in_package = line.compare(first, 9, "[package]") == 0; continue; }
+        if (!in_package) continue;
+        if (line.compare(first, 7, "version") != 0) continue;
+        const auto open = line.find('"');
+        if (open == std::string::npos) continue;
+        const auto close = line.find('"', open + 1);
+        if (close == std::string::npos) continue;
+        return line.substr(open + 1, close - open - 1);
+    }
+    return "";
+}
+
 int main() {
     const std::string os  = env_or_empty("MCPP_TARGET_OS");
     const std::string fam = compiler_family();
+
+    // BEFORE THE EARLY RETURN BELOW, AND THAT IS THE WHOLE OF WHY IT IS HERE.
+    // The compiler family decides whether a runtime library is named; it does
+    // not decide whether this library knows its own version. Emitting this
+    // after that return would define the version under one compiler and leave
+    // it undefined under the other, and the sources would then disagree about
+    // what they report while compiling cleanly under both.
+    if (const std::string v = package_version(); !v.empty()) {
+        mcpp::rerun_if_changed((env_or_empty("MCPP_MANIFEST_DIR") + "/mcpp.toml").c_str());
+        // THE QUOTES HAVE TO SURVIVE A SHELL. The build file this reaches is
+        // executed by one, so `-DOKM_VERSION="0.9.0"` arrives at the compiler
+        // as `-DOKM_VERSION=0.9.0` and 0.9.0 is not an expression:
+        //
+        //     <command-line>: error: too many decimal points in number
+        //
+        // naming a line in this file that is correct. Escaped here so that
+        // what the shell removes is the escape rather than the quote.
+        mcpp::cflag(("-DOKM_VERSION=\\\"" + v + "\\\"").c_str());
+    }
 
     if (fam != "gcc") return 0;
 

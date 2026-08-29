@@ -753,6 +753,43 @@ static int trace_wanted(void)
 	return want;
 }
 
+/* WHAT VERSION OF THIS LIBRARY A PROGRAM WAS BUILT AGAINST.
+ *
+ * build.mcpp reads it from mcpp.toml and defines it, so it is stated in one
+ * place. A build tool that did not run the program, or a manifest it could not
+ * read, leaves it undefined, and "unknown" is then a true statement -- unlike
+ * the constant this replaces, which was "0.5.0" through every release after
+ * 0.5.0 and was therefore not a missing answer but a wrong one. */
+#ifndef OKM_VERSION
+#define OKM_VERSION "unknown"
+#endif
+const char okm_version[] = OKM_VERSION;
+
+/* THE VERSION IS ANNOUNCED WHEN THE TRACE IS ASKED FOR, NOT WHEN SOMETHING IS
+ * MISSING, AND THE DIFFERENCE IS THE WHOLE POINT.
+ *
+ * Reported through openkal-linux#13: a consumer set this variable, saw no
+ * output, and could not distinguish "the version is right and nothing is
+ * absent" from "the variable did not take effect" or "this is not the binary I
+ * think it is". All three printed nothing. Two rounds of that issue were spent
+ * establishing which of the three had happened.
+ *
+ * So the line is emitted from startup, whenever the variable is set, before
+ * any operation has had the chance to be missing. Nothing is emitted when it
+ * is not set, which is every ordinary run. */
+void okm_trace_banner(void)
+{
+	if (!trace_wanted()) return;
+
+	static const char head[] = "openkal-musl ";
+	char line[96];
+	unsigned o = 0;
+	for (unsigned i = 0; i < sizeof head - 1; i++) line[o++] = head[i];
+	for (unsigned i = 0; okm_version[i] && o < sizeof line - 2; i++) line[o++] = okm_version[i];
+	line[o++] = '\n';
+	kal_stream_write(kal_stderr(), line, (kal_uintptr)o);
+}
+
 static void trace_absent(syscall_arg_t n)
 {
 	if (!trace_wanted()) return;
@@ -1876,9 +1913,22 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * not check it, which is correct: the success they were getting was false,
 	 * and a program whose security rests upon a mask is better stopped by a
 	 * visible failure than served by one that does nothing. */
+	/* THE RELEASE FIELD IS THIS LIBRARY'S VERSION, AND IT USED TO BE A CONSTANT
+	 * THAT WAS WRONG. It read "0.5.0" through every release after 0.5.0, so a
+	 * program that asked was not left without an answer -- it was given a false
+	 * one, which is the worse of the two. It now comes from the manifest, by
+	 * way of build.mcpp.
+	 *
+	 * It therefore MOVES AT EVERY RELEASE. Nothing in this library or in musl
+	 * reads it -- `gethostname` and `getdomainname` are musl's only consumers
+	 * of `uname` and both read `nodename` -- but a program above it that
+	 * compares this field against a fixed string will see it change, and
+	 * README.md records that beside the other divergences. `sysname` is
+	 * "openkal" and not "Linux", so nothing can have been reading this as a
+	 * kernel version. */
 	case SYS_uname: {
 		struct utsname* u = (struct utsname*)a1;
-		static const char* const parts[] = { "openkal", "openkal", "0.5.0", "openkal", 0 };
+		static const char* const parts[] = { "openkal", "openkal", okm_version, "openkal", 0 };
 		char* fields[] = { u->sysname, u->nodename, u->release, u->version, u->machine };
 		for (int f = 0; f < 5; f++) {
 			const char* v = parts[f] ? parts[f] : "unknown";
