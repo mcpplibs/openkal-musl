@@ -1084,6 +1084,39 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 
+	/* SETTING THE LENGTH OF A FILE BY NAME, WHICH IS A DIFFERENT OPERATION
+	 * FROM SETTING IT BY DESCRIPTOR AND WAS ABSENT.
+	 *
+	 * Only `ftruncate' had a case here, and `truncate' fell to the default arm.
+	 * The two are not interchangeable to a caller that has a name and no open
+	 * file: opening one, truncating it and releasing it is what this case does,
+	 * and a caller cannot do it itself without the descriptor it has not got.
+	 *
+	 * The C++ library above takes the name-shaped one. libc++'s `__resize_file'
+	 * is `detail::truncate(p.c_str(), size)', so `std::filesystem::resize_file'
+	 * reported ENOSYS for every path. Reported in openkal-linux#13.
+	 *
+	 * Opened for reading AND writing rather than for writing alone. openkal
+	 * decides at the point of opening what may afterwards be done with a file,
+	 * and `kal_fs_truncate' is a change --- which is the same reason
+	 * `SYS_utimensat' above opens the way it does. The divergence this produces
+	 * from POSIX, which asks for write permission and not for read, is the one
+	 * already recorded there. */
+	case SYS_truncate: {
+		struct okm_at at;
+		{
+			const long r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
+			if (r) return r;
+		}
+		struct kal_file f;
+		int e = okm_fs_open(at.base, at.rel, slen(at.rel),
+		                    KAL_OPEN_READ | KAL_OPEN_WRITE, &f);
+		if (e != kal_ok) return -okm_errno(e);
+		e = okm_fs_truncate(f, (uint64_t)a2);
+		okm_fs_close_file(f);
+		return e == kal_ok ? 0 : -okm_errno(e);
+	}
+
 	case SYS_ftruncate: {
 		struct okm_desc* d = okm_desc_of((int)a1);
 		if (!d || d->kind != OKM_FILE) return -EBADF;

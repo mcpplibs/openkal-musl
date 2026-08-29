@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.7.0"
+openkal-musl = "0.8.0"
 ```
 
 It names no implementation and no platform: a C library is the one consumer that
@@ -118,6 +118,7 @@ answer that leaves a program wrong without telling it.
 | an immediate answer about a started program | `waitpid(…, WNOHANG)` returns without the program having finished, but may wait up to one polling interval of the implementation beneath (one millisecond on Linux) | `kal_timeout_wait_process` takes a bound and openkal spells "no bound" as zero, so a caller that does not want to wait asks for the smallest bound there is. An environment rounds a bound up to what its clock can distinguish; a bound shorter than the clock is a promise no environment can keep. |
 | closing a standard stream in a program being started | `posix_spawn_file_actions_addclose(&fa, 0…2)` makes the spawn report `ENOSYS`; above position two it is performed, because nothing there is inherited | openkal has no value meaning "no stream", and the value that looks like one — zero — means the opposite: the stream the caller has. Accepting the action and not performing it would hand a program the standard input its caller had just taken away. |
 | starting a program upon a stream whose handle is zero | a caller that redirects its **output** onto its own standard input and then starts a program gets `ENOSYS` | `kal_spawn_streams` reserves zero for inheritance and `kal_stream` reserves nothing, so an implementation whose streams are the environment's own descriptors hands out zero for standard input. The two agree at position zero and cannot be told apart anywhere else. Reported upstream; refused here rather than answered wrongly. |
+| **setting** the modification time of a directory | `utimensat` on a directory is refused, so `std::filesystem::last_write_time(dir, t)` throws. **Reading** it is unaffected and correct. The value differs by implementation and is the implementation's to give: `EISDIR` on Linux and macOS, `EACCES` on Windows — both measured | `kal_fs_set_modified` takes a `kal_file` and openkal has neither a `kal_dir` form of it nor a form that takes a name, so this port opens the name as a file, which a directory refuses. What a backend says about that is its own: one distinguishes a directory and one does not. Note that libc++ gives both overloads of `last_write_time` the same name in the message it throws, so the text does not say which of the two failed: the reading overload is `stat` and works on a directory. A caller using a lock directory's timestamp reads it to decide staleness and writes it to refresh the lock, and only the second fails. |
 
 **⭐ What carries confinement here, since a mode word does not.** A program that
 writes "only I may read this" as a mode is stating it in a vocabulary this
