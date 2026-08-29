@@ -146,8 +146,18 @@ int main(int argc, char **argv, char **envp) {
 		ts[1].tv_sec = 1700000000; ts[1].tv_nsec = 0;
 		errno = 0;
 		const int r = utimensat(AT_FDCWD, "okm-probe.dir", ts, 0);
-		check(r != 0 && errno == EISDIR,
-		      "setting a directory's modification time is refused, as EISDIR");
+		/* THE REFUSAL IS THIS PORT'S AND THE VALUE IS THE BACKEND'S, so the
+		 * refusal is asserted and the value is reported.
+		 *
+		 * This asserted EISDIR and one row of the matrix answered 13 --- EACCES.
+		 * Both are correct: the port opens the name as a file, and what a
+		 * backend says about opening a directory as one is its own. Linux
+		 * answers kal_err_is_directory and the system with no such distinction
+		 * answers kal_err_permission. Asserting the first would have made this
+		 * an observation about one implementation while claiming to be about
+		 * the port. */
+		printf("note: refused with errno=%d\n", errno);
+		check(r != 0, "setting a directory's modification time is refused");
 	}
 
 	unlink("okm-probe.dir/a"); unlink("okm-probe.dir/b");

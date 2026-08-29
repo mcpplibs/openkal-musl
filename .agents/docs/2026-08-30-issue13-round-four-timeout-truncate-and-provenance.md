@@ -279,8 +279,18 @@ refuses that open, as `EISDIR`.
 
 ```
 ok: a directory reports its modification time
-ok: setting a directory's modification time is refused, as EISDIR
+note: refused with errno=21
+ok: setting a directory's modification time is refused
 ```
+
+The refusal is asserted and the value is only reported, and the reason is a
+correction this document owes itself: the first form of that observation
+asserted `EISDIR`, and the Windows row of the matrix answered `EACCES`. Both are
+right. The port opens the name as a file; what a backend says about opening a
+directory as one belongs to the backend, and one of them distinguishes a
+directory while another does not. Asserting the first value would have made the
+observation a statement about one implementation while reading as a statement
+about the port.
 
 **The two overloads produce the same message.** libc++ names both
 `"last_write_time"` in the `ErrorHandler` (**read**, `operations.cpp:679` and
