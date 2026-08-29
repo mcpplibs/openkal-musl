@@ -556,8 +556,17 @@ jobs:
           binary="$(bash "$GITHUB_WORKSPACE/tools/one-artifact.sh" posix)"
 
           # (3) first, because it is the property an ordinary run depends on.
+          #
+          # `-eq' AND NOT `='. This step runs on every row, and BSD `wc' pads its
+          # count with spaces where GNU `wc' does not, so a string comparison
+          # reads "       0" and fails on a program that wrote nothing:
+          #
+          #     ##[error]the program wrote        0 line(s) to the error stream
+          #
+          # The step above that does the same thing is `if: runner.os == Linux',
+          # which is why it never met this.
           quiet="$("./$binary" 2>&1 >/dev/null | wc -l)"
-          [ "$quiet" = 0 ] || {
+          [ "$quiet" -eq 0 ] || {
             echo "::error::the program wrote $quiet line(s) to the error stream without being asked"
             "./$binary" 2>&1 >/dev/null | sed 's/^/        /'; exit 1; }
           echo "  ok  silent unless asked"
