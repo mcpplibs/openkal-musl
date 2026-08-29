@@ -326,6 +326,14 @@ void __okm_libc_init(void)
 	__init_tls(0);
 	__init_ssp(g_random);
 	okm_table_init();
+
+	/* AFTER THE ENVIRONMENT IS READABLE AND BEFORE THE PROGRAM RUNS. The
+	 * banner asks openkal for a named value, so it cannot precede
+	 * __okm_init_env; and it must precede main, because the question it
+	 * answers -- which version is this -- is asked by a reader of the
+	 * program's output, who cannot be sure the variable took effect if the
+	 * only evidence is a report that may never be produced. */
+	okm_trace_banner();
 }
 
 int __libc_start_main(int (*main_fn)(int, char**, char**), int argc, char** argv,

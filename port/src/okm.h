@@ -169,6 +169,14 @@ int  okm_fd_cloexec(int fd, int on);
 int  okm_fd_get_cloexec(int fd);
 void okm_table_init(void);
 
+/* Announces this library's version on the standard error stream, and only
+ * when OPENKAL_MUSL_TRACE asks for it. Called once from startup rather than
+ * from the first refused operation: a run in which nothing is refused would
+ * otherwise print nothing, and a consumer could not tell that from a run in
+ * which the variable never took effect. okm_syscall.c states the rest. */
+void okm_trace_banner(void);
+extern const char okm_version[];
+
 /* The stream descriptor `fd' named when the program began, for fd in [0,3), and
  * zero otherwise. What a spawn needs in order to tell a descriptor that has been
  * redirected from one that has not; okm_fd.c records why the question is about

@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.8.0"
+openkal-musl = "0.9.0"
 ```
 
 It names no implementation and no platform: a C library is the one consumer that
@@ -118,6 +118,7 @@ answer that leaves a program wrong without telling it.
 | an immediate answer about a started program | `waitpid(…, WNOHANG)` returns without the program having finished, but may wait up to one polling interval of the implementation beneath (one millisecond on Linux) | `kal_timeout_wait_process` takes a bound and openkal spells "no bound" as zero, so a caller that does not want to wait asks for the smallest bound there is. An environment rounds a bound up to what its clock can distinguish; a bound shorter than the clock is a promise no environment can keep. |
 | closing a standard stream in a program being started | `posix_spawn_file_actions_addclose(&fa, 0…2)` makes the spawn report `ENOSYS`; above position two it is performed, because nothing there is inherited | openkal has no value meaning "no stream", and the value that looks like one — zero — means the opposite: the stream the caller has. Accepting the action and not performing it would hand a program the standard input its caller had just taken away. |
 | starting a program upon a stream whose handle is zero | a caller that redirects its **output** onto its own standard input and then starts a program gets `ENOSYS` | `kal_spawn_streams` reserves zero for inheritance and `kal_stream` reserves nothing, so an implementation whose streams are the environment's own descriptors hands out zero for standard input. The two agree at position zero and cannot be told apart anywhere else. Reported upstream; refused here rather than answered wrongly. |
+| ~~a version a program can read~~ | **answered since 0.9.0.** `uname`'s `release` field is this package's version, and `OPENKAL_MUSL_TRACE=enosys` names it on the error stream once per process before the program runs | It was the string literal `0.5.0` through every release after 0.5.0, so a program that asked was not left without an answer -- it was given a false one. ⚠️ It therefore MOVES AT EVERY RELEASE: nothing here or in musl reads it (`gethostname` and `getdomainname` are musl's only consumers of `uname` and both read `nodename`), but a program above it that compares the field against a fixed string will see it change. `sysname` is `openkal` and not `Linux`, so nothing can have been reading it as a kernel version. |
 | **setting** the modification time of a directory | `utimensat` on a directory is refused, so `std::filesystem::last_write_time(dir, t)` throws. **Reading** it is unaffected and correct. The value differs by implementation and is the implementation's to give: `EISDIR` on Linux and macOS, `EACCES` on Windows — both measured | `kal_fs_set_modified` takes a `kal_file` and openkal has neither a `kal_dir` form of it nor a form that takes a name, so this port opens the name as a file, which a directory refuses. What a backend says about that is its own: one distinguishes a directory and one does not. Note that libc++ gives both overloads of `last_write_time` the same name in the message it throws, so the text does not say which of the two failed: the reading overload is `stat` and works on a directory. A caller using a lock directory's timestamp reads it to decide staleness and writes it to refresh the lock, and only the second fails. |
 
 **⭐ What carries confinement here, since a mode word does not.** A program that
@@ -181,9 +182,22 @@ spent on exactly that question.
 Each operation the dispatcher has no case for is then named on the standard
 error stream, **once**, whatever the number of attempts:
 
+    openkal-musl 0.9.0
     openkal-musl: no operation for system call 266
 
-Three properties, each of them asserted in continuous integration because each
+**The first line is the version, and it is printed whether or not anything is
+missing.** That is the whole reason it exists. Before 0.9.0 a run in which
+nothing was refused printed nothing at all, and three situations were then
+indistinguishable: the version is right and no operation is absent, the variable
+did not take effect, or this is not the binary the reader thinks it is. Two
+rounds of [openkal-linux#13](https://github.com/mcpplibs/openkal-linux/issues/13)
+were answered against the wrong version because of it.
+
+A report pasted into an issue therefore carries its own provenance, and one
+process contributes one such line — a program that starts another produces one
+for each, and they must agree.
+
+Four properties, each of them asserted in continuous integration because each
 of the corresponding failures is quiet:
 
 - **Nothing is reported unless the variable is set.** A diagnostic that appears
@@ -195,6 +209,10 @@ of the corresponding failures is quiet:
   answer `ENOSYS` from cases of their own, each a decision with a reason
   recorded beside it. Reporting those would name a facility as missing that this
   port deliberately does not have, which is a different sentence.
+- **The version named is the one in `mcpp.toml`.** It is read from the manifest
+  by `build.mcpp` rather than written out a second time, and the workflow
+  compares the printed line against the manifest. A version stated in two places
+  agrees until one of them is edited.
 
 The report is written to the stream directly rather than through this library's
 own output, because what failed may be the operation that output was about to

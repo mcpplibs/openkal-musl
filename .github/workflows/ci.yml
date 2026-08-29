@@ -522,6 +522,60 @@ jobs:
           MCPP_TARGET: ${{ matrix.target }}
         run: bash tools/run-probe.sh examples/posix posix
 
+      # A BUILD STATES WHICH VERSION OF THIS LIBRARY IT HOLDS, AND THE STATEMENT
+      # IS COMPARED WITH THE MANIFEST RATHER THAN READ.
+      #
+      # This step exists because of what its absence cost. Two rounds of
+      # mcpplibs/openkal-linux#13 were answered against the wrong version: the
+      # only version-shaped thing a program could read was `uname`'s release
+      # field, which was the literal "0.5.0" through every release after 0.5.0,
+      # so a consumer who checked it was told a version and the version was
+      # wrong. The report that followed named versions its author believed in
+      # and could not verify, and neither could we.
+      #
+      # Three observations, and the third is the one that keeps this honest for
+      # everybody who is NOT debugging:
+      #
+      #   1. the banner names exactly what mcpp.toml says
+      #   2. `uname` reports the same string
+      #   3. WITHOUT the variable, the program writes nothing to the error
+      #      stream at all
+      #
+      # Without (3) this feature would be free to become noise in every
+      # ordinary run, and nothing would say so.
+      - name: A build states its own version, and says nothing when not asked
+        env:
+          MCPP_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          want="$(sed -n 's/^version *= *"\(.*\)"/\1/p' mcpp.toml | head -1)"
+          [ -n "$want" ] || { echo "::error::no version in mcpp.toml"; exit 1; }
+          echo "  the manifest says $want"
+
+          cd examples/posix
+          binary="$(bash "$GITHUB_WORKSPACE/tools/one-artifact.sh" posix)"
+
+          # (3) first, because it is the property an ordinary run depends on.
+          quiet="$("./$binary" 2>&1 >/dev/null | wc -l)"
+          [ "$quiet" = 0 ] || {
+            echo "::error::the program wrote $quiet line(s) to the error stream without being asked"
+            "./$binary" 2>&1 >/dev/null | sed 's/^/        /'; exit 1; }
+          echo "  ok  silent unless asked"
+
+          # (1) the banner. Each process announces itself once, so a program
+          # that starts another produces more than one line; they must agree.
+          banners="$(OPENKAL_MUSL_TRACE=enosys "./$binary" 2>&1 >/dev/null | grep '^openkal-musl [0-9]' | sort -u)"
+          [ "$banners" = "openkal-musl $want" ] || {
+            echo "::error::expected exactly 'openkal-musl $want'; got:"
+            printf '%s\n' "$banners" | sed 's/^/        /'; exit 1; }
+          echo "  ok  the banner names $want"
+
+          # (2) and the field a program reads without setting anything.
+          got="$("./$binary" 2>/dev/null | sed -n 's/^note: release=//p' | head -1)"
+          [ "$got" = "$want" ] || {
+            echo "::error::uname reports '$got' and the manifest says '$want'"; exit 1; }
+          echo "  ok  uname reports $want"
+
       # ⭐ THE NAMES THIS LIBRARY MUST NOT TAKE FROM A PROGRAM ABOVE IT.
       #
       # Reported as openkal-musl#13. This one is a COMPILE-TIME criterion: the
