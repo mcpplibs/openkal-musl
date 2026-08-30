@@ -175,6 +175,55 @@ syscall_arg_t __okm_futex(const int* addr, int op, int val, const struct timespe
 		if (e != kal_ok) return -okm_errno(e);
 		return (long)woken;
 	}
+	/* ⚠️⚠️ WOKEN HERE RATHER THAN MOVED THERE, AND WITHOUT THIS CASE A CONDITION
+	 * VARIABLE WITH TWO WAITERS STOPPED FOR EVER.
+	 *
+	 * `FUTEX_REQUEUE' asks for `val' waiters upon `addr' to be woken and a
+	 * further `val2' to be MOVED to a second address, so that a thread released
+	 * by a condition variable goes straight to waiting upon the mutex instead of
+	 * waking only to block again. openkal has kal_task_wait and kal_task_wake and
+	 * nothing that moves a waiter between two addresses --- so this used to reach
+	 * the arm below and answer ENOSYS.
+	 *
+	 * ⚠️ AND MUSL DOES NOT CHECK. `unlock_requeue' in pthread_cond_timedwait.c
+	 * releases the barrier and then makes this request; when it fails there is no
+	 * remaining path that wakes anyone, so the next waiter in the list sleeps
+	 * until the program is killed:
+	 *
+	 *     a_store(l, 0);
+	 *     if (w) __wake(l, 1, 1);
+	 *     else __syscall(SYS_futex, l, FUTEX_REQUEUE|FUTEX_PRIVATE, 0, 1, r) != -ENOSYS
+	 *         || __syscall(SYS_futex, l, FUTEX_REQUEUE, 0, 1, r);
+	 *
+	 * ⭐ IT TAKES TWO WAITERS, WHICH IS WHY IT SURVIVED. That call is reached only
+	 * when `node.prev' is set --- when a second context is queued behind the one
+	 * being released. One waiter upon a condition variable never reaches it, and
+	 * one waiter is what almost every program has. Measured against a host: a
+	 * consumer's test that has two contexts wait upon one variable passes there in
+	 * 0.06s and did not finish here in 300.
+	 *
+	 * ⇒ Waking is a correct substitute for moving, and the loop musl wakes into is
+	 * why. A waiter is always inside `while (a_cas(l, 0, 2))', so a context woken
+	 * upon `addr' re-reads the word, takes the lock the caller has just released,
+	 * and proceeds. What is lost is the journey: it wakes, and may block again
+	 * upon the mutex, where a move would have left it blocked once. That is a cost
+	 * in scheduling and not in correctness, and it is the whole difference.
+	 *
+	 * ⚠️ `val2' arrives in the argument this port declares as a deadline, because
+	 * that is the register the operation puts it in. It is a count here. */
+	case FUTEX_REQUEUE: {
+		const kal_intptr move = (kal_intptr)t;
+		/* Either count unbounded makes the sum unbounded, and the sum is what is
+		 * woken --- added rather than saturated, a pair of "all" would wrap to
+		 * none and stop exactly what this case exists to release. */
+		const kal_uintptr n = (val < 0 || move < 0)
+			? (kal_uintptr)-1
+			: (kal_uintptr)val + (kal_uintptr)move;
+		kal_uintptr woken = 0;
+		const int e = okm_task_wake((const kal_u32*)addr, n, &woken);
+		if (e != kal_ok) return -okm_errno(e);
+		return (long)woken;
+	}
 	default:
 		return -ENOSYS;
 	}

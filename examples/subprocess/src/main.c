@@ -64,6 +64,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdio.h>
@@ -121,6 +122,14 @@ static int child_mode(int argc, char** argv)
 		if (strcmp(argv[i], "--child-sleep") == 0 && i + 1 < argc) {
 			usleep((unsigned)atoi(argv[i + 1]) * 1000u);
 			_exit(7);
+		}
+		/* Two segments with a gap between them, so a reader that polls has to
+		 * come back twice and each arrival has a size worth measuring. */
+		if (strcmp(argv[i], "--child-two-segments") == 0) {
+			(void)!write(STDOUT_FILENO, "one.", 4);
+			usleep(400u * 1000u);
+			(void)!write(STDOUT_FILENO, "two.", 4);
+			_exit(0);
 		}
 	}
 	return -1;
@@ -711,6 +720,68 @@ int main(int argc, char** argv)
 
 		if (keep) { setenv("PATH", keep, 1); free(keep); }
 		else      unsetenv("PATH");
+	}
+
+	/* ⚠️⚠️ WHAT ONE `read' RETURNS AFTER A `poll', AND THE SIZE IS THE WHOLE
+	 * OBSERVATION.
+	 *
+	 * openkal has no readiness enquiry, so `poll' here performs a bounded
+	 * transfer and keeps what it produced --- one byte, deliberately, because a
+	 * larger read-ahead would be a second buffer under stdio's. The defect was
+	 * that `read' then returned ONLY that byte: a caller that polls goes straight
+	 * back to `poll', which keeps another, so a stream arrived one byte per
+	 * iteration for ever.
+	 *
+	 * ⭐ EVERY BYTE WAS DELIVERED AND IN ORDER, WHICH IS WHY IT SURVIVED. A caller
+	 * that concatenates sees exactly the right bytes; only a caller that looks at
+	 * the BOUNDARIES sees anything wrong, and then it sees a lot --- a reader
+	 * scanning each arrival for a word finds none, because `two.' arrives as `t'
+	 * and `wo.'. openkal-linux#13's first report called this "only output one
+	 * byte", and it was not truncation.
+	 *
+	 * ⇒ So this does not check the bytes. It checks that the FIRST arrival is the
+	 * segment the writer wrote, which is the thing that was wrong. */
+	{
+		int fds[2];
+		if (pipe(fds) != 0) {
+			check(0, "a pipe is created for the segment observation");
+		} else {
+			posix_spawn_file_actions_t fa;
+			posix_spawn_file_actions_init(&fa);
+			posix_spawn_file_actions_adddup2(&fa, fds[1], STDOUT_FILENO);
+			posix_spawn_file_actions_addclose(&fa, fds[0]);
+
+			pid_t sp = -1;
+			char* av[] = { argv[0], (char*)"--child-two-segments", NULL };
+			const int e = posix_spawn(&sp, argv[0], &fa, NULL, av, environ);
+			posix_spawn_file_actions_destroy(&fa);
+			close(fds[1]);
+
+			if (e != 0) {
+				check(0, "a program writing two segments starts");
+				close(fds[0]);
+			} else {
+				struct pollfd pf = { fds[0], POLLIN, 0 };
+				char seg[64];
+				long first = -1;
+				if (poll(&pf, 1, 5000) > 0) first = (long)read(fds[0], seg, sizeof seg);
+				check(first == 4 && memcmp(seg, "one.", 4) == 0,
+				      "a polled read returns the segment the writer wrote, not one byte of it");
+				if (first != 4) printf("note: first arrival was %ld byte(s)\n", first);
+
+				/* And the second segment, which must not have been folded into the
+				 * first --- a reader that got all eight bytes at once would satisfy
+				 * the observation above for the wrong reason. */
+				pf.revents = 0;
+				long second = -1;
+				if (poll(&pf, 1, 5000) > 0) second = (long)read(fds[0], seg, sizeof seg);
+				check(second == 4 && memcmp(seg, "two.", 4) == 0,
+				      "and the second segment arrives separately, as its writer wrote it");
+				close(fds[0]);
+				int s = 0;
+				waitpid(sp, &s, 0);
+			}
+		}
 	}
 
 	printf("-- failures: %d --\n", failures);

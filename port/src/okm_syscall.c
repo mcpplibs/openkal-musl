@@ -86,6 +86,12 @@ extern __typeof(kal_timeout_wait_process) kal_timeout_wait_process __attribute__
 int __posix_spawn(pid_t* restrict, const char* restrict,
                   const posix_spawn_file_actions_t*, const posix_spawnattr_t* restrict,
                   char* const[restrict], char* const[restrict]);
+/* The same, and whether the started program may outlive this one. Only
+ * SYS_execve passes 1: `posix_spawn' means the opposite, because a POSIX child
+ * outlives its parent. */
+int __okm_spawn_common(pid_t* restrict, const char* restrict,
+                       const posix_spawn_file_actions_t*, const posix_spawnattr_t* restrict,
+                       char* const[restrict], char* const[restrict], int bound);
 
 #define OKM_PAGE 4096
 
@@ -142,7 +148,37 @@ static syscall_arg_t do_read(int fd, void* buf, size_t len)
 	 * result every caller of `read' already handles. */
 	const long held = okm_take_ahead(d, buf, len);
 	if (held == OKM_AHEAD_EOF) return 0;
-	if (held) return (syscall_arg_t)held;
+	if (held) {
+		/* ⚠️⚠️ AND WHATEVER ELSE IS ALREADY THERE, BECAUSE ONE BYTE ON ITS OWN
+		 * TURNED EVERY POLLED READ INTO A POLLED READ OF ONE BYTE.
+		 *
+		 * The enquiry takes a byte to make its answer true. Returning only that
+		 * byte is a legal short read --- and a caller that polls goes straight
+		 * back to `poll', which takes another byte, so the whole of a stream
+		 * arrives ONE BYTE PER ITERATION, for ever. Measured against the host,
+		 * on `echo one; sleep 0.4; echo two':
+		 *
+		 *     here    "o" "n" "e" "." "t" "w" "o" "."      eight chunks
+		 *     host    "one." "two."                        two
+		 *
+		 * ⚠️ Every byte is delivered and in order, so a caller that concatenates
+		 * sees the right bytes --- which is why this survived: the defect is
+		 * invisible to anyone who does not look at the BOUNDARIES. A caller that
+		 * scans a chunk for a word finds none, because `two' arrives as `t' and
+		 * `wo'. openkal-linux#13's first report said the program `only output
+		 * one byte', and this is that.
+		 *
+		 * ⭐ THE REMEDY IS THE OPERATION THE ENQUIRY ITSELF IS BUILT ON. A bound
+		 * of `now' asks for whatever has already arrived and does not wait, so
+		 * the byte and the rest of what is there come back together. Where the
+		 * environment beneath declines `openkal.timeout' there is no such
+		 * operation, and the single byte is what can be honestly returned. */
+		if (len > 1 && okm_can_bound()) {
+			const long more = okm_timed_read(s, (char*)buf + 1, len - 1, OKM_NOW_NS);
+			if (more > 0) return (syscall_arg_t)(held + more);
+		}
+		return (syscall_arg_t)held;
+	}
 
 	if (d->flags & O_NONBLOCK) return okm_timed_read(s, buf, len, OKM_NOW_NS);
 
@@ -1181,12 +1217,11 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * `kal_fs_set_modified' takes a `kal_file' and has no `kal_dir' form.
 		 * So there is no stated route to a directory's time at all.
 		 *
-		 * ⇒ The intent is stated first and the fallback is taken only for a
-		 * directory, so a FILE still asks for exactly what the interface
-		 * requires. An implementation that cannot do it returns an error and
-		 * that error is passed on unchanged: this is not a simulation and not a
-		 * silent success, it is one operation attempted a second way. Recorded
-		 * in musl/PATCHES.md and asked of the specification. */
+		 * ⭐⭐ ASKED OF THE SPECIFICATION, AND openkal 0.10 ANSWERED IT.
+		 * `kal_fs_set_modified_at' takes a NAME, so a directory is now reached by
+		 * a stated route rather than by opening it for reading and hoping. The
+		 * older way is kept below for a backend that has not followed yet, and is
+		 * tried only where the new operation is absent. */
 		struct kal_node_info kind = { .self_size = sizeof kind };
 		const int ke = okm_fs_info(at.base, at.rel, slen(at.rel), 0,
 		                           KAL_INFO_KIND, &kind);
@@ -1198,6 +1233,13 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		const kal_uintptr want = (ke == kal_ok && kind.kind == kal_node_directory)
 		                       ? KAL_OPEN_READ
 		                       : (KAL_OPEN_READ | KAL_OPEN_WRITE);
+
+		{
+			const int se = okm_fs_set_modified_at(at.base, at.rel,
+			                                      slen(at.rel), when);
+			if (se != kal_err_not_supported)
+				return se == kal_ok ? 0 : -okm_errno(se);
+		}
 
 		struct kal_file f;
 		int e = okm_fs_open(at.base, at.rel, slen(at.rel), want, &f);
@@ -1485,38 +1527,63 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			return 0;
 		}
 		/* ⚠️⚠️ THESE THREE ANSWERED `0' AND DID NOTHING, SO EVERY LOCK WAS
-		 * GRANTED AND NO LOCK EXISTED.
+		 * GRANTED AND NO LOCK EXISTED. Measured with the host as control: two
+		 * programs took one exclusive lock and BOTH were told they had it.
 		 *
-		 * Measured, with the host as control: two programs took an exclusive
-		 * lock on one file and BOTH were told they had it; on the host the
-		 * second is refused with EAGAIN. Anything protecting a write with a
-		 * lock --- a state file, a single-instance guard, a database --- had no
-		 * protection and no way to find out.
+		 * 0.10.0 refused them, and said the refusal was TEMPORARY in a way the
+		 * permission one is not --- every environment beneath openkal can lock a
+		 * byte range, and what was missing was a word in the specification.
 		 *
-		 * ⚠️ `F_GETLK' was worse, because its answer pointed the other way.
-		 * POSIX says it writes `F_UNLCK' into `l_type' when nothing would
-		 * block; leaving the caller's word untouched returns the `F_WRLCK' the
-		 * caller conventionally put there before asking, so the answer read
-		 * "somebody holds this" --- for ever. A loop waiting for a lock to be
-		 * released never left it.
+		 * ⭐ openkal 0.10 IS THAT WORD. `kal_fs_lock' states the holder as the
+		 * open FILE and requires release when the program ends however it ends,
+		 * which is the half a caller could never have built for itself. */
+		case F_SETLK: case F_SETLKW: {
+			if (d->kind != OKM_FILE) return -EBADF;
+			const struct flock* fl = (const struct flock*)a3;
+			if (!fl) return -EFAULT;
+			/* openkal takes a position and a length; POSIX takes a position, a
+			 * length and where the position is measured from. Only the third
+			 * needs translating, and only two of its three forms can be. */
+			kal_u64 start;
+			if (fl->l_whence == SEEK_SET) start = (kal_u64)fl->l_start;
+			else if (fl->l_whence == SEEK_CUR) {
+				kal_u64 here = 0;
+				if (okm_fs_seek(d->file, 0, KAL_SEEK_CURRENT, &here) != kal_ok)
+					return -EINVAL;
+				start = here + (kal_u64)fl->l_start;
+			} else {
+				/* SEEK_END, which openkal has no form of: the length a range is
+				 * measured back from is not a thing this interface reports at the
+				 * moment the lock is taken. Refused rather than computed from a
+				 * size that may already have changed. */
+				return -EINVAL;
+			}
+			/* ⭐ ZERO MEANS `TO THE END, HOWEVER FAR THAT COMES TO BE' IN BOTH,
+			 * so it is passed rather than translated. */
+			const kal_u64 len = (kal_u64)fl->l_len;
+
+			if (fl->l_type == F_UNLCK) {
+				const int e = okm_fs_unlock(d->file, start, len);
+				return e == kal_ok ? 0 : -okm_errno(e);
+			}
+			kal_uintptr mode = (fl->l_type == F_RDLCK) ? KAL_LOCK_SHARED
+			                                           : KAL_LOCK_EXCLUSIVE;
+			if ((int)a2 == F_SETLKW) mode |= KAL_LOCK_WAIT;
+			const int e = okm_fs_lock(d->file, start, len, mode);
+			return e == kal_ok ? 0 : -okm_errno(e);
+		}
+		/* ⚠️ AND THE ENQUIRY IS STILL REFUSED, WHICH IS NOT AN OVERSIGHT.
 		 *
-		 * ⭐ REFUSED, AND THE REFUSAL IS TEMPORARY IN A WAY `chmod' IS NOT.
-		 * `chmod' is declined because a FAT volume, a UEFI partition and a
-		 * Windows access-control list do not share a model. Locking is the
-		 * opposite: `fcntl(F_SETLK)', `fcntl(F_SETLK)' and `LockFileEx' all
-		 * exist and all take a byte range, so every environment beneath openkal
-		 * can perform it. What is missing is a WORD in the specification, and
-		 * one has been asked for --- `kal_fs_lock' beside a `kal_fs_props'
-		 * position, which is exactly how link operations were admitted. When it
-		 * lands these three lines become an implementation and no caller
-		 * changes.
+		 * `F_GETLK' asks whether a lock WOULD block without taking one, and
+		 * openkal has no operation that answers a question without performing
+		 * it --- the same absence clause 6.3 records for readiness. Taking the
+		 * lock and releasing it again would answer, and would also take a lock
+		 * the caller did not ask for, hand a spurious `no' to a caller that
+		 * already holds one, and be stale the moment it returned.
 		 *
-		 * ⚠️ It cannot be composed here in the meantime. A lock built out of
-		 * `KAL_OPEN_EXCLUSIVE' and a name beside the file would be released by
-		 * nobody when its holder died --- a program that ended abnormally while
-		 * holding one would be locked out of its own file for ever, which is a
-		 * worse failure than the refusal and a much harder one to read. */
-		case F_SETLK: case F_SETLKW: case F_GETLK: return -ENOSYS;
+		 * ⭐ A refusal is what a caller can act upon; `F_SETLK' answers the
+		 * question `F_GETLK' is usually asked in order to answer. */
+		case F_GETLK: return -ENOSYS;
 		default: return -EINVAL;
 		}
 	}
@@ -1738,8 +1805,13 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * recorded in musl/PATCHES.md. */
 	case SYS_execve: {
 		pid_t child = 0;
-		const int e = __posix_spawn(&child, (const char*)a1, 0, 0,
-		                            (char* const*)a2, (char* const*)a3);
+		/* ⭐ BOUND, WHICH IS THE THING `execve' MEANS. The started program
+		 * stands in for this one, so it does not outlive it --- and until
+		 * openkal 0.10 there was no way to say so, which is why a `kill' aimed
+		 * at this image reached the copy that waits and left the program
+		 * running to completion, unsupervised. */
+		const int e = __okm_spawn_common(&child, (const char*)a1, 0, 0,
+		                                 (char* const*)a2, (char* const*)a3, 1);
 		if (e) return -e;
 		int st = 0;
 		if (do_wait4((int)child, &st, 0, 0) < 0) kal_exit(127);
@@ -2062,6 +2134,78 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 *
 	 * musl reaches this through `prlimit64' first and falls back to
 	 * `getrlimit' only on ENOSYS, so answering this one answers both. */
+	/* ⭐⭐ IT ANSWERED 1, SILENTLY, AND A POOL OF WORKERS WAS SIZED AGAINST IT.
+	 *
+	 * musl's `sysconf(_SC_NPROCESSORS_ONLN)' reaches this, and with no case it
+	 * fell back to 1 --- so `std::thread::hardware_concurrency()' answered 1
+	 * with no error and a program that sizes itself got one worker and no way
+	 * to know. Measured: 1 here against 32 on the same machine's own C library.
+	 * openkal 0.10 adds the enquiry, and it reports the set THIS context may
+	 * run on rather than the set the machine has.
+	 *
+	 * ⚠️ ZERO IS `CANNOT SAY' AND IS NOT ONE, so it is reported as a refusal
+	 * rather than as a bitmap of one processor: musl would read the latter as a
+	 * fact and this port would be inventing it. */
+#ifdef SYS_sched_getaffinity
+	case SYS_sched_getaffinity: {
+		const size_t cap = (size_t)a2;
+		unsigned char* out = (unsigned char*)a3;
+		if (!out || cap < sizeof(unsigned long)) return -EINVAL;
+		if (!okm_task_parallelism) return -ENOSYS;
+		const kal_uintptr n = okm_task_parallelism();
+		if (n == 0) return -ENOSYS;
+
+		for (size_t i = 0; i < cap; i++) out[i] = 0;
+		/* The identity of the processors is not reported by openkal --- only how
+		 * many --- so the lowest `n' positions are set. musl counts the bits and
+		 * asks nothing else of them. */
+		size_t bits = (size_t)n;
+		if (bits > cap * 8) bits = cap * 8;
+		for (size_t i = 0; i < bits; i++) out[i / 8] |= (unsigned char)(1u << (i % 8));
+		const size_t words = (bits + 8 * sizeof(unsigned long) - 1)
+		                   / (8 * sizeof(unsigned long));
+		return (syscall_arg_t)(words * sizeof(unsigned long));
+	}
+#endif
+
+	/* How much the volume holds, which `std::filesystem::space' reaches. */
+#if defined(SYS_statfs) || defined(SYS_fstatfs)
+	case
+#  ifdef SYS_statfs
+	     SYS_statfs
+#  else
+	     SYS_fstatfs
+#  endif
+	: {
+		struct okm_statfs {
+			unsigned long type, bsize;
+			uint64_t blocks, bfree, bavail, files, ffree;
+			struct { int v[2]; } fsid;
+			unsigned long namelen, frsize, flags, spare[4];
+		}* out = (void*)a2;
+		if (!out) return -EFAULT;
+		struct okm_at at;
+		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
+		if (r) return r;
+		struct kal_dir d;
+		int e = okm_fs_open_dir(at.base, ".", 1, &d);
+		if (e != kal_ok) return -okm_errno(e);
+		kal_u64 total = 0, avail = 0;
+		e = okm_fs_capacity(d, &total, &avail);
+		okm_fs_close_dir(d);
+		if (e != kal_ok) return -okm_errno(e);
+
+		for (unsigned i = 0; i < sizeof *out; i++) ((char*)out)[i] = 0;
+		/* openkal reports BYTES and this record counts blocks, so a block size
+		 * is chosen and the counts are derived from it rather than invented. */
+		out->bsize = out->frsize = OKM_PAGE;
+		out->blocks = total / OKM_PAGE;
+		out->bfree = out->bavail = avail / OKM_PAGE;
+		out->namelen = 255;
+		return 0;
+	}
+#endif
+
 #ifdef SYS_prlimit64
 	case SYS_prlimit64: {
 		struct okm_rlimit64 { uint64_t cur, max; };

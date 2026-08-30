@@ -257,10 +257,63 @@ static int seed(struct kal_spawn_streams* s, int* placed)
 	return 0;
 }
 
+/* ⭐⭐ WHETHER THE STARTED PROGRAM MAY OUTLIVE THIS ONE, WHICH IS THE THING
+ * `execve' MEANS AND NOTHING ELSE HERE DOES.
+ *
+ * `execve' is composed as starting a program and ending with its status, so
+ * there are three images where a system with the operation has two: this one,
+ * the copy that waits, and the program. A signal aimed at the identifier the
+ * caller holds reaches the WAITER --- measured with a host as control: identical
+ * status words, opposite outcomes, the caller told the program died while the
+ * program ran to completion, unsupervised. openkal-linux#13.
+ *
+ * openkal 0.10 adds `kal_process_spawn_bound', which says the thing that could
+ * not be said. It is asked for ONLY where `execve' is meant, because an ordinary
+ * `posix_spawn' means the opposite: POSIX children outlive their parents.
+ *
+ * ⚠️ AND A BACKEND MAY DECLINE IT, in which case this falls back to the
+ * unbound spawn rather than refusing to start the program at all. A caller of
+ * `execve' that gets an unbound program is where this port has always been; a
+ * caller that gets no program is worse. The difference is recorded in
+ * musl/PATCHES.md and is what `KAL_PROCESS_PROP_BOUND_LIFETIME' is for. */
+static int start_program(int bound, struct okm_at* at,
+                         const char** a_ptr, const kal_uintptr* a_len, int argc,
+                         const char** e_ptr, const kal_uintptr* e_len, int envc,
+                         struct kal_spawn_streams* streams,
+                         struct kal_process* child)
+{
+	if (bound && (okm_process_props() & KAL_PROCESS_PROP_BOUND_LIFETIME)) {
+		const int e = okm_process_spawn_bound(at->base, at->rel, slen(at->rel),
+		                                      a_ptr, a_len, (kal_uintptr)argc,
+		                                      e_ptr, e_len, (kal_uintptr)envc,
+		                                      streams, child);
+		if (e != kal_err_not_supported) return e;
+	}
+	return okm_process_spawn(at->base, at->rel, slen(at->rel),
+	                         a_ptr, a_len, (kal_uintptr)argc,
+	                         e_ptr, e_len, (kal_uintptr)envc,
+	                         streams, child);
+}
+
+int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
+                       const posix_spawn_file_actions_t* fa,
+                       const posix_spawnattr_t* restrict attr,
+                       char* const argv[restrict], char* const envp[restrict],
+                       int bound);
+
 int __posix_spawn(pid_t* restrict res, const char* restrict path,
                   const posix_spawn_file_actions_t* fa,
                   const posix_spawnattr_t* restrict attr,
                   char* const argv[restrict], char* const envp[restrict])
+{
+	return __okm_spawn_common(res, path, fa, attr, argv, envp, 0);
+}
+
+int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
+                       const posix_spawn_file_actions_t* fa,
+                       const posix_spawnattr_t* restrict attr,
+                       char* const argv[restrict], char* const envp[restrict],
+                       int bound)
 {
 	if (!res || !path) return EINVAL;
 	if (attr && (attr->__flags & ~(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK)))
@@ -423,10 +476,8 @@ int __posix_spawn(pid_t* restrict res, const char* restrict path,
 	 * started program reads its own name through kal_env_arg(0), so a caller
 	 * that did not supply it could not predict what the program would read. */
 	struct kal_process child;
-	int e = okm_process_spawn(at.base, at.rel, slen(at.rel),
-	                          a_ptr, a_len, (kal_uintptr)argc,
-	                          e_ptr, e_len, (kal_uintptr)envc,
-	                          &streams, &child);
+	int e = start_program(bound, &at, a_ptr, a_len, argc,
+	                      e_ptr, e_len, envc, &streams, &child);
 
 	/* ⭐ THE ONE ENVIRONMENT THAT SPELLS A PROGRAM WITH A SUFFIX IS ANSWERED
 	 * BEFORE THIS POINT AND NOT AFTER IT.

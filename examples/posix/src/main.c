@@ -27,6 +27,20 @@ static void *worker(void *p) {
 	return p;
 }
 
+/* Two contexts waiting upon ONE condition variable, which is a different thing
+ * from two contexts contending a mutex --- see where this is called. */
+static pthread_mutex_t cm = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  cv = PTHREAD_COND_INITIALIZER;
+static int cv_go, cv_done, cv_waiting;
+static void *cv_waiter(void *p) {
+	pthread_mutex_lock(&cm);
+	cv_waiting++;
+	while (!cv_go) pthread_cond_wait(&cv, &cm);
+	cv_done++;
+	pthread_mutex_unlock(&cm);
+	return p;
+}
+
 int main(int argc, char **argv, char **envp) {
 	/* The copy this program starts, so that openkal.process is observed by its
 	 * effect rather than by its return value. */
@@ -172,6 +186,50 @@ int main(int argc, char **argv, char **envp) {
 	check(started == 4, "four execution contexts started");
 	check(counter == 80000, "80000 increments, none lost");
 	printf("   counter=%d\n", counter);
+
+	/* ⚠️⚠️ TWO WAITERS UPON ONE CONDITION VARIABLE, AND THE COUNT IS THE POINT.
+	 *
+	 * The section above starts four contexts and contends a mutex hard, and it
+	 * passed throughout a defect that stopped this port dead: a broadcast reaches
+	 * musl's `unlock_requeue', which asks for `FUTEX_REQUEUE' --- and that request
+	 * is made ONLY when a second context is queued behind the one being released.
+	 * One waiter never reaches it. Answering it with ENOSYS therefore cost
+	 * nothing at all until a program had two, and then it cost everything: the
+	 * second waiter was never woken and the program did not end.
+	 *
+	 * ⭐ SO THE OBSERVATION IS NOT "A CONDITION VARIABLE WORKS". It is that a
+	 * SECOND waiter is released, because the first one always was. Found in a
+	 * consumer's own test suite rather than here, and this is the line that would
+	 * have found it: every probe in this file was written from a list of known
+	 * defects, and a defect that needs two waiters is not on such a list until
+	 * something with two waiters runs. */
+	{
+		pthread_t w[2];
+		int made = 0;
+		for (int i = 0; i < 2; i++) if (pthread_create(&w[i], NULL, cv_waiter, NULL) == 0) made++;
+
+		/* ⚠️ BOTH MUST BE WAITING BEFORE THE BROADCAST, or one is never queued
+		 * behind the other, the requeue is never requested, and the observation
+		 * below holds for a reason that has nothing to do with what it checks. */
+		for (int spin = 0; spin < 400; spin++) {
+			pthread_mutex_lock(&cm);
+			const int ready = cv_waiting;
+			pthread_mutex_unlock(&cm);
+			if (ready == made) break;
+			struct timespec ms = { 0, 5000000 };
+			nanosleep(&ms, NULL);
+		}
+		pthread_mutex_lock(&cm);
+		const int both_waiting = cv_waiting == made;
+		cv_go = 1;
+		pthread_cond_broadcast(&cv);
+		pthread_mutex_unlock(&cm);
+
+		for (int i = 0; i < made; i++) pthread_join(w[i], NULL);
+		check(made == 2, "two contexts started to wait upon one condition variable");
+		check(both_waiting, "both were waiting when the broadcast was made");
+		check(cv_done == 2, "the broadcast released the SECOND waiter and not only the first");
+	}
 
 	/* memory */
 	size_t big = 1 << 20;

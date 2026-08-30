@@ -118,6 +118,13 @@ int main(int argc, char** argv)
 	const long open_max = sysconf(_SC_OPEN_MAX);
 	check(open_max > 0, "the greatest number of descriptors is answered");
 
+	/* ⚠️⚠️ IT ANSWERED 1, SILENTLY. `hardware_concurrency()' reads this, so a
+	 * program sizing a pool of workers got one worker and no error. openkal 0.10
+	 * added the enquiry beneath it. This asserts only that it is a real count
+	 * and not the fallback, because the number itself is the machine's. */
+	const long cpus = sysconf(_SC_NPROCESSORS_ONLN);
+	check(cpus > 0, "how many contexts can run at once is answered");
+
 	struct rlimit rl;
 	const int got = getrlimit(RLIMIT_NOFILE, &rl);
 	check(got == 0 && rl.rlim_cur > 0, "and the limit it is read from is the same enquiry");
@@ -129,13 +136,17 @@ int main(int argc, char** argv)
 	/* ⚠️⚠️ THESE THREE ANSWERED 0 AND DID NOTHING. Measured against the host:
 	 * two programs took one exclusive lock and BOTH were told they had it.
 	 *
-	 * ⭐ THE REFUSAL IS TEMPORARY IN A WAY `chmod' IS NOT, and this observation
-	 * is written so that it says so. `fcntl(F_SETLK)' and `LockFileEx' both
-	 * exist and both take a byte range, so every environment beneath openkal
-	 * CAN do this; what is missing is a word in the specification, which has
-	 * been asked for. When it arrives this observation is the one that changes,
-	 * and it should change to "a second program is refused the lock" rather
-	 * than be deleted. */
+	 * 0.10.0 refused them and said the refusal was TEMPORARY in a way `chmod'
+	 * is not --- every environment beneath openkal can lock a byte range, and
+	 * what was missing was a word in the specification. That comment said this
+	 * observation was the one that would change when the word arrived, and that
+	 * it should change to "a second holder is refused" rather than be deleted.
+	 *
+	 * ⭐ openkal 0.10 IS THAT WORD, so it changed, and this is now the
+	 * observation it said it would become. `kal_fs_lock' states the holder as
+	 * the open FILE, which is why a SECOND open file of one name is refused
+	 * here --- the older process-held form would have granted it, and a library
+	 * that opened one file twice would have destroyed its own lock. */
 	{
 		const int fd = open("surface.lock", O_RDWR | O_CREAT | O_TRUNC, 0644);
 		check(fd >= 0, "a file to ask about locking can be made");
@@ -145,15 +156,42 @@ int main(int argc, char** argv)
 			fl.l_type = F_WRLCK; fl.l_whence = SEEK_SET;
 			fl.l_start = 0; fl.l_len = 0;
 			errno = 0;
-			refuses(fcntl(fd, F_SETLK, &fl), ENOSYS,
-			        "taking a lock is refused rather than granted and not taken");
+			check(fcntl(fd, F_SETLK, &fl) == 0, "an exclusive lock is taken");
 
+			/* ⭐ THE OBSERVATION THAT TELLS THE TWO FORMS APART, and it needs no
+			 * second program: a SECOND OPEN FILE of the same name, here. The
+			 * process-held form grants this, because the holder is the process
+			 * and the process already holds it. The open-file form refuses it,
+			 * and openkal states the open-file form. */
+			const int again = open("surface.lock", O_RDWR);
+			check(again >= 0, "the same name can be opened a second time");
+			if (again >= 0) {
+				struct flock two;
+				memset(&two, 0, sizeof two);
+				two.l_type = F_WRLCK; two.l_whence = SEEK_SET;
+				two.l_start = 0; two.l_len = 0;
+				errno = 0;
+				refuses(fcntl(again, F_SETLK, &two), EAGAIN,
+				        "and a second OPEN FILE is refused, not granted");
+				close(again);
+			}
+
+			struct flock un;
+			memset(&un, 0, sizeof un);
+			un.l_type = F_UNLCK; un.l_whence = SEEK_SET; un.l_start = 0; un.l_len = 0;
+			check(fcntl(fd, F_SETLK, &un) == 0, "the lock is released");
+
+			/* ⚠️ AND THE ENQUIRY IS STILL REFUSED, WHICH IS NOT AN OVERSIGHT.
+			 * `F_GETLK' asks whether a lock WOULD block without taking one, and
+			 * openkal has no operation that answers a question without
+			 * performing it. Taking the lock and releasing it would answer, and
+			 * would also take a lock the caller did not ask for. */
 			struct flock q;
 			memset(&q, 0, sizeof q);
 			q.l_type = F_WRLCK; q.l_whence = SEEK_SET; q.l_start = 0; q.l_len = 0;
 			errno = 0;
 			refuses(fcntl(fd, F_GETLK, &q), ENOSYS,
-			        "and asking who holds one is refused rather than answered wrongly");
+			        "but asking WHETHER one would block is still refused");
 			close(fd);
 		}
 		unlink("surface.lock");

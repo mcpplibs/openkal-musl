@@ -71,7 +71,7 @@ carry it in a `long`.
 
 ## The sources this port replaces, and why each
 
-Ten, and the list in the manifest carries the same reasons. Five read the shape
+Eleven, and the list in the manifest carries the same reasons. Five read the shape
 of one environment directly. Two carry a machine word through a variable
 declared `long`. Two more were found only by running the result. And one is
 replaced because another already was:
@@ -102,6 +102,40 @@ pointer: the value never becomes an integer at all.
 `src/unistd/getcwd.c` refuses an answer that does not begin with a separator.
 That is correct on every system musl was written for and is not correct on one
 that writes a volume first, and openkal does not say which a system does.
+
+⚠️⚠️ `src/fcntl/fcntl.c` is the THIRD of that kind, and it survived three releases
+of a port that already names the kind twice.
+
+It reads its variable argument as an `unsigned long`:
+
+    unsigned long arg;
+    arg = va_arg(ap, unsigned long);
+    case F_SETLK: return syscall(SYS_fcntl, fd, cmd, (void *)arg);
+
+which holds a pointer on every system musl was written for and thirty-two bits
+on one this port builds for. A caller passing a `struct flock *` had the top half
+of it discarded **before this port saw it**.
+
+⭐ **It was unreachable until 0.11.0**, which is why it survived. Every command
+this library answered took an integer, or took a pointer it never followed:
+`F_SETLK` returned 0 and did nothing, and then reported `ENOSYS`. A truncated
+pointer that nothing dereferences is a truncated pointer nothing reports. openkal
+0.10 gave this port a real lock, `F_SETLK` began following the pointer, and it
+faulted on the first attempt.
+
+⚠️ The register file names the type rather than the symptom:
+
+    page fault on read access to 0x00000000fe2ffec2
+    rax:00000000fe2ffec0   rsp:00007ffffe2fc7a0
+    movzxw 0x02(%rax), %eax
+
+`rax` is the caller's pointer with its top thirty-two bits gone, and the offset
+it faults at — two — is `l_whence`, the first field this port reads.
+
+⚠️ And the vararg TYPE is part of the calling convention rather than a detail:
+`va_arg(ap, unsigned long)` and `va_arg(ap, uintptr_t)` read different numbers of
+bytes where the two differ, so this is not a cast applied afterwards. Reading it
+as the narrower type has already lost the half by then.
 
 ## What has no equivalent on one object format
 
@@ -152,16 +186,25 @@ and the first two were found by a consumer rather than here:
    the caller. What is still not answered is a name that exists and cannot be
    executed — openkal reports no execute permission, so that one still ends the
    caller with 127. Asked of openkal-linux, which knows and does not report it.
-2. **`kill` does not reach a program started this way.** After `fork` and
+2. **`kill` did not reach a program started this way.** After `fork` and
    `execve` there are three images, not two: the copy waits for the program it
-   started. A signal sent to the identifier the parent holds reaches the waiter,
-   which dies — and the parent is told the program died on that signal, while
-   the program runs to completion, unsupervised. Measured, with the host as
-   control: identical status words, opposite outcomes. **Not answered here.**
-   openkal has no way to say "this program's lifetime is bound to mine", and
-   `kal_process_terminate` is right to terminate only what it was given. Asked
-   of the specification. Until then a caller that needs to stop what it started
-   should use `posix_spawn`, `system` or `popen`, where `kill` does reach.
+   started, and a signal sent to the identifier the parent holds reached the
+   waiter. The parent was told the program died on that signal while the program
+   ran to completion, unsupervised. Measured, with the host as control:
+   identical status words, opposite outcomes.
+
+   ⚠️ **This entry used to end "Not answered here", and it is answered now.**
+   openkal had no way to say "this program's lifetime is bound to mine", and
+   `kal_process_terminate` was right to terminate only what it was given — so
+   what was missing was a word, not a mechanism. openkal 0.10 added
+   `kal_process_spawn_bound`, and **since 0.11.0 `execve` asks for it**.
+   `posix_spawn` does not and must not: a POSIX child outlives its parent.
+
+   ⚠️ A backend may decline the binding — openkal-macos has no primitive that
+   arms it from inside the started image, and openkal-windows has not measured
+   its own. There this falls back to the unbound spawn rather than refusing to
+   start the program at all, and the divergence is the one this entry used to
+   describe. `KAL_PROCESS_PROP_BOUND_LIFETIME` is what a caller asks.
 3. **The identifier the started program reports is not the caller's**, because
    there are two images where a system with the operation would have one.
 
