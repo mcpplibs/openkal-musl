@@ -1869,6 +1869,37 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		const int e = __okm_spawn_common(&child, (const char*)a1, 0, 0,
 		                                 (char* const*)a2, (char* const*)a3, 1);
 		if (e) return -e;
+
+		/* ⚠️⚠️ THE WAITER LETS GO OF EVERY STREAM IT HOLDS, AND WITHOUT THIS THE
+		 * FAR END OF A PIPE NEVER SAW THE END OF INPUT.
+		 *
+		 * A replacement leaves ONE image. This composition leaves two, and the
+		 * one that remains still holds every file description the caller had ---
+		 * including the write end of a pipe it had just placed at the started
+		 * program's standard output. A pipe reports the end of input when the
+		 * LAST writer lets go, so as long as this waiter sat there, the reader on
+		 * the other side saw a stream that was still open, from a program that
+		 * had already ended.
+		 *
+		 * ⭐ Measured through a consumer: an MCP server that exits while a
+		 * request is in flight should be reported as "Connection closed", and was
+		 * reported as "Timed out after 1000ms" --- the client waited its full
+		 * deadline for an end of input that this image was holding shut. The
+		 * server was long gone; nobody was writing; the pipe stayed open because
+		 * of a waiter neither side knew existed.
+		 *
+		 * ⚠️ THIS IS THE 0.10 DEFECT'S THIRD FACE. `kal_process_spawn_bound' was
+		 * added because a SIGNAL reached the middle image; this is the middle
+		 * image holding a RESOURCE. Both come from the same fact --- the
+		 * composition has an image the interface never told anyone about --- and
+		 * both are fixed by making that image as invisible as it claims to be.
+		 *
+		 * ⇒ Safe because this image does exactly two things afterwards: wait, and
+		 * end with a status. The started program received what it needed at the
+		 * spawn; the descriptors here are this image's own references and nothing
+		 * reads them again. */
+		__okm_close_all_for_exec();
+
 		int st = 0;
 		if (do_wait4((int)child, &st, 0, 0) < 0) kal_exit(127);
 		/* The status the started program ended with, in the form this library
