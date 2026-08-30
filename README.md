@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.9.0"
+openkal-musl = "0.10.0"
 ```
 
 It names no implementation and no platform: a C library is the one consumer that
@@ -43,8 +43,8 @@ architecture. Replacing that one header is the whole of the redirection; the
 
 `musl/PATCHES.md` lists the whole of what is not unmodified: **four patched
 lines**, all of one kind — a machine word carried through a variable declared
-`long`, which is not a machine word on one of the three targets — and **nine
-replaced sources**. Five of the nine are replaced for the same reason: each
+`long`, which is not a machine word on one of the three targets — and **ten
+replaced sources**. Five of the ten are replaced for the same reason: each
 reads the shape of one particular environment rather than asking a kernel for
 something.
 
@@ -61,6 +61,12 @@ word through a `long`, one refuses a working directory that does not begin with
 a separator — correct on every system musl was written for, and not on one that
 writes a volume first — and one walks the program headers of an image in a format
 two of the three targets do not have.
+
+The tenth is replaced because the fifth was. `src/process/posix_spawnp.c` does
+not search a PATH itself: it hands `__execvpe` to `posix_spawn` to be run **in
+the duplicate**, and this port has no duplicate to run it in, so the field was
+read by nobody and a name without a separator was taken as a path. It reported
+success for a program it had not started.
 
 Four names have no C in musl to fall back on — `setjmp`, `longjmp`,
 `sigsetjmp` and the cancellable system-call sequence. The first three are
@@ -119,7 +125,13 @@ answer that leaves a program wrong without telling it.
 | closing a standard stream in a program being started | `posix_spawn_file_actions_addclose(&fa, 0…2)` makes the spawn report `ENOSYS`; above position two it is performed, because nothing there is inherited | openkal has no value meaning "no stream", and the value that looks like one — zero — means the opposite: the stream the caller has. Accepting the action and not performing it would hand a program the standard input its caller had just taken away. |
 | starting a program upon a stream whose handle is zero | a caller that redirects its **output** onto its own standard input and then starts a program gets `ENOSYS` | `kal_spawn_streams` reserves zero for inheritance and `kal_stream` reserves nothing, so an implementation whose streams are the environment's own descriptors hands out zero for standard input. The two agree at position zero and cannot be told apart anywhere else. Reported upstream; refused here rather than answered wrongly. |
 | ~~a version a program can read~~ | **answered since 0.9.0.** `uname`'s `release` field is this package's version, and `OPENKAL_MUSL_TRACE=enosys` names it on the error stream once per process before the program runs | It was the string literal `0.5.0` through every release after 0.5.0, so a program that asked was not left without an answer -- it was given a false one. ⚠️ It therefore MOVES AT EVERY RELEASE: nothing here or in musl reads it (`gethostname` and `getdomainname` are musl's only consumers of `uname` and both read `nodename`), but a program above it that compares the field against a fixed string will see it change. `sysname` is `openkal` and not `Linux`, so nothing can have been reading it as a kernel version. |
-| **setting** the modification time of a directory | `utimensat` on a directory is refused, so `std::filesystem::last_write_time(dir, t)` throws. **Reading** it is unaffected and correct. The value differs by implementation and is the implementation's to give: `EISDIR` on Linux and macOS, `EACCES` on Windows — both measured | `kal_fs_set_modified` takes a `kal_file` and openkal has neither a `kal_dir` form of it nor a form that takes a name, so this port opens the name as a file, which a directory refuses. What a backend says about that is its own: one distinguishes a directory and one does not. Note that libc++ gives both overloads of `last_write_time` the same name in the message it throws, so the text does not say which of the two failed: the reading overload is `stat` and works on a directory. A caller using a lock directory's timestamp reads it to decide staleness and writes it to refresh the lock, and only the second fails. |
+| ~~**setting** the modification time of a directory~~ | **answered since 0.10.0 where the implementation can open a directory**, which Linux and macOS can and Windows cannot — its `kal_fs_open` names `FILE_NON_DIRECTORY_FILE`, so `utimensat` on a directory is still refused there. **Reading** it was never affected and is correct everywhere | the port used to ask for `KAL_OPEN_READ \| KAL_OPEN_WRITE` unconditionally, which a directory refuses; it now asks what the name refers to and opens a directory for reading only. ⚠️ **That is outside what `fs.h` states** — the interface requires `KAL_OPEN_WRITE` for `kal_fs_set_modified` and names `kal_fs_open_dir`, which yields a `kal_dir`, as the way to open a directory, while `kal_fs_set_modified` has no `kal_dir` form. So there is no stated route to a directory's time at all; one has been asked for. A file still asks for exactly what the interface requires. Note that libc++ gives both overloads of `last_write_time` the same name in the message it throws, so a failure did not say which of the two had failed — and the one that worked was the one a consumer reported as broken. |
+| ~~a lock on a file~~ | **`fcntl(F_SETLK)`, `F_SETLKW` and `F_GETLK` report `ENOSYS` since 0.10.0.** ⚠️ They used to answer 0 and do nothing, so **two programs took one exclusive lock and both were told they had it**; `F_GETLK` left the caller's word untouched, which reads as "somebody holds this" — for ever, so a loop waiting for a lock to be released never left it. `flock` has no case and reports `ENOSYS` too | openkal has no locking operation. ⭐ **Unlike the permission row, this refusal is temporary**: `fcntl(F_SETLK)` on Linux and macOS and `LockFileEx` on Windows all exist and all take a byte range, so every environment beneath openkal can perform it — what is missing is a word in the specification, and one has been asked for (a `kal_fs_lock` beside a `kal_fs_props` position, admitted on exactly the grounds the link operations were). It cannot be composed here meanwhile: a lock built from `KAL_OPEN_EXCLUSIVE` and a name beside the file is released by nobody when its holder dies, so a program that ended abnormally while holding one would be locked out of its own file for ever. |
+| whether a file may be executed | `access(path, X_OK)` answers **yes for anything that exists**, and starting a name that exists and cannot be run still ends the caller with 127 | `kal_node_info` carries `writable` and no other permission, so "it is there" is the whole of what this port can answer. The two halves are the same gap: the enquiry cannot tell, and neither can the check `posix_spawn` makes before starting. openkal-linux knows — its own duplicate is the thing that fails — and has been asked to report it. |
+| descriptors above 2 crossing into a started program | a started program receives standard input, output and error and **nothing else**; a non-close-on-exec descriptor 4 is not there, and `fcntl(F_SETFD, 0)` upon one therefore changes nothing | `kal_spawn_streams` has exactly three positions and openkal has no general form for placing a stream at position *n*. `posix_spawn_file_actions_adddup2` above position two is already refused rather than accepted, so the two agree; only implicit inheritance is lost. A general form has been asked for. |
+| how many processors there are | `sched_getaffinity` reports `ENOSYS`, so `std::thread::hardware_concurrency()` and `sysconf(_SC_NPROCESSORS_ONLN)` answer **1** | ⚠️ this one is silent: a program sizing a pool of workers gets one worker and no error. `openkal.task` says whether contexts run in parallel (`KAL_TASK_PROP_PARALLEL`) and not how many can; an enquiry has been asked for beside that word. |
+| volume capacity, hard links, named pipes | `statvfs` (`std::filesystem::space`), `link` (`create_hard_link`), `mkfifo` and `socketpair` report `ENOSYS` | openkal has no operation for any of them. `kal_fs_link_create` makes a node whose content is a name — a symbolic link — and there is no hard link; `kal_process_channel` is a pipe in one direction, so a bidirectional pair is not one of them. Each is a loud absence rather than a wrong answer, which is why none is composed here. |
+| an alternate signal stack | `sigaltstack` reports `ENOSYS` since 0.10.0 | it used to report success and install nothing, and the enquiry that would have caught it answered 0 with a zeroed record. There are no signals here, so there is nothing for such a stack to be. |
 
 **⭐ What carries confinement here, since a mode word does not.** A program that
 writes "only I may read this" as a mode is stating it in a vocabulary this
@@ -182,7 +194,7 @@ spent on exactly that question.
 Each operation the dispatcher has no case for is then named on the standard
 error stream, **once**, whatever the number of attempts:
 
-    openkal-musl 0.9.0
+    openkal-musl 0.10.0
     openkal-musl: no operation for system call 266
 
 **The first line is the version, and it is printed whether or not anything is
@@ -331,12 +343,17 @@ absent**, on the reading that clause 7.1 declines to duplicate an address space
 **pair**. `openkal.space` supplies the first half by itself, and what was
 missing was never an atom.
 
-**`execve` is starting a program, waiting for it, and ending with its status.** A
-caller cannot distinguish that through this library: the same program runs, with
-the same arguments, on the same streams, and the same status reaches whoever
-waits. There are two images where a system with the operation would have one. It
-is what every environment without the operation does, and two of the three
+**`execve` is starting a program, waiting for it, and ending with its status.**
+It is what every environment without the operation does, and two of the three
 beneath openkal are such environments.
+
+⚠️ **This paragraph used to add that a caller cannot distinguish it. A caller
+can, and saying otherwise is what kept anyone from looking.** Three differences
+are known and `musl/PATCHES.md` states each: a program that cannot be started
+(**answered since 0.10.0** — the name is asked about first, so `execvp` can
+search a PATH), a `kill` that reaches the waiting copy rather than the program
+(**not answered**; use `posix_spawn`, `system` or `popen` where a caller needs
+to stop what it started), and the identifier the started program reports.
 
 **A program named without a suffix** is tried with one environment's suffix
 second, which is what every C library for that environment does. It is here

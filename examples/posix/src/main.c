@@ -123,43 +123,27 @@ int main(int argc, char **argv, char **envp) {
 	if (d) closedir(d);
 	check(entries == 2, "the directory reports both entries");
 
-	/* READING A DIRECTORY'S MODIFICATION TIME WORKS AND SETTING IT DOES NOT,
-	 * AND THE TWO ARE OBSERVED SEPARATELY BECAUSE THE C++ LIBRARY ABOVE GIVES
-	 * THEM ONE NAME.
+	/* READING A DIRECTORY'S MODIFICATION TIME WORKS, AND IT IS OBSERVED HERE
+	 * SEPARATELY FROM SETTING IT BECAUSE THE C++ LIBRARY ABOVE GIVES THEM ONE
+	 * NAME.
 	 *
 	 * libc++ throws `filesystem error: in last_write_time' for both overloads,
 	 * so a caller that reads a lock directory's timestamp to decide staleness
 	 * and writes it to refresh the lock cannot tell from the message which of
-	 * the two failed. It was read as the first in openkal-linux#13 and it is
-	 * the second: `stat' resolves a directory perfectly well, while
-	 * `kal_fs_set_modified' takes a kal_file and openkal has no form of it that
-	 * takes a directory or a name, so this port opens the name as a file.
+	 * the two failed. It was reported as the first in openkal-linux#13 and it
+	 * was the second: `stat' resolves a directory perfectly well.
 	 *
-	 * The refusal is asserted rather than merely not exercised. README.md
-	 * carries the row; if openkal gains the operation, this is the observation
-	 * that says the row is out of date. */
+	 * ⭐ SETTING IT USED TO BE ASSERTED HERE AS A REFUSAL, and this comment said
+	 * that if openkal gained the operation this observation would be the one to
+	 * say the row was out of date. It did its job: 0.10.0 opens a directory for
+	 * READING to stamp it --- which Linux and macOS perform and Windows does not
+	 * --- so the answer now depends on the implementation beneath, and an
+	 * observation that depends on the backend belongs where the backend is
+	 * stated on the command line. It moved to `examples/surface', under
+	 * `--dir-time | --no-dir-time'. Only the reading half is left here. */
 	struct stat ds;
 	check(stat("okm-probe.dir", &ds) == 0 && S_ISDIR(ds.st_mode) && ds.st_mtime > 0,
 	      "a directory reports its modification time");
-	{
-		struct timespec ts[2];
-		ts[0].tv_sec = 0; ts[0].tv_nsec = UTIME_OMIT;
-		ts[1].tv_sec = 1700000000; ts[1].tv_nsec = 0;
-		errno = 0;
-		const int r = utimensat(AT_FDCWD, "okm-probe.dir", ts, 0);
-		/* THE REFUSAL IS THIS PORT'S AND THE VALUE IS THE BACKEND'S, so the
-		 * refusal is asserted and the value is reported.
-		 *
-		 * This asserted EISDIR and one row of the matrix answered 13 --- EACCES.
-		 * Both are correct: the port opens the name as a file, and what a
-		 * backend says about opening a directory as one is its own. Linux
-		 * answers kal_err_is_directory and the system with no such distinction
-		 * answers kal_err_permission. Asserting the first would have made this
-		 * an observation about one implementation while claiming to be about
-		 * the port. */
-		printf("note: refused with errno=%d\n", errno);
-		check(r != 0, "setting a directory's modification time is refused");
-	}
 
 	unlink("okm-probe.dir/a"); unlink("okm-probe.dir/b");
 	check(rmdir("okm-probe.dir") == 0, "the directory is removed");

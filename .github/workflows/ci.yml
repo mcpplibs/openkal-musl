@@ -68,14 +68,14 @@ jobs:
           #   --abort-terminated  a termination rather than a return: Windows
           #                       fail-fasts, and the fault this replaces was
           #                       reported there as an exit
-          - { name: 'linux, gcc',    os: ubuntu-24.04, toolchain: 'gcc@16.1.0',  target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-signal'     }
-          - { name: 'linux, llvm',   os: ubuntu-24.04, toolchain: 'llvm@22.1.8', target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-signal'     }
-          - { name: 'macos, llvm',   os: macos-14,     toolchain: 'llvm@20.1.7', target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-status'     }
+          - { name: 'linux, gcc',    os: ubuntu-24.04, toolchain: 'gcc@16.1.0',  target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-signal', dirtime: '--dir-time'    }
+          - { name: 'linux, llvm',   os: ubuntu-24.04, toolchain: 'llvm@22.1.8', target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-signal', dirtime: '--dir-time'    }
+          - { name: 'macos, llvm',   os: macos-14,     toolchain: 'llvm@20.1.7', target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-status', dirtime: '--dir-time'    }
           # ⚠️ openkal-windows declines `openkal.space`: this system has no
           # primitive that copies an address space and starts a context in the
           # copy, and inventing one would be the simulation clause 3.1
           # forbids. `--no-fork` asserts the refusal.
-          - { name: 'windows, gcc',  os: windows-2022, toolchain: 'gcc@16.1.0',  target: 'x86_64-windows-gnu', net: 'yes', fork: '--no-fork', shell: '--no-shell', abort: '--abort-terminated' }
+          - { name: 'windows, gcc',  os: windows-2022, toolchain: 'gcc@16.1.0',  target: 'x86_64-windows-gnu', net: 'yes', fork: '--no-fork', shell: '--no-shell', abort: '--abort-terminated', dirtime: '--no-dir-time' }
     defaults:
       run:
         shell: bash
@@ -627,6 +627,26 @@ jobs:
         env:
           MCPP_TARGET: ${{ matrix.target }}
         run: bash tools/run-probe.sh examples/subprocess subprocess ${{ matrix.fork }} ${{ matrix.shell }} ${{ matrix.abort }}
+
+      # ⭐⭐ WHETHER AN ANSWER IS TRUE, WHICH IS A DIFFERENT QUESTION FROM
+      # WHETHER AN OPERATION WORKS --- AND THE ONE NO PROBE HERE WAS ASKING.
+      #
+      # Every probe above starts something, opens something or transfers
+      # something and asserts that it happened. A whole family of defects lived
+      # underneath that: `fcntl(F_SETLK)' granted every lock and took none, so
+      # two programs held one exclusive lock; `F_GETLK' left the caller's word
+      # untouched, so the answer read "somebody holds this" for ever;
+      # `getppid' returned -38 AS AN IDENTIFIER; `sigaltstack' reported an
+      # installation it had not performed; `sysconf(_SC_OPEN_MAX)' answered 0
+      # for a bound this library sets itself.
+      #
+      # ⚠️ NOT ONE OF THEM IS A MISSING OPERATION, so not one appears in
+      # `OPENKAL_MUSL_TRACE=enosys'. They were found by comparing every answer
+      # against the host's, and this probe is that comparison kept.
+      - name: The surface probe
+        env:
+          MCPP_TARGET: ${{ matrix.target }}
+        run: bash tools/run-probe.sh examples/surface surface ${{ matrix.dirtime }}
 
       # ⭐⭐ WHERE A STARTED PROGRAM'S OUTPUT WENT, WHICH THE PROBE CANNOT ASK
       # ABOUT ITSELF.

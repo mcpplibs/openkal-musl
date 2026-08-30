@@ -71,9 +71,20 @@ carry it in a `long`.
 
 ## The sources this port replaces, and why each
 
-Nine, and the list in the manifest carries the same reasons. Five read the shape
+Ten, and the list in the manifest carries the same reasons. Five read the shape
 of one environment directly. Two carry a machine word through a variable
-declared `long`. Two more were found only by running the result:
+declared `long`. Two more were found only by running the result. And one is
+replaced because another already was:
+
+`src/process/posix_spawnp.c` does not search a PATH. It stores `__execvpe` in
+the attributes and lets `posix_spawn` call it **in the duplicate** instead of
+`execve`, so the search happens inside a program that has already been started.
+This port replaced `posix_spawn` and has no duplicate to run it in, so the field
+was read by nobody: a name without a separator was taken as a path relative to
+the working directory, and `posix_spawnp("sh", …)` started `./sh`, failed, and
+**reported success**. `port/src/okm_spawn.c` performs the search, one
+`__posix_spawn` per entry, by musl's own rules — and `__posix_spawn` now refuses
+an attribute function it does not recognise rather than ignoring one.
 
 `src/mman/mmap.c` returns a pointer through a `long`. It is replaced rather than
 patched because the replacement is also better where a `long` does hold a
@@ -115,12 +126,35 @@ to find by testing.
 environment that cannot replace a running image cannot supply one, and clause
 3.1 of the specification declines to simulate what cannot be supplied. This
 library expresses it as starting the program, waiting for it, and ending with
-the status it ended with. A caller cannot distinguish that through this library
---- the same program runs, with the same arguments, on the same streams, and the
-same status reaches whoever waits --- but there are two images where a system
-with the operation would have one, so the identifier the started program reports
-is not the caller's. It is the arrangement every environment without the
+the status it ended with. It is the arrangement every environment without the
 operation uses, and two of the three beneath openkal are such environments.
+
+⚠️⚠️ **This paragraph used to say that a caller cannot distinguish that. It can,
+and the claim is what kept anyone from looking.** Three differences are known,
+and the first two were found by a consumer rather than here:
+
+1. **When the program cannot be started.** The replacement happens inside the
+   duplicate, so its failure is not the caller's to see; the duplicate ended
+   with 127 and `execve` ended the caller with it, instead of returning -1.
+   musl's own `execvp` issues one `execve` per PATH entry and needs each to
+   return, so a program named without a separator was found only when it
+   happened to sit in the first entry. **Answered since 0.10.0**: the name is
+   asked about before the program is started, so `ENOENT` and `EACCES` reach
+   the caller. What is still not answered is a name that exists and cannot be
+   executed — openkal reports no execute permission, so that one still ends the
+   caller with 127. Asked of openkal-linux, which knows and does not report it.
+2. **`kill` does not reach a program started this way.** After `fork` and
+   `execve` there are three images, not two: the copy waits for the program it
+   started. A signal sent to the identifier the parent holds reaches the waiter,
+   which dies — and the parent is told the program died on that signal, while
+   the program runs to completion, unsupervised. Measured, with the host as
+   control: identical status words, opposite outcomes. **Not answered here.**
+   openkal has no way to say "this program's lifetime is bound to mine", and
+   `kal_process_terminate` is right to terminate only what it was given. Asked
+   of the specification. Until then a caller that needs to stop what it started
+   should use `posix_spawn`, `system` or `popen`, where `kill` does reach.
+3. **The identifier the started program reports is not the caller's**, because
+   there are two images where a system with the operation would have one.
 
 `utimensat` asks the environment for ownership of the file, and this library
 asks for write access instead, because openkal's operation is stated on an open
@@ -361,6 +395,68 @@ passing it on would be read as inheritance and would start the program writing t
 the stream the caller had just redirected away from --- the silent wrong answer
 this whole set of changes exists to remove. Reported to the specification; it is
 not a defect this library can fix, and a refusal is one a caller can act upon.
+
+## Seven more, added with the exec search — and what they have in common
+
+⭐⭐ **Every one of these is an operation that was PRESENT AND ANSWERED WRONGLY,
+which is a different failure from an operation that is missing — and it is the
+reason none of them was found by the diagnostic added for the last set.**
+
+`OPENKAL_MUSL_TRACE=enosys` reports what reaches the default arm. Not one of the
+seven does. They were found by writing `examples/surface`, which asks what an
+answer **is** rather than whether a call returned, and comparing every answer
+against the host's.
+
+**A lock was granted and never taken.** `fcntl(F_SETLK)`, `F_SETLKW` and
+`F_GETLK` answered 0 and did nothing. Measured with the host as control: two
+programs took one exclusive lock and both were told they had it. `F_GETLK` was
+worse — POSIX writes `F_UNLCK` into `l_type` when nothing would block, and
+leaving the caller's word untouched returns the `F_WRLCK` the caller
+conventionally put there, so the answer read "somebody holds this" for ever and
+a loop waiting for a lock never left it. All three now report `ENOSYS`. ⭐ The
+refusal is temporary in a way the permission one is not: every environment
+beneath openkal can lock a byte range, and what is missing is a word in the
+specification. Composing one here from `KAL_OPEN_EXCLUSIVE` is not an option —
+nothing would release it when its holder died.
+
+**`getppid` returned a negated error value as an identifier.** musl writes it
+without `__syscall_ret`, deliberately, because POSIX says it cannot fail; the
+default arm answered `-ENOSYS` and a caller was told its parent was -38, with
+`errno` untouched. ⚠️ **This is the defect `getpgrp` had and that was fixed one
+release earlier, three lines away in the same dispatch, and it was not looked
+for.** It answers 0 now — "no parent this environment can name" — and
+`examples/surface` asks the whole family rather than the member.
+
+**A copy of the calling image reported its parent's identifier.** `getpid`
+answered the constant 1 in every context, so `fork` produced two images that
+gave one answer and the copy had no way to name itself. The identifier is now
+settled before the copy is taken and carried into it. ⚠️ The comparison `kill`
+makes to decide "this program itself" moved with it; against the constant it
+would have made `raise`, and therefore `abort`, report `ESRCH` in every copy.
+
+**`setpgid` and `setsid` refused a question neither asks.** They answered
+`ENOSYS` on the ground that making a group is not the same as being in one —
+but `setpgid(0, 0)` asks to be in a group of one, which `getpgid(0) == getpid()`
+already says is true, and `setsid` has a failure POSIX writes down for exactly
+that state. They answer 0 and `EPERM`. Every daemonising library handles
+`EPERM`; none handles `ENOSYS`.
+
+**`sigaltstack` reported an installation it had not performed**, and the enquiry
+answered 0 with a zeroed record rather than "none is installed". `ENOSYS`.
+
+**A bound this library sets was refused rather than stated.** `sysconf(_SC_OPEN_MAX)`
+answered 0, because musl reads it from `getrlimit(RLIMIT_NOFILE)` and there was
+no case. It answers `OKM_MAX_FD`. Other resources are still refused, because
+openkal reports no such limits and inventing one is the shape this port avoids.
+
+**`utimensat` could not set a directory's time.** It asked for
+`KAL_OPEN_READ | KAL_OPEN_WRITE` unconditionally and a directory refuses that.
+It now asks what the name refers to and opens a directory for reading only. ⚠️
+That is outside what `fs.h` states — the interface requires `KAL_OPEN_WRITE`
+and has no `kal_dir` form of `kal_fs_set_modified`, so there is no stated route
+to a directory's time at all. A file still asks for exactly what is required,
+and an implementation that cannot open a directory returns an error that is
+passed on unchanged. Asked of the specification.
 
 ## What the architecture does not decide alone
 

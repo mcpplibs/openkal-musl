@@ -6,7 +6,7 @@
 #
 # with the target, where the row needs one, in `MCPP_TARGET`.
 #
-# ⚠️ WHY THIS IS A SCRIPT AND NOT A STEP. There are four probes now and each
+# ⚠️ WHY THIS IS A SCRIPT AND NOT A STEP. There are five probes now and each
 # needs the same three things: a watchdog, because a program that does not
 # return is as much a failure as one that returns wrongly and the job would
 # otherwise spend its whole timeout finding out; a report of where a program
