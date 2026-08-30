@@ -170,6 +170,8 @@ static inline int okm_fs_list_next(struct kal_dir, kal_uintptr*, char*, kal_uint
 #if OKM_HAS_PROCESS
 
 #define okm_process_spawn     kal_process_spawn
+#define okm_process_job_enter kal_process_job_enter
+#define okm_process_job_terminate kal_process_job_terminate
 #define okm_process_wait      kal_process_wait
 #define okm_process_terminate kal_process_terminate
 #define okm_process_close     kal_process_close
@@ -208,6 +210,8 @@ static inline int okm_process_spawn(const struct kal_spawn*, const char*, kal_ui
 static inline int okm_process_wait(struct kal_process, int*,
                                    int*) { return kal_err_not_supported; }
 static inline int okm_process_terminate(struct kal_process) { return kal_err_not_supported; }
+static inline int okm_process_job_enter(struct kal_job*) { return kal_err_not_supported; }
+static inline int okm_process_job_terminate(struct kal_job) { return kal_err_not_supported; }
 static inline void okm_process_close(struct kal_process) {}
 
 #endif  /* OKM_HAS_PROCESS */

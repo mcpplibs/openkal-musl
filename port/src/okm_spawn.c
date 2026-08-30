@@ -78,6 +78,7 @@
 #define OKM_SPAWN_MAX_OPEN 8
 
 int __okm_child_record(struct kal_process h);
+int __okm_child_record_job(struct kal_process h, struct kal_job j);
 
 static size_t slen(const char* s) { size_t n = 0; while (s && s[n]) n++; return n; }
 
@@ -417,6 +418,11 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 	struct kal_file opened[OKM_SPAWN_MAX_OPEN];
 	int opened_n = 0;
 
+	/* The directory the program is to run in, if a file action named one. It is
+	 * this call's and is released with the opened files below. */
+	struct kal_dir where;
+	int where_held = 0;
+
 	/* Resolving a file action's name needs one of these and it is four kilobytes.
 	 * Static, under this file's lock, for the same reason the argument vectors
 	 * above are: a second one on the stack would double the frame of a function
@@ -485,8 +491,33 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 				if (op->fd > 2) break;
 				refused = ENOSYS;
 				break;
-			case FDOP_CHDIR:
-			case FDOP_FCHDIR:
+			/* ⭐⭐ ANSWERED SINCE 0.12, BECAUSE openkal 0.11 GAVE A SPAWN A SECOND
+			 * DIRECTORY. Both of these say the same thing --- run the program
+			 * HERE --- and until there was a place to put it they were refused
+			 * along with everything else this file could not express. */
+			case FDOP_CHDIR: {
+				struct okm_at cat;
+				const int r = okm_resolve(AT_FDCWD, op->path, &cat, 0);
+				if (r) { refused = (int)-r; break; }
+				struct kal_dir d;
+				const int e = okm_fs_open_dir(cat.base, cat.rel, slen(cat.rel), &d);
+				if (e != kal_ok) { refused = okm_errno(e); break; }
+				if (where_held) okm_fs_close_dir(where);
+				where = d; where_held = 1;
+				break;
+			}
+			case FDOP_FCHDIR: {
+				struct okm_desc* dd = okm_desc_of(op->fd);
+				if (!dd || dd->kind != OKM_DIR) { refused = EBADF; break; }
+				/* A directory of this program's own, opened again so that the
+				 * spawn holds one the caller cannot close underneath it. */
+				struct kal_dir d;
+				const int e = okm_fs_open_dir(dd->dir, ".", 1, &d);
+				if (e != kal_ok) { refused = okm_errno(e); break; }
+				if (where_held) okm_fs_close_dir(where);
+				where = d; where_held = 1;
+				break;
+			}
 			default:
 				/* An action openkal cannot express. Performing the spawn
 				 * without it would start the program in a state the caller did
@@ -512,6 +543,7 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 
 	if (refused) {
 		for (int i = 0; i < opened_n; i++) okm_fs_close_file(opened[i]);
+		if (where_held) okm_fs_close_dir(where);
 		okm_unlock();
 		return refused;
 	}
@@ -534,7 +566,8 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 	 * else entirely. Passing it now closes that, and it closes the `fork' route
 	 * as well: a copy that chdir'd has its own `okm_cwd_dir', and the `execve'
 	 * it then performs reaches this line. */
-	int e = start_program(bound, want_unit, okm_cwd_dir, &at, a_ptr, a_len, argc,
+	int e = start_program(bound, want_unit, where_held ? where : okm_cwd_dir,
+	                      &at, a_ptr, a_len, argc,
 	                      e_ptr, e_len, envc, &streams, &child);
 
 	/* ⭐ THE ONE ENVIRONMENT THAT SPELLS A PROGRAM WITH A SUFFIX IS ANSWERED
@@ -563,11 +596,12 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 	 * from a file, and openkal-musl asks the specification to say so for streams
 	 * in general rather than for one of them. */
 	for (int i = 0; i < opened_n; i++) okm_fs_close_file(opened[i]);
+	if (where_held) okm_fs_close_dir(where);
 
 	okm_unlock();
 	if (e != kal_ok) return okm_errno(e);
 
-	const int pid = __okm_child_record(child);
+	const int pid = __okm_child_record_job(child, unit);
 	if (pid < 0) { okm_process_close(child); return EAGAIN; }
 	*res = (pid_t)pid;
 	return 0;
