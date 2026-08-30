@@ -14,8 +14,40 @@ openkal-musl = "0.10.0"
 It names no implementation and no platform: a C library is the one consumer that
 must know which implementation it needs, so it declares that itself.
 
-One further line is required, and the reason is worth stating because it is not
-about openkal:
+⚠️⚠️ **That line is for a C program. A C++ program names the runtime instead, and
+naming both is an error rather than a redundancy.**
+
+`openkal-llvm-runtime` supplies libc++, libc++abi and libunwind configured for
+this package, and it pins the version of this package **exactly** — a version
+requirement here does not float up. So a program that names both gets neither:
+
+```
+error: dependency 'mcpplibs.openkal-musl' has irreconcilable versions:
+  '0.10.0' requested by '<the program>'
+  '0.9.0'  requested by 'mcpplibs.openkal-llvm-runtime@0.5.0'
+```
+
+⇒ A C++ program writes **one** line, and the C library arrives with it:
+
+```toml
+[dependencies]
+openkal-llvm-runtime = "0.6.0"   # carries openkal-musl 0.10.0
+```
+
+⭐ Recorded here because it was got wrong by the people who maintain this
+package: the consumer who reported openkal-linux#13 builds C++, and was told to
+change the line above rather than this one. The version table below is what a
+consumer needs to answer it without asking.
+
+| this package | is carried by |
+| --- | --- |
+| 0.10.0 | `openkal-llvm-runtime = "0.6.0"` |
+| 0.9.0 | `openkal-llvm-runtime = "0.5.0"` |
+| 0.7.0 | `openkal-llvm-runtime = "0.4.0"` |
+| 0.6.0 | `openkal-llvm-runtime = "0.3.1"` |
+
+One further line is required for a C program, and the reason is worth stating
+because it is not about openkal:
 
 ```toml
 [build]
