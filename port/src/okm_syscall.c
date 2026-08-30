@@ -66,6 +66,7 @@ extern __typeof(kal_timeout_wait_process) kal_timeout_wait_process __attribute__
 #include <signal.h>
 #include <stdint.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/uio.h>
@@ -528,19 +529,64 @@ static void to_timespec(kal_duration ns, struct timespec* ts)
 static struct { int used; int pid; struct kal_process h; } g_child[OKM_MAX_CHILD];
 static int g_next_pid = 1000;
 
-int __okm_child_record(struct kal_process h)
+/* ⭐ WHAT THIS PROGRAM ANSWERS WHEN ASKED WHO IT IS.
+ *
+ * It was the constant 1 for every context, so a copy made by `fork' reported
+ * the identifier of the image it was copied from --- two contexts, one answer,
+ * and no way for the copy to name itself. A program that writes its identifier
+ * where another will read it (a lock file, a name for a temporary, a line of a
+ * log) wrote a value that named something else.
+ *
+ * The original keeps 1. A copy is told the identifier its parent recorded for
+ * it, which is the one number both sides already agree on --- the parent's
+ * `fork' returned it. */
+static int g_self_pid = 1;
+
+void __okm_set_self_pid(int pid) { g_self_pid = pid; }
+
+/* Takes an entry and settles its identifier WITHOUT a resource to put in it.
+ *
+ * ⚠️ THE IDENTIFIER HAS TO EXIST BEFORE THE CONTEXT DOES. `fork' copies the
+ * address space at `kal_space_start', so anything the copy is to know must be
+ * written before that call --- and the identifier used to be assigned after it,
+ * from the handle it returned. Reserving first is what lets the copy be told.
+ *
+ * ⚠️ THE CALLER HOLDS THE LOCK. `__okm_child_record' takes it and this does
+ * not, because `__okm_fork' is already inside it when it reserves: the copy has
+ * to be taken while no other context is part-way through a change to the table.
+ * A second acquisition would not nest. */
+int __okm_child_reserve(int* pid_out)
 {
-	okm_lock();
 	for (int i = 0; i < OKM_MAX_CHILD; i++) {
 		if (g_child[i].used) continue;
 		g_child[i].used = 1;
 		g_child[i].pid = ++g_next_pid;
-		g_child[i].h = h;
-		okm_unlock();
-		return g_child[i].pid;
+		g_child[i].h = (struct kal_process){ 0 };
+		if (pid_out) *pid_out = g_child[i].pid;
+		return i;
 	}
+	return -1;
+}
+
+void __okm_child_commit(int slot, struct kal_process h)
+{
+	if (slot >= 0 && slot < OKM_MAX_CHILD) g_child[slot].h = h;
+}
+
+void __okm_child_release(int slot)
+{
+	if (slot >= 0 && slot < OKM_MAX_CHILD) g_child[slot].used = 0;
+}
+
+int __okm_child_record(struct kal_process h)
+{
+	okm_lock();
+	int pid = 0;
+	const int slot = __okm_child_reserve(&pid);
+	if (slot < 0) { okm_unlock(); return -EAGAIN; }
+	__okm_child_commit(slot, h);
 	okm_unlock();
-	return -EAGAIN;
+	return pid;
 }
 
 /* ⚠️ A COPY OF THE CALLING IMAGE INHERITS THIS TABLE AND MUST NOT KEEP IT.
@@ -1112,9 +1158,49 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			const long r = okm_resolve((int)a1, (const char*)a2, &at, 0);
 			if (r) return r;
 		}
+		/* ⚠️⚠️ A DIRECTORY COULD NOT HAVE ITS TIME SET, AND IT IS AN ORDINARY
+		 * THING TO WANT.
+		 *
+		 * `KAL_OPEN_READ | KAL_OPEN_WRITE' was asked for unconditionally, and
+		 * an implementation opening a directory for writing refuses --- so this
+		 * answered EISDIR for every directory. Reported by a consumer whose
+		 * lock is a directory it stamps; measured through the C++ library
+		 * above, where BOTH overloads of `last_write_time' report under that
+		 * one name, so the failure read as though READING the time had failed.
+		 * Reading it was never broken.
+		 *
+		 * ⭐ AND THE OPERATION IS PERFORMABLE. Measured directly against
+		 * openkal-linux: opening the directory with KAL_OPEN_READ succeeds and
+		 * `kal_fs_set_modified' upon it succeeds and the directory's time
+		 * really changes.
+		 *
+		 * ⚠️ WHICH IS OUTSIDE WHAT `fs.h' STATES, AND IS RECORDED RATHER THAN
+		 * CONCEALED. The interface says the file "shall have been opened with
+		 * KAL_OPEN_WRITE", and names `kal_fs_open_dir' --- which yields a
+		 * `kal_dir' --- as the way to open a directory, while
+		 * `kal_fs_set_modified' takes a `kal_file' and has no `kal_dir' form.
+		 * So there is no stated route to a directory's time at all.
+		 *
+		 * ⇒ The intent is stated first and the fallback is taken only for a
+		 * directory, so a FILE still asks for exactly what the interface
+		 * requires. An implementation that cannot do it returns an error and
+		 * that error is passed on unchanged: this is not a simulation and not a
+		 * silent success, it is one operation attempted a second way. Recorded
+		 * in musl/PATCHES.md and asked of the specification. */
+		struct kal_node_info kind = { .self_size = sizeof kind };
+		const int ke = okm_fs_info(at.base, at.rel, slen(at.rel), 0,
+		                           KAL_INFO_KIND, &kind);
+		/* ⚠️ AN ENQUIRY THAT CANNOT BE MADE IS NOT AN ANSWER OF `NO', so a build
+		 * without `openkal.fs' asks for what the interface requires and lets the
+		 * open answer, exactly as it did before this enquiry was added. */
+		if (ke != kal_ok && ke != kal_err_not_supported) return -okm_errno(ke);
+		if (ke == kal_ok && kind.kind == kal_node_absent) return -ENOENT;
+		const kal_uintptr want = (ke == kal_ok && kind.kind == kal_node_directory)
+		                       ? KAL_OPEN_READ
+		                       : (KAL_OPEN_READ | KAL_OPEN_WRITE);
+
 		struct kal_file f;
-		int e = okm_fs_open(at.base, at.rel, slen(at.rel),
-		                    KAL_OPEN_READ | KAL_OPEN_WRITE, &f);
+		int e = okm_fs_open(at.base, at.rel, slen(at.rel), want, &f);
 		if (e != kal_ok) return -okm_errno(e);
 		e = okm_fs_set_modified(f, when);
 		okm_fs_close_file(f);
@@ -1398,7 +1484,39 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			         | (want & (O_APPEND | O_NONBLOCK));
 			return 0;
 		}
-		case F_SETLK: case F_SETLKW: case F_GETLK: return 0;
+		/* ⚠️⚠️ THESE THREE ANSWERED `0' AND DID NOTHING, SO EVERY LOCK WAS
+		 * GRANTED AND NO LOCK EXISTED.
+		 *
+		 * Measured, with the host as control: two programs took an exclusive
+		 * lock on one file and BOTH were told they had it; on the host the
+		 * second is refused with EAGAIN. Anything protecting a write with a
+		 * lock --- a state file, a single-instance guard, a database --- had no
+		 * protection and no way to find out.
+		 *
+		 * ⚠️ `F_GETLK' was worse, because its answer pointed the other way.
+		 * POSIX says it writes `F_UNLCK' into `l_type' when nothing would
+		 * block; leaving the caller's word untouched returns the `F_WRLCK' the
+		 * caller conventionally put there before asking, so the answer read
+		 * "somebody holds this" --- for ever. A loop waiting for a lock to be
+		 * released never left it.
+		 *
+		 * ⭐ REFUSED, AND THE REFUSAL IS TEMPORARY IN A WAY `chmod' IS NOT.
+		 * `chmod' is declined because a FAT volume, a UEFI partition and a
+		 * Windows access-control list do not share a model. Locking is the
+		 * opposite: `fcntl(F_SETLK)', `fcntl(F_SETLK)' and `LockFileEx' all
+		 * exist and all take a byte range, so every environment beneath openkal
+		 * can perform it. What is missing is a WORD in the specification, and
+		 * one has been asked for --- `kal_fs_lock' beside a `kal_fs_props'
+		 * position, which is exactly how link operations were admitted. When it
+		 * lands these three lines become an implementation and no caller
+		 * changes.
+		 *
+		 * ⚠️ It cannot be composed here in the meantime. A lock built out of
+		 * `KAL_OPEN_EXCLUSIVE' and a name beside the file would be released by
+		 * nobody when its holder died --- a program that ended abnormally while
+		 * holding one would be locked out of its own file for ever, which is a
+		 * worse failure than the refusal and a much harder one to read. */
+		case F_SETLK: case F_SETLKW: case F_GETLK: return -ENOSYS;
 		default: return -EINVAL;
 		}
 	}
@@ -1570,7 +1688,27 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	}
 	case SYS_sched_yield: okm_task_yield(); return 0;
 	case SYS_gettid:      return (syscall_arg_t)OKM_CONTEXT_ID();
-	case SYS_getpid:      return 1;
+	case SYS_getpid:      return (syscall_arg_t)g_self_pid;
+
+	/* ⚠️⚠️ THE SAME DEFECT `getpgrp' HAD, IN THE SAME FAMILY, MISSED ONCE.
+	 *
+	 * musl's `getppid' is `return __syscall(SYS_getppid);' WITHOUT
+	 * `__syscall_ret', deliberately, because POSIX says the call cannot fail.
+	 * There was no case for the number, so the default arm answered -ENOSYS and
+	 * a program that asked was told its parent was -38: not -1, no errno, and
+	 * nothing to check. Measured. The note at `getpgid' below records the same
+	 * shape being fixed for `getpgrp' --- and this one was three lines away and
+	 * was not looked for. The criterion added with this change sweeps the whole
+	 * family rather than this member of it.
+	 *
+	 * ⭐ ZERO RATHER THAN ONE. openkal names nothing that started this program,
+	 * so there is no identifier to give. Zero is what the first process of a
+	 * system answers on the environment this library's callers come from, and
+	 * it means what is true here: there is no parent to name. One would be a
+	 * worse answer than a wrong number, because `getppid() == 1' is read by
+	 * daemonising code as "my parent has died and I have been adopted", which
+	 * would send a program down a path nothing here asked for. */
+	case SYS_getppid:     return 0;
 	case SYS_set_tid_address: return (syscall_arg_t)OKM_CONTEXT_ID();
 	case SYS_exit:        return __okm_task_exit((int)a1);
 	case SYS_exit_group:  kal_exit((int)a1); return 0;
@@ -1629,7 +1767,10 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * reported ESRCH --- including for SIGABRT. Zero and minus one name
 		 * groups that contain this program, and it is the only member this
 		 * library can reach. */
-		if (pid == 1 || pid == 0 || pid == -1) return signal_self(sig);
+		/* ⚠️ AND IT IS `g_self_pid' RATHER THAN THE CONSTANT. A copy made by
+		 * `fork' answers the identifier its parent recorded, so comparing
+		 * against 1 would make `raise' and `abort' report ESRCH in every copy. */
+		if (pid == g_self_pid || pid == 0 || pid == -1) return signal_self(sig);
 		return -ESRCH;
 	}
 #endif
@@ -1867,16 +2008,71 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * identity `getpid' already reports, which is the whole truth here: there
 	 * is one program and it is in its own group. A group that is not this
 	 * program's is a group this environment has no way to name, and is
-	 * refused. `setpgid' and `setsid' remain refused: making a group is not
-	 * the same as being in one, and reporting success for it would be
-	 * reporting an effect that does not exist. */
+	 * refused.
+	 *
+	 * ⚠️⚠️ THIS PARAGRAPH USED TO END "`setpgid' AND `setsid' REMAIN REFUSED:
+	 * MAKING A GROUP IS NOT THE SAME AS BEING IN ONE", AND THAT ANSWERED A
+	 * QUESTION NEITHER OF THEM ASKS.
+	 *
+	 * `setpgid(0, 0)' does not ask for a group to be made. It asks for the
+	 * calling program to be in a group of its own --- which, by the three
+	 * answers immediately below, IS ALREADY TRUE HERE. Refusing it reported
+	 * that an effect was unavailable while the effect held. ⇒ It succeeds, and
+	 * that is not reporting an effect that does not exist: it is reporting one
+	 * that does.
+	 *
+	 * `setsid()' has a failure POSIX writes down: EPERM when the caller is
+	 * already a process group leader. `getpgid(0) == getpid()' is that
+	 * assertion, so EPERM is the true answer rather than a polite one.
+	 *
+	 * ⭐ AND THE DIFFERENCE IS NOT COSMETIC. The `fork'-then-`setsid' dance
+	 * exists BECAUSE of EPERM, so every daemonising library handles it; not one
+	 * handles ENOSYS. A written-down failure is one a caller can act on. */
 	case SYS_getpgid:
-		return (a1 == 0 || a1 == 1) ? 1 : -ESRCH;
+		return (a1 == 0 || a1 == g_self_pid) ? g_self_pid : -ESRCH;
 #ifdef SYS_getpgrp
-	case SYS_getpgrp: return 1;
+	case SYS_getpgrp: return (syscall_arg_t)g_self_pid;
 #endif
 	case SYS_getsid:
-		return (a1 == 0 || a1 == 1) ? 1 : -ESRCH;
+		return (a1 == 0 || a1 == g_self_pid) ? g_self_pid : -ESRCH;
+
+	/* Naming this program, or naming nobody, asks for the arrangement that
+	 * already holds. Naming anything else asks for a group this environment
+	 * cannot name, which is EPERM rather than ENOSYS: the operation is here,
+	 * the group is not. */
+	case SYS_setpgid:
+		if ((a1 == 0 || a1 == (syscall_arg_t)g_self_pid)
+		    && (a2 == 0 || a2 == (syscall_arg_t)g_self_pid)) return 0;
+		return -EPERM;
+	case SYS_setsid:
+		return -EPERM;   /* already a process group leader; see above */
+
+	/* ⭐ THE BOUND IS THIS LIBRARY'S OWN AND IT WAS REFUSING TO STATE IT.
+	 *
+	 * musl answers `sysconf(_SC_OPEN_MAX)' from this call, so with no case here
+	 * the answer was ZERO --- and a program sizing a set of descriptors, or
+	 * closing every descriptor above a point, acts on that number. The number
+	 * is not unknown: it is OKM_MAX_FD, which README.md states beside the other
+	 * bounds this port fixes.
+	 *
+	 * Only the one resource is answered. The others are not refused out of
+	 * caution but out of not knowing: openkal reports no address-space or
+	 * processor limits, and inventing one would be the shape this port exists
+	 * to avoid. Setting any limit is refused for the same reason.
+	 *
+	 * musl reaches this through `prlimit64' first and falls back to
+	 * `getrlimit' only on ENOSYS, so answering this one answers both. */
+#ifdef SYS_prlimit64
+	case SYS_prlimit64: {
+		struct okm_rlimit64 { uint64_t cur, max; };
+		if ((const void*)a3) return -EPERM;         /* a new limit */
+		struct okm_rlimit64* out = (void*)a4;
+		if (!out) return 0;
+		if ((int)a2 != RLIMIT_NOFILE) return -ENOSYS;
+		out->cur = out->max = (uint64_t)OKM_MAX_FD;
+		return 0;
+	}
+#endif
 
 	/* ⭐ REFUSED FROM A CASE OF ITS OWN RATHER THAN FROM THE DEFAULT ARM, SO
 	 * THAT THE TRACE DOES NOT REPORT IT.
@@ -2007,7 +2203,13 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		return -ENOSYS;
 	}
 #ifdef SYS_sigaltstack
-	case SYS_sigaltstack: return 0;
+	/* ⚠️ IT ANSWERED `0' AND INSTALLED NOTHING, AND THE ENQUIRY LIED TOO.
+	 * Measured: install a stack, ask for it back, and the answer is a zeroed
+	 * record --- reported as success, with `ss_sp' and `ss_size' both zero,
+	 * rather than as "none is installed". An alternate stack is where a signal
+	 * handler runs, this library delivers no signals, and so there is nothing
+	 * here to install it for. Refused rather than granted. */
+	case SYS_sigaltstack: return -ENOSYS;
 #endif
 	case SYS_rt_sigreturn: return -ENOSYS;
 

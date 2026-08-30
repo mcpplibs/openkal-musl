@@ -61,6 +61,10 @@ extern __typeof(kal_space_start) kal_space_start __attribute__((__weak__));
 
 int  __okm_child_record(struct kal_process h);   /* okm_syscall.c */
 void __okm_forget_children(void);               /* okm_syscall.c */
+int  __okm_child_reserve(int* pid_out);         /* okm_syscall.c --- lock held */
+void __okm_child_commit(int slot, struct kal_process h);
+void __okm_child_release(int slot);
+void __okm_set_self_pid(int pid);
 
 /* The context the started child resumes into.
  *
@@ -112,6 +116,14 @@ static jmp_buf g_resume;
 static volatile uintptr_t g_carried_tp;
 static void* volatile     g_carried_self;
 
+/* ⭐ AND THE IDENTIFIER, WHICH IS CARRIED FOR THE SAME REASON AND BY THE SAME
+ * MEANS. `getpid' answered the constant 1 in every context, so a copy reported
+ * the identifier of the image it was copied from: two contexts, one answer, and
+ * no way for the copy to name itself. The number the copy should give is the one
+ * the parent's `fork' returns, so it has to exist BEFORE the copy is taken ---
+ * which is why the table entry is now reserved above rather than recorded below. */
+static volatile int       g_carried_pid;
+
 /* A stack for the entry function, used only by an implementation that honours
  * the argument. All it holds is one call to `longjmp'. */
 static char g_entry_stack[8192] __attribute__((aligned(16)));
@@ -133,6 +145,22 @@ syscall_arg_t __okm_fork(void)
 	g_carried_tp   = __okm_get_tp();
 	g_carried_self = __okm_get_self();
 
+	/* ⚠️ THE ENTRY IS TAKEN BEFORE THE CONTEXT EXISTS, so that the identifier
+	 * settled here is the one the copy reads out of its own copy of this global.
+	 * The lock this function already holds is the table's, which is what makes
+	 * reserving here safe and what makes a second acquisition wrong.
+	 *
+	 * ⚠️ `volatile', although both are written BEFORE the `setjmp' below and are
+	 * read only on the path that does not resume through it. That is enough to
+	 * be correct and is not enough to be obviously correct: this file's rule is
+	 * that a local live across that call says so, and a reader checking the rule
+	 * should not have to reconstruct which path reads which. */
+	int scratch = 0;
+	const volatile int slot = __okm_child_reserve(&scratch);
+	if (slot < 0) { okm_unlock(); return -EAGAIN; }
+	const volatile int reserved_pid = scratch;
+	g_carried_pid = reserved_pid;
+
 	/* ⚠️ NOTHING BELOW THIS LINE MAY READ A LOCAL VARIABLE THAT WAS WRITTEN
 	 * AFTER IT. A variable modified between `setjmp' and `longjmp' and not
 	 * declared volatile is indeterminate in the resumed context; the child path
@@ -147,6 +175,10 @@ syscall_arg_t __okm_fork(void)
 		 * and POSIX is explicit that a duplicate has no children. okm_syscall.c
 		 * records what keeping them would cost. */
 		__okm_forget_children();
+		/* ⭐ AND THE COPY NAMES ITSELF. Read from this file's own global, which
+		 * the copy carries because it was written before the copy was taken;
+		 * `__okm_forget_children' above cleared the TABLE and not this. */
+		__okm_set_self_pid((int)g_carried_pid);
 		okm_unlock();
 		return 0;                     /* the child */
 	}
@@ -154,13 +186,12 @@ syscall_arg_t __okm_fork(void)
 	struct kal_process child;
 	const int e = kal_space_start(child_entry, 0,
 	                              g_entry_stack + sizeof g_entry_stack, &child);
-	/* ⚠️ RELEASED BEFORE THE CHILD IS RECORDED, because the recording takes the
-	 * same lock and this one does not nest. The child was copied above and
-	 * holds its own copy of what was released here. */
+	/* ⚠️ THE ENTRY WAS TAKEN BEFORE THE CONTEXT WAS STARTED, so a start that
+	 * failed has to give it back --- otherwise a program whose every `fork'
+	 * fails would exhaust the table and begin reporting EAGAIN for a reason
+	 * that has nothing to do with how many children it has. */
+	if (e != kal_ok) { __okm_child_release(slot); okm_unlock(); return -okm_errno(e); }
+	__okm_child_commit(slot, child);
 	okm_unlock();
-	if (e != kal_ok) return -okm_errno(e);
-
-	const int pid = __okm_child_record(child);
-	if (pid < 0) { okm_process_close(child); return -EAGAIN; }
-	return (syscall_arg_t)pid;
+	return (syscall_arg_t)reserved_pid;
 }

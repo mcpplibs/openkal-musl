@@ -56,8 +56,10 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <spawn.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 /* musl's own description of a file action, included by path rather than
@@ -80,6 +82,90 @@ int __okm_child_record(struct kal_process h);
 static size_t slen(const char* s) { size_t n = 0; while (s && s[n]) n++; return n; }
 
 static int count(char* const* v) { int n = 0; while (v && v[n]) n++; return n; }
+
+/* --- can this name be started at all? --------------------------------------
+ *
+ * ⚠️⚠️ ASKED HERE BECAUSE THE ANSWER DOES NOT COME BACK FROM BENEATH, AND A
+ * CALLER OF `execvp' CANNOT PROCEED WITHOUT IT.
+ *
+ * An implementation starts a program by duplicating itself and replacing the
+ * duplicate, and the replacement happens in the DUPLICATE --- so a name that
+ * cannot be started is discovered by a program that is no longer this one.
+ * openkal-linux ends that duplicate with 127 (`process.cpp'), and its
+ * `kal_process_spawn' returns `kal_ok' with a handle: the failure is reported
+ * to nobody.
+ *
+ * ⇒ `execve' then waited for the duplicate, read 127, and ENDED THE CALLING
+ * PROGRAM with it. musl's `execvp' issues one `execve' per PATH entry and
+ * relies on it RETURNING with errno set so it can try the next one, so the
+ * search could not survive its first miss: a program named without a slash was
+ * found only when it happened to sit in the first entry. Reported as
+ * openkal-linux#13 and measured by a consumer, who also measured that
+ * `bwrap' --- present at /usr/bin/bwrap --- was reported as not installed.
+ *
+ * ⭐ THE ENQUIRY IS ALREADY REQUIRED OF EVERY IMPLEMENTATION. `kal_fs_info' is
+ * an operation of `openkal.fs' and this file already resolves the name through
+ * `okm_resolve'; asking what the name refers to is one more call on a path that
+ * is about to start a program anyway.
+ *
+ * ⚠️ AND IT ANSWERS TWO OF THE THREE QUESTIONS, WHICH IS WHY A3 IS STILL OPEN.
+ * `ENOENT' and `ENOTDIR' are what a PATH search needs and are what this
+ * settles. Whether an existing file may be EXECUTED is not something openkal
+ * reports --- `kal_node_info' carries `writable' and no other permission --- so
+ * a name that exists and cannot be run still ends the caller with 127. That
+ * residue is recorded in README.md beside `access(X_OK)', which cannot answer
+ * it either and for the same reason. The complete answer needs the backend to
+ * report its own failure; asked for at openkal-linux. */
+static int startable(struct kal_dir base, const char* rel)
+{
+	struct kal_node_info info = { .self_size = sizeof info };
+	/* Resolves, because starting resolves. */
+	const int e = okm_fs_info(base, rel, slen(rel), 0, KAL_INFO_KIND, &info);
+	/* ⚠️ AN ENQUIRY THAT CANNOT BE MADE IS NOT AN ANSWER OF `NO'. A build
+	 * configured without `openkal.fs' --- OKM_HAS_FS=0, which a machine with no
+	 * storage is built with --- answers `not supported' here, and turning that
+	 * into a refusal would stop a spawn this port would otherwise have
+	 * attempted. The enquiry is an improvement on the failure that follows, not
+	 * a precondition of it: where it cannot be made, the spawn answers as it
+	 * did before this check existed. */
+	if (e == kal_err_not_supported) return 0;
+	if (e != kal_ok) return okm_errno(e);
+	if (info.kind == kal_node_absent) return ENOENT;
+	/* POSIX names this one: a directory is not a program, and `execve' upon one
+	 * is EACCES rather than ENOENT. `execvp' continues its search on both. */
+	if (info.kind == kal_node_directory) return EACCES;
+	return 0;
+}
+
+/* The name to start, and whether it can be. On the one environment that spells
+ * a program with a suffix the name may be rewritten here, so that the enquiry
+ * and the spawn agree about which name they are talking about. */
+static int startable_name(struct okm_at* at)
+{
+	const int e = startable(at->base, at->rel);
+#ifdef _WIN32
+	/* Tried second rather than first, so a file that genuinely bears the name
+	 * is preferred to one that bears the name and the suffix --- the rule the
+	 * spawn below already followed, moved up so that the enquiry follows it
+	 * too. Without this the pre-check would refuse every name this environment
+	 * would have found. */
+	if (e == ENOENT) {
+		const size_t n = slen(at->rel);
+		int has_suffix = 0;
+		for (size_t i = n; i > 0; i--) {
+			if (at->rel[i - 1] == '/') break;
+			if (at->rel[i - 1] == '.') { has_suffix = 1; break; }
+		}
+		if (!has_suffix && n + 4 < sizeof at->rel) {
+			at->rel[n + 0] = '.'; at->rel[n + 1] = 'e';
+			at->rel[n + 2] = 'x'; at->rel[n + 3] = 'e'; at->rel[n + 4] = 0;
+			if (startable(at->base, at->rel) == 0) return 0;
+			at->rel[n] = 0;                       /* put the name back */
+		}
+	}
+#endif
+	return e;
+}
 
 /* --- what the started program's three streams are -------------------------- */
 
@@ -179,11 +265,27 @@ int __posix_spawn(pid_t* restrict res, const char* restrict path,
 	if (!res || !path) return EINVAL;
 	if (attr && (attr->__flags & ~(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK)))
 		return ENOSYS;
+	/* ⚠️ musl carries the PATH SEARCH in this field: `posix_spawnp' stores
+	 * `__execvpe' there and its `posix_spawn' calls it in the duplicate instead
+	 * of `execve'. This file replaces that duplicate, so the field was read by
+	 * nobody --- and `posix_spawnp("sh", …)' therefore started `./sh', failed,
+	 * and REPORTED SUCCESS. The search is performed by `__posix_spawnp' below
+	 * and never arrives here, so a function found in this field now is one this
+	 * file does not know how to honour, and is refused rather than ignored. */
+	if (attr && attr->__fn) return ENOSYS;
 
 	struct okm_at at;
 	{
 		const long r = okm_resolve(AT_FDCWD, path, &at, 0);
 		if (r) return (int)-r;
+	}
+
+	/* Before anything is locked or opened, because a name that cannot be
+	 * started needs no cleanup and a caller searching a PATH needs the answer
+	 * more than it needs anything else this function does. */
+	{
+		const int e = startable_name(&at);
+		if (e) return e;
 	}
 
 	const int argc = count(argv);
@@ -326,36 +428,20 @@ int __posix_spawn(pid_t* restrict res, const char* restrict path,
 	                          e_ptr, e_len, (kal_uintptr)envc,
 	                          &streams, &child);
 
-#ifdef _WIN32
-	/* The one place where this environment's naming of a program differs from
-	 * the naming this interface presents.
+	/* ⭐ THE ONE ENVIRONMENT THAT SPELLS A PROGRAM WITH A SUFFIX IS ANSWERED
+	 * BEFORE THIS POINT AND NOT AFTER IT.
 	 *
-	 * A program here is a file whose name ends in a particular suffix, and a
-	 * caller of this interface names programs the way this interface's callers
-	 * name them --- without one. Every C library for this environment resolves
-	 * that difference, and it is resolved here rather than beneath, because
-	 * openkal is deliberately literal about names: it passes on the name it was
-	 * given and does not know that a program is a kind of file.
+	 * A program there is a file whose name ends in a particular suffix, and a
+	 * caller of this interface names programs without one; the difference is
+	 * resolved here rather than beneath, because openkal is deliberately
+	 * literal about names and does not know that a program is a kind of file.
 	 *
-	 * It is tried second rather than first, so a file that genuinely bears the
-	 * name is preferred to one that bears the name and the suffix. */
-	if (e == kal_err_not_found) {
-		const size_t n = slen(at.rel);
-		int has_suffix = 0;
-		for (size_t i = n; i > 0; i--) {
-			if (at.rel[i - 1] == '/') break;
-			if (at.rel[i - 1] == '.') { has_suffix = 1; break; }
-		}
-		if (!has_suffix && n + 4 < sizeof at.rel) {
-			at.rel[n + 0] = '.'; at.rel[n + 1] = 'e';
-			at.rel[n + 2] = 'x'; at.rel[n + 3] = 'e'; at.rel[n + 4] = 0;
-			e = okm_process_spawn(at.base, at.rel, n + 4,
-			                      a_ptr, a_len, (kal_uintptr)argc,
-			                      e_ptr, e_len, (kal_uintptr)envc,
-			                      &streams, &child);
-		}
-	}
-#endif
+	 * ⚠️ It used to be resolved by RETRYING the spawn on `kal_err_not_found'.
+	 * That cannot stay: the enquiry added above refuses an absent name before
+	 * the spawn is reached, so the retry would never run and every suffixless
+	 * name on that environment would be refused. `startable_name' therefore
+	 * owns the choice, keeps the same order --- the bare name first --- and
+	 * rewrites `at.rel' so that what was asked about is what is started. */
 
 	/* ⭐ THE FILES A FILE ACTION OPENED ARE RELEASED HERE, AND THE STARTED
 	 * PROGRAM KEEPS ITS STREAM.
@@ -379,3 +465,90 @@ int __posix_spawn(pid_t* restrict res, const char* restrict path,
 }
 
 weak_alias(__posix_spawn, posix_spawn);
+
+/* --- starting a program named without a path -------------------------------
+ *
+ * The third of musl's own sources this port replaces, and it is replaced
+ * because the second one was.
+ *
+ * musl does not search a PATH here. It stores `__execvpe' in the attributes and
+ * lets its `posix_spawn' call that IN THE DUPLICATE instead of `execve', so the
+ * search happens inside a program that has already been started. This port has
+ * no duplicate to run it in --- `__posix_spawn' translates a spawn into
+ * `kal_process_spawn' --- so the field was read by nobody and the name was
+ * taken as a path relative to the working directory. `posix_spawnp("sh", …)'
+ * started `./sh', which is not there, and reported SUCCESS.
+ *
+ * ⇒ The search is performed here, one `__posix_spawn' per entry, which is the
+ * arrangement musl's own `__execvpe' uses one `execve' per entry for. It works
+ * for the same reason that one now works: `__posix_spawn' reports a name it
+ * cannot start rather than starting something that ends with 127.
+ *
+ * The rules are musl's, so that a program moved onto this port meets the answer
+ * it met before: a name containing a separator is not searched for; an empty
+ * entry means the working directory; `EACCES' anywhere is remembered and
+ * reported only if nothing is found; and any other error ends the search at
+ * once, because it is not evidence about the next entry.
+ *
+ * ⚠️ INCLUDING THE ENTRY SEPARATOR, WHICH IS A COLON ON EVERY TARGET AND IS THE
+ * WRONG ONE FOR EXACTLY ONE OF THEM.
+ *
+ * One environment separates its own PATH with a semicolon and begins each entry
+ * with a volume letter and a colon, so a colon-separated reading of its PATH
+ * produces entries that are not names. The reason it is still a colon here is
+ * that `execvp' --- which this port does NOT replace, and which reaches
+ * `execve' --- splits on a colon in musl's own source. Splitting differently in
+ * this function would make the two ways of searching for one program disagree
+ * with each other, which is a worse thing for a caller to meet than one that is
+ * wrong in a way both share. Recorded in musl/PATCHES.md; the CI row for that
+ * environment declares no shell, so nothing there searches a PATH today. */
+int __posix_spawnp(pid_t* restrict res, const char* restrict file,
+                   const posix_spawn_file_actions_t* fa,
+                   const posix_spawnattr_t* restrict attr,
+                   char* const argv[restrict], char* const envp[restrict])
+{
+	if (!res || !file) return EINVAL;
+	if (!*file) return ENOENT;
+
+	for (const char* s = file; *s; s++)
+		if (*s == '/') return __posix_spawn(res, file, fa, attr, argv, envp);
+
+	const char* path = getenv("PATH");
+	/* musl's own default, and it is here for the same reason it is there: a
+	 * program that never set PATH still has somewhere to be looked for. */
+	if (!path) path = "/usr/local/bin:/bin:/usr/bin";
+
+	const size_t k = slen(file);
+	if (k > NAME_MAX) return ENAMETOOLONG;
+
+	/* ⚠️ ON THE STACK, WHICH IS WHAT musl DOES TOO (a variable-length array of
+	 * the same bound). The static buffers above are under this file's lock and
+	 * this function runs before it is taken --- a static here would be a race
+	 * between two contexts searching at once, which is worse than a frame. */
+	char cand[OKM_MAX_PATH];
+	int seen_eacces = 0;
+
+	for (const char* p = path; ; ) {
+		const char* z = p;
+		while (*z && *z != ':') z++;
+		const size_t n = (size_t)(z - p);
+		/* An entry that cannot be joined to the name is skipped rather than
+		 * truncated: a truncated name is a different name and might exist. */
+		if (n + (n ? 1 : 0) + k + 1 <= sizeof cand) {
+			size_t o = 0;
+			for (size_t i = 0; i < n; i++) cand[o++] = p[i];
+			if (o) cand[o++] = '/';
+			for (size_t i = 0; i <= k; i++) cand[o + i] = file[i];
+
+			const int e = __posix_spawn(res, cand, fa, attr, argv, envp);
+			if (!e) return 0;
+			if (e == EACCES) seen_eacces = 1;
+			else if (e != ENOENT && e != ENOTDIR) return e;
+		}
+		if (!*z) break;
+		p = z + 1;
+	}
+	return seen_eacces ? EACCES : ENOENT;
+}
+
+weak_alias(__posix_spawnp, posix_spawnp);

@@ -545,6 +545,174 @@ int main(int argc, char** argv)
 		failures += 2;
 	}
 
+	/* --- what a copy of this image calls itself -------------------------------- */
+
+	if (expect_fork) {
+		/* ⚠️⚠️ EVERY CONTEXT USED TO ANSWER 1, SO A COPY REPORTED THE IDENTIFIER
+		 * OF THE IMAGE IT WAS COPIED FROM. Two contexts, one answer, and no way
+		 * for the copy to name itself --- a program writing its own identifier
+		 * where something else would read it (a lock file, the name of a
+		 * temporary, a line of a log) wrote a value naming something else.
+		 *
+		 * ⭐ THE NUMBER BOTH SIDES ALREADY AGREE ON is the one `fork' returns to
+		 * the parent, so that is what the copy is told. It has to exist BEFORE
+		 * the copy is taken, which is why okm_fork.c reserves the table entry
+		 * above `kal_space_start' rather than recording it below. */
+		int tell[2];
+		check(pipe(tell) == 0, "a copy can be asked what it calls itself");
+		const pid_t named = fork();
+		if (named == 0) {
+			char m[32];
+			const int n = snprintf(m, sizeof m, "%ld", (long)getpid());
+			(void)!write(tell[1], m, (size_t)(n > 0 ? n : 0));
+			_exit(0);
+		}
+		close(tell[1]);
+		char got[32];
+		memset(got, 0, sizeof got);
+		(void)!read(tell[0], got, sizeof got - 1);
+		close(tell[0]);
+		int st_named = 0;
+		waitpid(named, &st_named, 0);
+		const long said = atol(got);
+		if (said != (long)named)
+			printf("   the parent was given %ld and the copy said %ld\n",
+			       (long)named, said);
+		check(named > 0 && said == (long)named,
+		      "and it names the identifier its parent was given, not its parent's");
+
+		/* ⚠️ THE GUARD THIS CHANGE NEEDS, AND IT IS NOT A CRITERION --- it holds
+		 * before the change as well. `kill' decides "this program itself" by
+		 * comparing against the identifier, and that comparison was against the
+		 * constant 1. Carrying an identifier into a copy without moving the
+		 * comparison would make `raise' --- and therefore `abort', and therefore
+		 * every uncaught exception --- report ESRCH in every copy. */
+		const pid_t dying = fork();
+		if (dying == 0) abort();
+		int st_dying = 0;
+		waitpid(dying, &st_dying, 0);
+		int copy_ok = 0;
+		switch (expect_abort) {
+		case ABORT_SIGABRT:    copy_ok = WIFSIGNALED(st_dying)
+		                              && WTERMSIG(st_dying) == SIGABRT; break;
+		case ABORT_STATUS_134: copy_ok = WIFEXITED(st_dying)
+		                              && WEXITSTATUS(st_dying) == 134; break;
+		default:               copy_ok = WIFSIGNALED(st_dying); break;
+		}
+		if (!copy_ok)
+			printf("   abort in a copy: status=0x%x exited=%d code=%d signalled=%d\n",
+			       (unsigned)st_dying, WIFEXITED(st_dying), WEXITSTATUS(st_dying),
+			       WIFSIGNALED(st_dying));
+		check(copy_ok, "and a copy that ends itself abnormally still does so");
+	}
+
+	/* --- a program that CANNOT be started ------------------------------------- */
+
+	/* ⭐⭐ THE QUESTION THIS FILE NEVER ASKED, AND THE ONE A CONSUMER LOST NINE
+	 * TESTS TO.
+	 *
+	 * Every observation above starts a program that is there. None asked what
+	 * happens when the name names nothing --- and the answer was that
+	 * `kal_process_spawn' duplicates and replaces, so the replacement fails
+	 * INSIDE THE DUPLICATE, which ends with 127 and tells nobody. `posix_spawn'
+	 * reported success. `execve' waited for the duplicate, read 127, and ENDED
+	 * THE CALLING PROGRAM with it.
+	 *
+	 * ⚠️ WHICH BREAKS EVERY SEARCH FOR A PROGRAM BY NAME. musl's `execvp'
+	 * issues one `execve' per PATH entry and needs it to RETURN so it can try
+	 * the next; here it did not return at all, so the first entry that missed
+	 * was the end. A consumer measured `bwrap' --- installed at /usr/bin/bwrap
+	 * --- being reported as not installed. */
+
+	errno = 0;
+	{
+		pid_t absent_pid = -1;
+		char* av[] = { (char*)"no-such-program", NULL };
+		char* ev[] = { NULL };
+		const int e = posix_spawn(&absent_pid, "/no-such-program-here", NULL, NULL,
+		                          av, ev);
+		check(e == ENOENT,
+		      "starting a program that is not there reports that, rather than success");
+		if (e == 0) { int s; waitpid(absent_pid, &s, 0); failures++; }
+	}
+
+	{
+		/* POSIX names this one separately, and `execvp' continues its search on
+		 * it exactly as it does on ENOENT. */
+		pid_t dir_pid = -1;
+		char* av[] = { (char*)".", NULL };
+		char* ev[] = { NULL };
+		const int e = posix_spawn(&dir_pid, ".", NULL, NULL, av, ev);
+		check(e == EACCES, "and naming a directory is refused as a directory");
+		if (e == 0) { int s; waitpid(dir_pid, &s, 0); failures++; }
+	}
+
+	/* ⚠️ CALLED IN THIS PROGRAM AND NOT IN A COPY, DELIBERATELY. What is being
+	 * observed is that `execve' RETURNS; a version that does not return ends
+	 * this program at 127, and the probe runner reports a program that stopped
+	 * without a count of failures --- which is the loudest reading available and
+	 * is the correct one, because a caller of `execvp' cannot survive it either. */
+	{
+		char* av[] = { (char*)"no-such-program", NULL };
+		char* ev[] = { NULL };
+		errno = 0;
+		const int r = execve("/no-such-program-here", av, ev);
+		check(r == -1 && errno == ENOENT,
+		      "replacing this image with a program that is not there returns, with a reason");
+	}
+
+	/* --- and a program found by searching a PATH ------------------------------ */
+
+	if (expect_shell) {
+		/* The first entry misses. That is the whole point: the search has to
+		 * survive it, and until now it could not. */
+		/* ⚠️ COPIED WITH A LENGTH THAT IS THE VALUE'S RATHER THAN A BUFFER'S.
+		 * `getenv' answers a pointer INTO the environment and `setenv' below may
+		 * move it, so the old value has to be kept somewhere --- and a fixed
+		 * buffer would silently truncate on a machine whose PATH is long, which
+		 * continuous-integration machines are. A truncated PATH restored at the
+		 * end is a probe quietly corrupting the environment of whatever it adds
+		 * next. */
+		const char* saved_path = getenv("PATH");
+		char* keep = NULL;
+		if (saved_path) {
+			keep = malloc(strlen(saved_path) + 1);
+			check(keep != NULL, "the PATH this program was started with can be kept");
+			if (keep) strcpy(keep, saved_path);
+		}
+		setenv("PATH", "/no-such-directory:/bin:/usr/bin", 1);
+
+		pid_t sp = -1;
+		char* av[] = { (char*)"sh", (char*)"-c", (char*)"exit 23", NULL };
+		const int e = posix_spawnp(&sp, "sh", NULL, NULL, av, environ);
+		check(e == 0, "a program named without a path is found by searching PATH");
+		if (e == 0) {
+			int s = 0;
+			check(waitpid(sp, &s, 0) == sp && WIFEXITED(s) && WEXITSTATUS(s) == 23,
+			      "and it is the program that was searched for");
+		} else {
+			failures++;
+		}
+
+		if (expect_fork) {
+			/* The same search, through the route musl writes it: one `execve'
+			 * per entry, in a copy, relying on each one returning. */
+			const pid_t vp = fork();
+			if (vp == 0) {
+				char* cav[] = { (char*)"sh", (char*)"-c", (char*)"exit 29", NULL };
+				execvp("sh", cav);
+				_exit(97);        /* the search gave up: 97, not 127 */
+			}
+			int s = 0;
+			check(vp > 0 && waitpid(vp, &s, 0) == vp
+			      && WIFEXITED(s) && WEXITSTATUS(s) == 29,
+			      "and the same search performed by execvp survives its first miss");
+		}
+
+		if (keep) { setenv("PATH", keep, 1); free(keep); }
+		else      unsetenv("PATH");
+	}
+
 	printf("-- failures: %d --\n", failures);
 	return failures ? 1 : 0;
 }
