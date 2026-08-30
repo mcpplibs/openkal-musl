@@ -562,7 +562,15 @@ static void to_timespec(kal_duration ns, struct timespec* ts)
  * others --- which is the kind of program that meets it --- and because each
  * entry is three words. */
 #define OKM_MAX_CHILD 256
-static struct { int used; int pid; struct kal_process h; } g_child[OKM_MAX_CHILD];
+/* ⭐ AND THE UNIT THAT START FORMED, WHICH IS THE ONLY PLACE IT CAN LIVE.
+ * A caller ends a group by naming a negative identifier; openkal names a unit by
+ * a handle whose meaning is the implementation's. The two are related here and
+ * nowhere else --- openkal deliberately offers no way to recover a unit from a
+ * program, because an implementation that had to keep a table to answer that
+ * would be the defect clause 7.1 describes. This library is not an
+ * implementation of openkal; keeping what it was GIVEN is bookkeeping, not
+ * recovery. */
+static struct { int used; int pid; struct kal_process h; struct kal_job job; int has_job; } g_child[OKM_MAX_CHILD];
 static int g_next_pid = 1000;
 
 /* ⭐ WHAT THIS PROGRAM ANSWERS WHEN ASKED WHO IT IS.
@@ -577,6 +585,15 @@ static int g_next_pid = 1000;
  * it, which is the one number both sides already agree on --- the parent's
  * `fork' returned it. */
 static int g_self_pid = 1;
+
+/* The unit this program formed, if it did. ⚠️ KEPT BECAUSE THE NUMBER A CALLER
+ * WILL LATER USE IS NOT THE HANDLE: `kill(-n)' names a group by a POSIX
+ * identifier, and openkal's unit is a handle whose meaning belongs to the
+ * implementation. One per program, which is what one `setpgid(0, 0)' forms, so
+ * this is a word and not a table --- and a copy made by `fork' carries it, which
+ * is what lets a copy form the unit and its parent end it. */
+static struct kal_job g_job;
+static int            g_job_held;
 
 void __okm_set_self_pid(int pid) { g_self_pid = pid; }
 
@@ -598,6 +615,8 @@ int __okm_child_reserve(int* pid_out)
 		g_child[i].used = 1;
 		g_child[i].pid = ++g_next_pid;
 		g_child[i].h = (struct kal_process){ 0 };
+		g_child[i].job = (struct kal_job){ 0 };
+		g_child[i].has_job = 0;
 		if (pid_out) *pid_out = g_child[i].pid;
 		return i;
 	}
@@ -609,20 +628,48 @@ void __okm_child_commit(int slot, struct kal_process h)
 	if (slot >= 0 && slot < OKM_MAX_CHILD) g_child[slot].h = h;
 }
 
+/* The unit a start formed for this child, recorded so that a later `kill(-n)'
+ * can name it. Separate from the commit above because a start forms a unit only
+ * when the caller asked for one. */
+void __okm_child_job(int slot, struct kal_job j)
+{
+	if (slot >= 0 && slot < OKM_MAX_CHILD && j.h != 0) {
+		g_child[slot].job = j;
+		g_child[slot].has_job = 1;
+	}
+}
+
 void __okm_child_release(int slot)
 {
+	/* ⚠️ THE UNIT IS NOT RELEASED WITH THE PROGRAM, AND THAT IS THE POINT OF IT.
+	 * A group outlives the program that formed it for exactly as long as it has
+	 * members --- which is the case a caller uses a unit FOR: the shell exits
+	 * immediately and the work it put in the background is what a timeout has to
+	 * reach. Clearing this on the wait made `kill(-n)' answer ESRCH the moment
+	 * the shell was reaped, which is a fraction of a second before every caller
+	 * that wants it. Measured: the background work survived.
+	 *
+	 * The slot is free for a new program; the number and its unit stay until
+	 * that slot is taken again. */
 	if (slot >= 0 && slot < OKM_MAX_CHILD) g_child[slot].used = 0;
 }
 
-int __okm_child_record(struct kal_process h)
+int __okm_child_record_job(struct kal_process h, struct kal_job j)
 {
 	okm_lock();
 	int pid = 0;
 	const int slot = __okm_child_reserve(&pid);
 	if (slot < 0) { okm_unlock(); return -EAGAIN; }
 	__okm_child_commit(slot, h);
+	__okm_child_job(slot, j);
 	okm_unlock();
 	return pid;
+}
+
+int __okm_child_record(struct kal_process h)
+{
+	const struct kal_job none = { 0 };
+	return __okm_child_record_job(h, none);
 }
 
 /* ⚠️ A COPY OF THE CALLING IMAGE INHERITS THIS TABLE AND MUST NOT KEEP IT.
@@ -645,6 +692,15 @@ static int child_index(int pid)
 {
 	for (int i = 0; i < OKM_MAX_CHILD; i++)
 		if (g_child[i].used && g_child[i].pid == pid) return i;
+	return -1;
+}
+
+/* The unit a program formed, which is looked up WITHOUT requiring the program to
+ * still be running --- see __okm_child_release. */
+static int job_index(int pid)
+{
+	for (int i = 0; i < OKM_MAX_CHILD; i++)
+		if (g_child[i].has_job && g_child[i].pid == pid) return i;
 	return -1;
 }
 
@@ -1813,6 +1869,37 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		const int e = __okm_spawn_common(&child, (const char*)a1, 0, 0,
 		                                 (char* const*)a2, (char* const*)a3, 1);
 		if (e) return -e;
+
+		/* ⚠️⚠️ THE WAITER LETS GO OF EVERY STREAM IT HOLDS, AND WITHOUT THIS THE
+		 * FAR END OF A PIPE NEVER SAW THE END OF INPUT.
+		 *
+		 * A replacement leaves ONE image. This composition leaves two, and the
+		 * one that remains still holds every file description the caller had ---
+		 * including the write end of a pipe it had just placed at the started
+		 * program's standard output. A pipe reports the end of input when the
+		 * LAST writer lets go, so as long as this waiter sat there, the reader on
+		 * the other side saw a stream that was still open, from a program that
+		 * had already ended.
+		 *
+		 * ⭐ Measured through a consumer: an MCP server that exits while a
+		 * request is in flight should be reported as "Connection closed", and was
+		 * reported as "Timed out after 1000ms" --- the client waited its full
+		 * deadline for an end of input that this image was holding shut. The
+		 * server was long gone; nobody was writing; the pipe stayed open because
+		 * of a waiter neither side knew existed.
+		 *
+		 * ⚠️ THIS IS THE 0.10 DEFECT'S THIRD FACE. `kal_process_spawn_bound' was
+		 * added because a SIGNAL reached the middle image; this is the middle
+		 * image holding a RESOURCE. Both come from the same fact --- the
+		 * composition has an image the interface never told anyone about --- and
+		 * both are fixed by making that image as invisible as it claims to be.
+		 *
+		 * ⇒ Safe because this image does exactly two things afterwards: wait, and
+		 * end with a status. The started program received what it needed at the
+		 * spawn; the descriptors here are this image's own references and nothing
+		 * reads them again. */
+		__okm_close_all_for_exec();
+
 		int st = 0;
 		if (do_wait4((int)child, &st, 0, 0) < 0) kal_exit(127);
 		/* The status the started program ended with, in the form this library
@@ -1824,6 +1911,31 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 #ifdef SYS_kill
 	case SYS_kill: {
 		const int pid = (int)a1, sig = (int)a2;
+		/* ⭐⭐ A NEGATIVE IDENTIFIER NAMES A UNIT, AND THIS IS THE OTHER HALF OF
+		 * `setpgid(0, 0)' ABOVE.
+		 *
+		 * `kill(-n)' is how a caller ends a group, and the identifier it uses is
+		 * the one `setpgid' gave it --- either this program's, or a child's whose
+		 * copy formed the unit. Both reach the unit this library holds, because
+		 * a program forms at most one and a copy carries its parent's.
+		 *
+		 * ⚠️ WITHOUT THIS THE FORMING WOULD BE INVISIBLE. That is the shape of
+		 * the two defects before it: a call that succeeds and changes nothing
+		 * observable is worse than one that refuses, because the caller proceeds.
+		 * `kill(-n)' answered ESRCH here while the unit existed. */
+		if (pid < 0 && pid != -1) {
+			const int gi = job_index(-pid);
+			if (gi >= 0 && g_child[gi].has_job) {
+				if (sig == 0) return 0;
+				const int e = okm_process_job_terminate(g_child[gi].job);
+				return e == kal_ok ? 0 : -okm_errno(e);
+			}
+			if (g_job_held) {
+				if (sig == 0) return 0;
+				const int e = okm_process_job_terminate(g_job);
+				return e == kal_ok ? 0 : -okm_errno(e);
+			}
+		}
 		const int i = child_index(pid);
 		if (i >= 0) {
 			/* ⚠️ SIGNAL ZERO IS AN ENQUIRY AND USED TO TERMINATE THE CHILD.
@@ -2108,13 +2220,35 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_getsid:
 		return (a1 == 0 || a1 == g_self_pid) ? g_self_pid : -ESRCH;
 
-	/* Naming this program, or naming nobody, asks for the arrangement that
-	 * already holds. Naming anything else asks for a group this environment
-	 * cannot name, which is EPERM rather than ENOSYS: the operation is here,
-	 * the group is not. */
+	/* ⭐⭐ A REAL GROUP SINCE 0.12, AND IT IS THE CALL A SHELL RUNNER MAKES.
+	 *
+	 * `setpgid(0, 0)' asks that THIS program lead a unit of its own, which
+	 * openkal 0.11 spells `kal_process_job_enter'. It used to answer 0 and form
+	 * nothing --- true in a world with no groups, since a program is then
+	 * trivially alone --- and the caller's next act, `kill(-pid)', found nothing
+	 * to kill.
+	 *
+	 * ⚠️ THE UNIT IS KEPT, BECAUSE THE NUMBER THE CALLER WILL USE IS NOT ENOUGH.
+	 * A caller ends a group by naming a negative identifier, and openkal's unit
+	 * is a handle whose meaning is the implementation's --- a process group's
+	 * identifier on one system, a job object on another. `g_job' is where this
+	 * library remembers which unit `setpgid' formed, so that `kill(-n)' below can
+	 * name it. One unit per program, which is what one `setpgid(0, 0)' forms.
+	 *
+	 * Naming another program's group is still refused: openkal cannot put a
+	 * program into a unit it does not lead, and EPERM says the operation is here
+	 * while the group is not. */
 	case SYS_setpgid:
-		if ((a1 == 0 || a1 == (syscall_arg_t)g_self_pid)
-		    && (a2 == 0 || a2 == (syscall_arg_t)g_self_pid)) return 0;
+		if (a1 != 0 && a1 != (syscall_arg_t)g_self_pid) return -EPERM;
+		if (a2 == 0 || a2 == (syscall_arg_t)g_self_pid) {
+			struct kal_job unit = { 0 };
+			const int e = okm_process_job_enter(&unit);
+			if (e == kal_ok) { g_job = unit; g_job_held = 1; return 0; }
+			/* An environment with no units leaves a program trivially alone in
+			 * one, which is what this used to assert unconditionally. */
+			if (e == kal_err_not_supported) return 0;
+			return -okm_errno(e);
+		}
 		return -EPERM;
 	case SYS_setsid:
 		return -EPERM;   /* already a process group leader; see above */

@@ -521,3 +521,25 @@ int okm_absolute(int dirfd, const char* path, char* out, size_t cap)
 	if (d->path_slot < 0 || !g_dirpath[d->path_slot][0]) return -ENOENT;
 	return join(g_dirpath[d->path_slot], path, out, cap);
 }
+
+/* Every stream this image holds, released --- used by the one place that has an
+ * image with nothing left to do.
+ *
+ * ⚠️⚠️ IT EXISTS BECAUSE `execve' HERE LEAVES AN IMAGE BEHIND. A replacement
+ * leaves one image; this library composes it as start, wait, end, which leaves
+ * two --- and the second still holds every file description the caller had. A pipe
+ * reports the end of input when the LAST writer lets go, so a waiter holding the
+ * write end kept a reader on the other side waiting for a program that had
+ * already ended. Measured through a consumer: a server that exits mid-request was
+ * reported as a timeout rather than as a closed connection.
+ *
+ * ⚠️ NOT A GENERAL `close everything'. The standard streams are released too,
+ * which is right HERE and wrong anywhere else: this image writes nothing more.
+ * The one caller is the `execve' composition, immediately before it waits. */
+void __okm_close_all_for_exec(void)
+{
+	okm_lock();
+	for (int fd = 0; fd < OKM_MAX_FD; fd++)
+		if (g_fd[fd].desc >= 0) okm_fd_release(fd);
+	okm_unlock();
+}

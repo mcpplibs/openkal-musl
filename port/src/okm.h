@@ -161,6 +161,11 @@ void okm_unlock(void);
 /* The table. */
 int  okm_fd_alloc(int from);                     /* the lowest free descriptor */
 void okm_fd_release(int fd);
+
+/* Every stream this image holds, released. The one caller is the `execve'
+ * composition, whose waiting image must not keep a pipe open on behalf of a
+ * program that has already ended --- see the definition. */
+void __okm_close_all_for_exec(void);
 struct okm_desc* okm_desc_of(int fd);
 int  okm_fd_bind(int fd, int kind, kal_uintptr stream,
                  struct kal_file file, struct kal_dir dir, int flags);
