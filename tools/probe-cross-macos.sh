@@ -71,10 +71,22 @@ cflags=(-std=c99 -D_XOPEN_SOURCE=700 -DOKM_MUSL_INTERNAL=1
 
 cd "$here"
 
-# The configured source set: musl's own rule, minus the nine this port replaces,
+# The configured source set: musl's own rule, minus the ten this port replaces,
 # minus the one this system's build excludes. Keeping this list in step with
 # mcpp.toml is what makes question 2's answer the configured one.
-skip='__libc_start_main|__init_tls|__set_thread_area|clone|posix_spawn|mmap|syscall_ret|getcwd|dl_iterate_phdr|okm_phdr|cache'
+#
+# ⚠️⚠️ AND `posix_spawnp' IS NAMED SEPARATELY, WHICH IS NOT REDUNDANT. The match
+# is anchored on the whole basename, so `posix_spawn' does NOT cover
+# `posix_spawnp.c' --- and when that source became the tenth this port replaces,
+# this list said nothing and the link reported
+#
+#     ld64.lld: error: duplicate symbol: _posix_spawnp
+#
+# ⭐ Which is the whole reason this list carries the warning it does: it is a
+# SECOND statement of what mcpp.toml already states, and a second statement is
+# a thing that falls behind the first. It fell behind on the release that added
+# the tenth entry, and it is this job that said so.
+skip='__libc_start_main|__init_tls|__set_thread_area|clone|posix_spawn|posix_spawnp|mmap|syscall_ret|getcwd|dl_iterate_phdr|okm_phdr|cache'
 units=0
 for f in musl/src/*/*.c musl/src/malloc/mallocng/*.c port/src/*.c port/src/*.S; do
     base=$(basename "$f"); base=${base%.*}

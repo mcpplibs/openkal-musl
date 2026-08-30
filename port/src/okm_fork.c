@@ -148,10 +148,17 @@ syscall_arg_t __okm_fork(void)
 	/* ⚠️ THE ENTRY IS TAKEN BEFORE THE CONTEXT EXISTS, so that the identifier
 	 * settled here is the one the copy reads out of its own copy of this global.
 	 * The lock this function already holds is the table's, which is what makes
-	 * reserving here safe and what makes a second acquisition wrong. */
-	int reserved_pid = 0;
-	const int slot = __okm_child_reserve(&reserved_pid);
+	 * reserving here safe and what makes a second acquisition wrong.
+	 *
+	 * ⚠️ `volatile', although both are written BEFORE the `setjmp' below and are
+	 * read only on the path that does not resume through it. That is enough to
+	 * be correct and is not enough to be obviously correct: this file's rule is
+	 * that a local live across that call says so, and a reader checking the rule
+	 * should not have to reconstruct which path reads which. */
+	int scratch = 0;
+	const volatile int slot = __okm_child_reserve(&scratch);
 	if (slot < 0) { okm_unlock(); return -EAGAIN; }
+	const volatile int reserved_pid = scratch;
 	g_carried_pid = reserved_pid;
 
 	/* ⚠️ NOTHING BELOW THIS LINE MAY READ A LOCAL VARIABLE THAT WAS WRITTEN

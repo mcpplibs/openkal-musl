@@ -543,7 +543,6 @@ static int g_next_pid = 1000;
 static int g_self_pid = 1;
 
 void __okm_set_self_pid(int pid) { g_self_pid = pid; }
-int  __okm_self_pid(void)        { return g_self_pid; }
 
 /* Takes an entry and settles its identifier WITHOUT a resource to put in it.
  *
@@ -1191,9 +1190,12 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		struct kal_node_info kind = { .self_size = sizeof kind };
 		const int ke = okm_fs_info(at.base, at.rel, slen(at.rel), 0,
 		                           KAL_INFO_KIND, &kind);
-		if (ke != kal_ok) return -okm_errno(ke);
-		if (kind.kind == kal_node_absent) return -ENOENT;
-		const kal_uintptr want = (kind.kind == kal_node_directory)
+		/* ⚠️ AN ENQUIRY THAT CANNOT BE MADE IS NOT AN ANSWER OF `NO', so a build
+		 * without `openkal.fs' asks for what the interface requires and lets the
+		 * open answer, exactly as it did before this enquiry was added. */
+		if (ke != kal_ok && ke != kal_err_not_supported) return -okm_errno(ke);
+		if (ke == kal_ok && kind.kind == kal_node_absent) return -ENOENT;
+		const kal_uintptr want = (ke == kal_ok && kind.kind == kal_node_directory)
 		                       ? KAL_OPEN_READ
 		                       : (KAL_OPEN_READ | KAL_OPEN_WRITE);
 

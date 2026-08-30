@@ -121,6 +121,14 @@ static int startable(struct kal_dir base, const char* rel)
 	struct kal_node_info info = { .self_size = sizeof info };
 	/* Resolves, because starting resolves. */
 	const int e = okm_fs_info(base, rel, slen(rel), 0, KAL_INFO_KIND, &info);
+	/* ⚠️ AN ENQUIRY THAT CANNOT BE MADE IS NOT AN ANSWER OF `NO'. A build
+	 * configured without `openkal.fs' --- OKM_HAS_FS=0, which a machine with no
+	 * storage is built with --- answers `not supported' here, and turning that
+	 * into a refusal would stop a spawn this port would otherwise have
+	 * attempted. The enquiry is an improvement on the failure that follows, not
+	 * a precondition of it: where it cannot be made, the spawn answers as it
+	 * did before this check existed. */
+	if (e == kal_err_not_supported) return 0;
 	if (e != kal_ok) return okm_errno(e);
 	if (info.kind == kal_node_absent) return ENOENT;
 	/* POSIX names this one: a directory is not a program, and `execve' upon one
