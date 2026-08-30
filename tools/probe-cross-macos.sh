@@ -86,7 +86,7 @@ cd "$here"
 # SECOND statement of what mcpp.toml already states, and a second statement is
 # a thing that falls behind the first. It fell behind on the release that added
 # the tenth entry, and it is this job that said so.
-skip='__libc_start_main|__init_tls|__set_thread_area|clone|posix_spawn|posix_spawnp|mmap|syscall_ret|getcwd|dl_iterate_phdr|okm_phdr|cache'
+skip='__libc_start_main|__init_tls|__set_thread_area|clone|posix_spawn|posix_spawnp|mmap|syscall_ret|getcwd|fcntl|dl_iterate_phdr|okm_phdr|cache'
 units=0
 for f in musl/src/*/*.c musl/src/malloc/mallocng/*.c port/src/*.c port/src/*.S; do
     base=$(basename "$f"); base=${base%.*}

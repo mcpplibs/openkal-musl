@@ -71,7 +71,7 @@ carry it in a `long`.
 
 ## The sources this port replaces, and why each
 
-Ten, and the list in the manifest carries the same reasons. Five read the shape
+Eleven, and the list in the manifest carries the same reasons. Five read the shape
 of one environment directly. Two carry a machine word through a variable
 declared `long`. Two more were found only by running the result. And one is
 replaced because another already was:
@@ -102,6 +102,40 @@ pointer: the value never becomes an integer at all.
 `src/unistd/getcwd.c` refuses an answer that does not begin with a separator.
 That is correct on every system musl was written for and is not correct on one
 that writes a volume first, and openkal does not say which a system does.
+
+⚠️⚠️ `src/fcntl/fcntl.c` is the THIRD of that kind, and it survived three releases
+of a port that already names the kind twice.
+
+It reads its variable argument as an `unsigned long`:
+
+    unsigned long arg;
+    arg = va_arg(ap, unsigned long);
+    case F_SETLK: return syscall(SYS_fcntl, fd, cmd, (void *)arg);
+
+which holds a pointer on every system musl was written for and thirty-two bits
+on one this port builds for. A caller passing a `struct flock *` had the top half
+of it discarded **before this port saw it**.
+
+⭐ **It was unreachable until 0.11.0**, which is why it survived. Every command
+this library answered took an integer, or took a pointer it never followed:
+`F_SETLK` returned 0 and did nothing, and then reported `ENOSYS`. A truncated
+pointer that nothing dereferences is a truncated pointer nothing reports. openkal
+0.10 gave this port a real lock, `F_SETLK` began following the pointer, and it
+faulted on the first attempt.
+
+⚠️ The register file names the type rather than the symptom:
+
+    page fault on read access to 0x00000000fe2ffec2
+    rax:00000000fe2ffec0   rsp:00007ffffe2fc7a0
+    movzxw 0x02(%rax), %eax
+
+`rax` is the caller's pointer with its top thirty-two bits gone, and the offset
+it faults at — two — is `l_whence`, the first field this port reads.
+
+⚠️ And the vararg TYPE is part of the calling convention rather than a detail:
+`va_arg(ap, unsigned long)` and `va_arg(ap, uintptr_t)` read different numbers of
+bytes where the two differ, so this is not a cast applied afterwards. Reading it
+as the narrower type has already lost the half by then.
 
 ## What has no equivalent on one object format
 

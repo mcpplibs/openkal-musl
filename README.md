@@ -76,8 +76,8 @@ architecture. Replacing that one header is the whole of the redirection; the
 
 `musl/PATCHES.md` lists the whole of what is not unmodified: **four patched
 lines**, all of one kind — a machine word carried through a variable declared
-`long`, which is not a machine word on one of the three targets — and **ten
-replaced sources**. Five of the ten are replaced for the same reason: each
+`long`, which is not a machine word on one of the three targets — and **eleven
+replaced sources**. Five of the eleven are replaced for the same reason: each
 reads the shape of one particular environment rather than asking a kernel for
 something.
 

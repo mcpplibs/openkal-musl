@@ -126,6 +126,14 @@ sources = [
   "!musl/src/mman/mmap.c",
   "!musl/src/internal/syscall_ret.c",
   "!musl/src/unistd/getcwd.c",
+  # ⚠️⚠️ THE THIRD SOURCE OF ONE KIND, AND IT WAS UNREACHABLE UNTIL 0.11.0.
+  # musl's `fcntl' reads its variable argument as an `unsigned long', which holds
+  # a pointer on every system musl was written for and thirty-two bits on one
+  # this port builds for --- so a `struct flock *' arrived with its top half
+  # gone. Every command answered before 0.11.0 took an integer or took a pointer
+  # nothing followed, so the truncation faulted nothing; a real `F_SETLK' follows
+  # it, and it faulted on the first attempt. Replaced by port/src/okm_fcntl.c.
+  "!musl/src/fcntl/fcntl.c",
   # Replaced by port/src/okm_phdr.c: musl answers this from the auxiliary
   # vector, which the replaced __libc_start_main does not read.
   "!musl/src/ldso/dl_iterate_phdr.c",
