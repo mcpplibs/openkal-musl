@@ -59,6 +59,10 @@
 #define okm_fs_rename        kal_fs_rename
 #define okm_fs_file_info     kal_fs_file_info
 #define okm_fs_set_modified  kal_fs_set_modified
+#define okm_fs_set_modified_at kal_fs_set_modified_at
+#define okm_fs_lock          kal_fs_lock
+#define okm_fs_unlock        kal_fs_unlock
+#define okm_fs_capacity      kal_fs_capacity
 #define okm_fs_list_begin    kal_fs_list_begin
 #define okm_fs_list_next     kal_fs_list_next
 
@@ -149,6 +153,14 @@ static inline int okm_fs_rename(struct kal_dir, const char*, kal_uintptr,
 static inline int okm_fs_file_info(struct kal_file, kal_u32,
                                    struct kal_node_info*) { return kal_err_not_supported; }
 static inline int okm_fs_set_modified(struct kal_file, kal_u64) { return kal_err_not_supported; }
+static inline int okm_fs_set_modified_at(struct kal_dir, const char*, kal_uintptr,
+                                         kal_u64) { return kal_err_not_supported; }
+static inline int okm_fs_lock(struct kal_file, kal_u64, kal_u64,
+                              kal_uintptr) { return kal_err_not_supported; }
+static inline int okm_fs_unlock(struct kal_file, kal_u64,
+                                kal_u64) { return kal_err_not_supported; }
+static inline int okm_fs_capacity(struct kal_dir, kal_u64*,
+                                  kal_u64*) { return kal_err_not_supported; }
 static inline int okm_fs_list_begin(struct kal_dir, kal_uintptr*) { return kal_err_not_supported; }
 static inline int okm_fs_list_next(struct kal_dir, kal_uintptr*, char*, kal_uintptr,
                                    kal_uintptr*, int*) { return kal_err_not_supported; }
@@ -158,6 +170,7 @@ static inline int okm_fs_list_next(struct kal_dir, kal_uintptr*, char*, kal_uint
 #if OKM_HAS_PROCESS
 
 #define okm_process_spawn     kal_process_spawn
+#define okm_process_spawn_bound kal_process_spawn_bound
 #define okm_process_wait      kal_process_wait
 #define okm_process_terminate kal_process_terminate
 #define okm_process_close     kal_process_close
@@ -193,6 +206,11 @@ static inline int okm_process_spawn(struct kal_dir, const char*, kal_uintptr,
                                     const char**, const kal_uintptr*, kal_uintptr,
                                     const struct kal_spawn_streams*,
                                     struct kal_process*) { return kal_err_not_supported; }
+static inline int okm_process_spawn_bound(struct kal_dir, const char*, kal_uintptr,
+                                    const char**, const kal_uintptr*, kal_uintptr,
+                                    const char**, const kal_uintptr*, kal_uintptr,
+                                    const struct kal_spawn_streams*,
+                                    struct kal_process*) { return kal_err_not_supported; }
 static inline int okm_process_wait(struct kal_process, int*,
                                    int*) { return kal_err_not_supported; }
 static inline int okm_process_terminate(struct kal_process) { return kal_err_not_supported; }
@@ -207,6 +225,13 @@ static inline void okm_process_close(struct kal_process) {}
 #define okm_task_yield kal_task_yield
 #define okm_task_wait  kal_task_wait
 #define okm_task_wake  kal_task_wake
+
+/* ⭐ WEAK, BECAUSE openkal 0.10 ADDED IT AND A BACKEND MAY NOT HAVE FOLLOWED.
+ * Every route in this port that reaches an optional operation tests the
+ * reference before calling; this one is reached from `sched_getaffinity', which
+ * a program asks once at startup and must not fault in. */
+extern __typeof(kal_task_parallelism) kal_task_parallelism __attribute__((__weak__));
+#define okm_task_parallelism kal_task_parallelism
 
 /* The identity of the execution context in progress. */
 #define OKM_CONTEXT_ID() kal_task_current()
@@ -252,6 +277,12 @@ static inline int okm_task_wake(const kal_u32*, kal_uintptr,
  * accurate answer for a machine that has one, and it keeps okm_context.c's
  * per-context table working unchanged rather than growing a second shape. */
 #define OKM_CONTEXT_ID() ((kal_uintptr)1)
+
+/* Where contexts are withheld there is exactly one, and this says so rather
+ * than refusing: a program sizing itself against one context on a machine that
+ * has one is sizing itself correctly. */
+static inline kal_uintptr okm_task_parallelism_absent(void) { return 1; }
+#define okm_task_parallelism okm_task_parallelism_absent
 
 #endif  /* OKM_HAS_TASK */
 
