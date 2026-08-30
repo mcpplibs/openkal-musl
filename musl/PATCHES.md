@@ -86,6 +86,15 @@ the working directory, and `posix_spawnp("sh", …)` started `./sh`, failed, and
 `__posix_spawn` per entry, by musl's own rules — and `__posix_spawn` now refuses
 an attribute function it does not recognise rather than ignoring one.
 
+⚠️ **Including musl's entry separator, which is a colon on every target and is
+the wrong one for exactly one of them.** One environment separates its own PATH
+with a semicolon and begins each entry with a volume letter and a colon, so
+reading that PATH on a colon produces entries that are not names. It is still a
+colon here because `execvp` — which this port does **not** replace — splits on
+one in musl's own source, and having the two ways of searching for one program
+disagree with each other is worse for a caller than having both wrong the same
+way. Nothing on that target searches a PATH today: its CI row declares no shell.
+
 `src/mman/mmap.c` returns a pointer through a `long`. It is replaced rather than
 patched because the replacement is also better where a `long` does hold a
 pointer: the value never becomes an integer at all.

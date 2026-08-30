@@ -488,7 +488,20 @@ weak_alias(__posix_spawn, posix_spawn);
  * it met before: a name containing a separator is not searched for; an empty
  * entry means the working directory; `EACCES' anywhere is remembered and
  * reported only if nothing is found; and any other error ends the search at
- * once, because it is not evidence about the next entry. */
+ * once, because it is not evidence about the next entry.
+ *
+ * ⚠️ INCLUDING THE ENTRY SEPARATOR, WHICH IS A COLON ON EVERY TARGET AND IS THE
+ * WRONG ONE FOR EXACTLY ONE OF THEM.
+ *
+ * One environment separates its own PATH with a semicolon and begins each entry
+ * with a volume letter and a colon, so a colon-separated reading of its PATH
+ * produces entries that are not names. The reason it is still a colon here is
+ * that `execvp' --- which this port does NOT replace, and which reaches
+ * `execve' --- splits on a colon in musl's own source. Splitting differently in
+ * this function would make the two ways of searching for one program disagree
+ * with each other, which is a worse thing for a caller to meet than one that is
+ * wrong in a way both share. Recorded in musl/PATCHES.md; the CI row for that
+ * environment declares no shell, so nothing there searches a PATH today. */
 int __posix_spawnp(pid_t* restrict res, const char* restrict file,
                    const posix_spawn_file_actions_t* fa,
                    const posix_spawnattr_t* restrict attr,
