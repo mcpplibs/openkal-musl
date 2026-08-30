@@ -148,7 +148,37 @@ static syscall_arg_t do_read(int fd, void* buf, size_t len)
 	 * result every caller of `read' already handles. */
 	const long held = okm_take_ahead(d, buf, len);
 	if (held == OKM_AHEAD_EOF) return 0;
-	if (held) return (syscall_arg_t)held;
+	if (held) {
+		/* ⚠️⚠️ AND WHATEVER ELSE IS ALREADY THERE, BECAUSE ONE BYTE ON ITS OWN
+		 * TURNED EVERY POLLED READ INTO A POLLED READ OF ONE BYTE.
+		 *
+		 * The enquiry takes a byte to make its answer true. Returning only that
+		 * byte is a legal short read --- and a caller that polls goes straight
+		 * back to `poll', which takes another byte, so the whole of a stream
+		 * arrives ONE BYTE PER ITERATION, for ever. Measured against the host,
+		 * on `echo one; sleep 0.4; echo two':
+		 *
+		 *     here    "o" "n" "e" "." "t" "w" "o" "."      eight chunks
+		 *     host    "one." "two."                        two
+		 *
+		 * ⚠️ Every byte is delivered and in order, so a caller that concatenates
+		 * sees the right bytes --- which is why this survived: the defect is
+		 * invisible to anyone who does not look at the BOUNDARIES. A caller that
+		 * scans a chunk for a word finds none, because `two' arrives as `t' and
+		 * `wo'. openkal-linux#13's first report said the program `only output
+		 * one byte', and this is that.
+		 *
+		 * ⭐ THE REMEDY IS THE OPERATION THE ENQUIRY ITSELF IS BUILT ON. A bound
+		 * of `now' asks for whatever has already arrived and does not wait, so
+		 * the byte and the rest of what is there come back together. Where the
+		 * environment beneath declines `openkal.timeout' there is no such
+		 * operation, and the single byte is what can be honestly returned. */
+		if (len > 1 && okm_can_bound()) {
+			const long more = okm_timed_read(s, (char*)buf + 1, len - 1, OKM_NOW_NS);
+			if (more > 0) return (syscall_arg_t)(held + more);
+		}
+		return (syscall_arg_t)held;
+	}
 
 	if (d->flags & O_NONBLOCK) return okm_timed_read(s, buf, len, OKM_NOW_NS);
 
