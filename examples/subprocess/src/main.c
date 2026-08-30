@@ -666,12 +666,19 @@ int main(int argc, char** argv)
 	if (expect_shell) {
 		/* The first entry misses. That is the whole point: the search has to
 		 * survive it, and until now it could not. */
+		/* ⚠️ COPIED WITH A LENGTH THAT IS THE VALUE'S RATHER THAN A BUFFER'S.
+		 * `getenv' answers a pointer INTO the environment and `setenv' below may
+		 * move it, so the old value has to be kept somewhere --- and a fixed
+		 * buffer would silently truncate on a machine whose PATH is long, which
+		 * continuous-integration machines are. A truncated PATH restored at the
+		 * end is a probe quietly corrupting the environment of whatever it adds
+		 * next. */
 		const char* saved_path = getenv("PATH");
-		char keep[1024];
-		keep[0] = 0;
+		char* keep = NULL;
 		if (saved_path) {
-			strncpy(keep, saved_path, sizeof keep - 1);
-			keep[sizeof keep - 1] = 0;
+			keep = malloc(strlen(saved_path) + 1);
+			check(keep != NULL, "the PATH this program was started with can be kept");
+			if (keep) strcpy(keep, saved_path);
 		}
 		setenv("PATH", "/no-such-directory:/bin:/usr/bin", 1);
 
@@ -702,8 +709,8 @@ int main(int argc, char** argv)
 			      "and the same search performed by execvp survives its first miss");
 		}
 
-		if (keep[0]) setenv("PATH", keep, 1);
-		else         unsetenv("PATH");
+		if (keep) { setenv("PATH", keep, 1); free(keep); }
+		else      unsetenv("PATH");
 	}
 
 	printf("-- failures: %d --\n", failures);
