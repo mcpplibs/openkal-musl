@@ -276,20 +276,49 @@ static int seed(struct kal_spawn_streams* s, int* placed)
  * `execve' that gets an unbound program is where this port has always been; a
  * caller that gets no program is worse. The difference is recorded in
  * musl/PATCHES.md and is what `KAL_PROCESS_PROP_BOUND_LIFETIME' is for. */
-static int start_program(int bound, struct okm_at* at,
+static int start_program(int bound, struct kal_job* unit, struct kal_dir work,
+                         struct okm_at* at,
                          const char** a_ptr, const kal_uintptr* a_len, int argc,
                          const char** e_ptr, const kal_uintptr* e_len, int envc,
                          struct kal_spawn_streams* streams,
                          struct kal_process* child)
 {
-	if (bound && (okm_process_props() & KAL_PROCESS_PROP_BOUND_LIFETIME)) {
-		const int e = okm_process_spawn_bound(at->base, at->rel, slen(at->rel),
-		                                      a_ptr, a_len, (kal_uintptr)argc,
-		                                      e_ptr, e_len, (kal_uintptr)envc,
-		                                      streams, child);
-		if (e != kal_err_not_supported) return e;
-	}
-	return okm_process_spawn(at->base, at->rel, slen(at->rel),
+	const kal_uintptr props = okm_process_props();
+
+	struct kal_spawn how;
+	how.base        = at->base;
+	/* ⭐ THE DIRECTORY THE PROGRAM RUNS IN, WHICH IS THIS LIBRARY'S OWN AND NOT
+	 * `base'. `base' is whichever preopen the program's NAME resolved under ---
+	 * for `/usr/bin/sh' that is the root --- and before openkal 0.11 it was the
+	 * only directory a spawn carried, so a started program ran wherever the
+	 * implementation happened to be. `chdir' moved what THIS library resolves
+	 * names against and nothing else, so a caller that chdir'd and then started a
+	 * program was the one who found out. */
+	how.work        = work;
+	/* ⭐ THE UNIT, WHICH IS WHAT `POSIX_SPAWN_SETPGROUP' MEANS HERE. A caller
+	 * that asked for it gets a `kal_job' whose identity the start establishes;
+	 * a backend that does not claim the position is given no unit at all rather
+	 * than a refusal, for the same reason the binding below is optional. */
+	how.job         = (unit && (props & KAL_PROCESS_PROP_JOB)) ? unit : 0;
+	how.grants      = 0;
+	how.grant_count = 0;
+	how.flags       = 0;
+
+	/* ⚠️ ASKED FOR ONLY WHERE IT IS MEANT, AND ONLY WHERE IT IS ANSWERED.
+	 *
+	 * `execve' is composed as starting a program and ending with its status, so
+	 * the binding is what makes the composition behave like the operation. An
+	 * ordinary `posix_spawn' means the opposite --- POSIX children outlive their
+	 * parents --- so `bound' is false there.
+	 *
+	 * A backend that does not claim a position gets the request WITHOUT it
+	 * rather than a refusal: a caller of `execve' that gets an unbound program is
+	 * where this port has always been, and a caller that gets no program at all
+	 * is worse. The same reasoning covers the job. */
+	if (bound && (props & KAL_PROCESS_PROP_BOUND_LIFETIME))
+		how.flags |= KAL_SPAWN_BOUND_LIFETIME;
+
+	return okm_process_spawn(&how, at->rel, slen(at->rel),
 	                         a_ptr, a_len, (kal_uintptr)argc,
 	                         e_ptr, e_len, (kal_uintptr)envc,
 	                         streams, child);
@@ -316,7 +345,22 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
                        int bound)
 {
 	if (!res || !path) return EINVAL;
-	if (attr && (attr->__flags & ~(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK)))
+	/* ⭐ `POSIX_SPAWN_SETPGROUP' IS HONOURED SINCE 0.12, AND ONLY IN THE ONE FORM
+	 * THIS PORT CAN MEAN.
+	 *
+	 * The attribute carries a group to join, and a caller that asks to join
+	 * SOMEBODY ELSE'S group is asking for a thing openkal has no way to say ---
+	 * `KAL_SPAWN_OWN_JOB' makes a program the start of its own unit and cannot
+	 * put it into an existing one. So a zero group, which is the spelling for
+	 * "a group of your own", is answered; a named group is still refused rather
+	 * than silently turned into a different one.
+	 *
+	 * ⚠️ That is exactly the case the consumer writes: `setpgid(0, 0)' in the
+	 * child so that a timeout can kill the whole tree. */
+	if (attr && (attr->__flags & ~(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK
+	                             | POSIX_SPAWN_SETPGROUP)))
+		return ENOSYS;
+	if (attr && (attr->__flags & POSIX_SPAWN_SETPGROUP) && attr->__pgrp != 0)
 		return ENOSYS;
 	/* ⚠️ musl carries the PATH SEARCH in this field: `posix_spawnp' stores
 	 * `__execvpe' there and its `posix_spawn' calls it in the duplicate instead
@@ -476,7 +520,21 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 	 * started program reads its own name through kal_env_arg(0), so a caller
 	 * that did not supply it could not predict what the program would read. */
 	struct kal_process child;
-	int e = start_program(bound, &at, a_ptr, a_len, argc,
+	/* ⚠️ THE UNIT IS THIS CALL'S, AND IT IS NOT KEPT ANYWHERE AFTERWARDS --- see
+	 * the note at the end of this function. */
+	struct kal_job unit = { 0 };
+	struct kal_job* want_unit =
+		(attr && (attr->__flags & POSIX_SPAWN_SETPGROUP)) ? &unit : 0;
+	/* ⭐ THE WORKING DIRECTORY IS THIS LIBRARY'S, AND THAT IS THE WHOLE FIX.
+	 *
+	 * `chdir' here moves `okm_cwd_dir' and nothing else, because openkal has no
+	 * operation that moves a running program's. Before 0.11 a spawn carried one
+	 * directory --- the one the program's NAME resolved under --- so a caller that
+	 * chdir'd and then started a program found the program running somewhere
+	 * else entirely. Passing it now closes that, and it closes the `fork' route
+	 * as well: a copy that chdir'd has its own `okm_cwd_dir', and the `execve'
+	 * it then performs reaches this line. */
+	int e = start_program(bound, want_unit, okm_cwd_dir, &at, a_ptr, a_len, argc,
 	                      e_ptr, e_len, envc, &streams, &child);
 
 	/* ⭐ THE ONE ENVIRONMENT THAT SPELLS A PROGRAM WITH A SUFFIX IS ANSWERED

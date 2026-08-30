@@ -170,7 +170,6 @@ static inline int okm_fs_list_next(struct kal_dir, kal_uintptr*, char*, kal_uint
 #if OKM_HAS_PROCESS
 
 #define okm_process_spawn     kal_process_spawn
-#define okm_process_spawn_bound kal_process_spawn_bound
 #define okm_process_wait      kal_process_wait
 #define okm_process_terminate kal_process_terminate
 #define okm_process_close     kal_process_close
@@ -201,12 +200,7 @@ static inline kal_uintptr okm_process_props(void)
 /* Nothing is provided, so nothing is claimed. */
 static inline kal_uintptr okm_process_props(void) { return 0; }
 
-static inline int okm_process_spawn(struct kal_dir, const char*, kal_uintptr,
-                                    const char**, const kal_uintptr*, kal_uintptr,
-                                    const char**, const kal_uintptr*, kal_uintptr,
-                                    const struct kal_spawn_streams*,
-                                    struct kal_process*) { return kal_err_not_supported; }
-static inline int okm_process_spawn_bound(struct kal_dir, const char*, kal_uintptr,
+static inline int okm_process_spawn(const struct kal_spawn*, const char*, kal_uintptr,
                                     const char**, const kal_uintptr*, kal_uintptr,
                                     const char**, const kal_uintptr*, kal_uintptr,
                                     const struct kal_spawn_streams*,
