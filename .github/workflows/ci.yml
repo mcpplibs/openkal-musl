@@ -75,7 +75,7 @@ jobs:
           # primitive that copies an address space and starts a context in the
           # copy, and inventing one would be the simulation clause 3.1
           # forbids. `--no-fork` asserts the refusal.
-          - { name: 'windows, gcc',  os: windows-2022, toolchain: 'gcc@16.1.0',  target: 'x86_64-windows-gnu', net: 'yes', fork: '--no-fork', shell: '--no-shell', abort: '--abort-terminated', dirtime: '--no-dir-time' }
+          - { name: 'windows, gcc',  os: windows-2022, toolchain: 'gcc@16.1.0',  target: 'x86_64-windows-gnu', net: 'yes', fork: '--no-fork', shell: '--no-shell', abort: '--abort-terminated', dirtime: '--dir-time'     }
     defaults:
       run:
         shell: bash
