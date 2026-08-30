@@ -152,16 +152,25 @@ and the first two were found by a consumer rather than here:
    the caller. What is still not answered is a name that exists and cannot be
    executed — openkal reports no execute permission, so that one still ends the
    caller with 127. Asked of openkal-linux, which knows and does not report it.
-2. **`kill` does not reach a program started this way.** After `fork` and
+2. **`kill` did not reach a program started this way.** After `fork` and
    `execve` there are three images, not two: the copy waits for the program it
-   started. A signal sent to the identifier the parent holds reaches the waiter,
-   which dies — and the parent is told the program died on that signal, while
-   the program runs to completion, unsupervised. Measured, with the host as
-   control: identical status words, opposite outcomes. **Not answered here.**
-   openkal has no way to say "this program's lifetime is bound to mine", and
-   `kal_process_terminate` is right to terminate only what it was given. Asked
-   of the specification. Until then a caller that needs to stop what it started
-   should use `posix_spawn`, `system` or `popen`, where `kill` does reach.
+   started, and a signal sent to the identifier the parent holds reached the
+   waiter. The parent was told the program died on that signal while the program
+   ran to completion, unsupervised. Measured, with the host as control:
+   identical status words, opposite outcomes.
+
+   ⚠️ **This entry used to end "Not answered here", and it is answered now.**
+   openkal had no way to say "this program's lifetime is bound to mine", and
+   `kal_process_terminate` was right to terminate only what it was given — so
+   what was missing was a word, not a mechanism. openkal 0.10 added
+   `kal_process_spawn_bound`, and **since 0.11.0 `execve` asks for it**.
+   `posix_spawn` does not and must not: a POSIX child outlives its parent.
+
+   ⚠️ A backend may decline the binding — openkal-macos has no primitive that
+   arms it from inside the started image, and openkal-windows has not measured
+   its own. There this falls back to the unbound spawn rather than refusing to
+   start the program at all, and the divergence is the one this entry used to
+   describe. `KAL_PROCESS_PROP_BOUND_LIFETIME` is what a caller asks.
 3. **The identifier the started program reports is not the caller's**, because
    there are two images where a system with the operation would have one.
 
