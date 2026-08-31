@@ -348,6 +348,30 @@ was measuring in the first place, and the growth does not change its direction.
 
 ## Verification
 
+### ⚠️ Measuring a foreign architecture through emulation, and the one thing it cannot show
+
+An `aarch64` build of this library runs on an `x86_64` machine through
+`qemu-user` and `binfmt_misc`, and every observation in this repository's probes
+holds there **except the ones that start a program built for the same foreign
+architecture**. That is a property of the emulator and not of this library, and
+it is stated here because the failure looks exactly like a defect:
+
+| what a program starts | under emulation |
+| --- | --- |
+| a native binary of the host — `sh`, `git`, anything on `PATH` | works |
+| **another copy of the foreign-architecture program itself** | the start fails |
+
+⭐ The distinction is the second exec. The kernel runs a native binary directly,
+and the emulated process simply stops being emulated; a foreign one has to be
+re-entered through `binfmt_misc` from inside an already-emulated process, which
+`qemu-user` does not do. Measured: `execveat` returns `ENOENT` for a path that
+exists, while the same call in the same run starts `/bin/sh` correctly, and the
+same failure appears on the release before this one.
+
+⇒ **A consumer measuring itself this way is not affected** unless its tests start
+copies of themselves. A suite that runs helper programs sees nothing wrong: one
+consumer's 108 tests pass identically on both architectures.
+
 `examples/wordcount` is an ordinary POSIX program whose source mentions nothing
 of any of this. Its three counts are compared against the system's own `wc`,
 which is an oracle this package did not produce; a program that merely produced
