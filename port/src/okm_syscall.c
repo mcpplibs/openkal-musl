@@ -1923,7 +1923,12 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * the two defects before it: a call that succeeds and changes nothing
 		 * observable is worse than one that refuses, because the caller proceeds.
 		 * `kill(-n)' answered ESRCH here while the unit existed. */
-		if (pid < 0 && pid != -1) {
+		/* ⚠️ `pid != INT_MIN' IS NOT DEFENSIVENESS. Negating it is undefined --- it
+		 * has no positive counterpart in the type --- and both this block and the
+		 * comparison at its end negate. A caller reaching here with that value
+		 * names no unit either way, so it takes the same route as any other
+		 * identifier that names none. */
+		if (pid < 0 && pid != -1 && pid != INT_MIN) {
 			const int gi = job_index(-pid);
 			if (gi >= 0 && g_child[gi].has_job) {
 				if (sig == 0) return 0;
