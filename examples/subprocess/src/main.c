@@ -798,6 +798,64 @@ int main(int argc, char** argv)
 		}
 	}
 
+	/* --- a program that needs an INTERPRETER ---------------------------------
+	 *
+	 * ⚠️⚠️ A WHOLE CLASS OF PROGRAMS COULD NOT BE STARTED, AND NOTHING HERE
+	 * LOOKED. `execveat' with a directory descriptor and a relative name gives
+	 * the kernel the program's name as `/dev/fd/<dirfd>/<name>'. For an ordinary
+	 * executable that spelling never surfaces --- the kernel holds the file open
+	 * already. For a program that needs an INTERPRETER it does: the kernel starts
+	 * the interpreter and hands it that name TO OPEN, after the replacement, by
+	 * which time a close-on-exec descriptor is gone. The interpreter is told the
+	 * script does not exist.
+	 *
+	 * ⭐ Two kinds of program need one, and they are the same defect:
+	 *     a `#!' script                     --- on every architecture
+	 *     a binary of another architecture  --- through `binfmt_misc'
+	 *
+	 * ⚠️ IT WAS FOUND ON aarch64 AND FIRST BLAMED ON THE EMULATOR, because there
+	 * every foreign binary needs the binfmt interpreter and so every start
+	 * failed at once. It reproduces natively with a script, which is what a
+	 * consumer meets on an ordinary machine.
+	 *
+	 * ⚠️ The script is made executable by the SHELL and not by this program:
+	 * `chmod' is refused here, so a script this program wrote would be refused
+	 * for its mode and the observation would hold for the wrong reason. */
+	if (expect_shell) {
+		char here[512];
+		if (!getcwd(here, sizeof here)) here[0] = 0;
+		char script[640], mk[900];
+		snprintf(script, sizeof script, "%s/interp-probe.sh", here);
+		snprintf(mk, sizeof mk,
+		         "printf '#!/bin/sh\\nexit 0\\n' > %s && chmod 755 %s", script, script);
+
+		pid_t m = -1;
+		char* mav[] = { (char*)"sh", (char*)"-c", mk, NULL };
+		int ms = 0;
+		const int me = posix_spawnp(&m, "sh", NULL, NULL, mav, environ);
+		if (me == 0) waitpid(m, &ms, 0);
+		/* The control: unless the shell really made an executable script, the
+		 * observation below would fail for a reason that is not the one sought. */
+		check(me == 0 && WIFEXITED(ms) && WEXITSTATUS(ms) == 0 &&
+		      access(script, X_OK) == 0,
+		      "a shell makes an executable script for this program to start");
+
+		pid_t s = -1;
+		char* sav[] = { script, NULL };
+		int ss = 0;
+		errno = 0;
+		const int se = posix_spawn(&s, script, NULL, NULL, sav, environ);
+		if (se != 0) {
+			printf("note: starting the script reported errno %d\n", se);
+			check(0, "a program that needs an interpreter starts");
+		} else {
+			waitpid(s, &ss, 0);
+			check(WIFEXITED(ss) && WEXITSTATUS(ss) == 0,
+			      "a program that needs an interpreter starts, and runs");
+		}
+		unlink(script);
+	}
+
 	/* --- units, which 0.12.0 added and no probe here ever looked at ------------
 	 *
 	 * ⚠️⚠️ THE WHOLE OF `setpgid'/`kill(-n)' SHIPPED WITH ITS ONLY WITNESS IN

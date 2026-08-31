@@ -348,29 +348,49 @@ was measuring in the first place, and the growth does not change its direction.
 
 ## Verification
 
-### ⚠️ Measuring a foreign architecture through emulation, and the one thing it cannot show
+### ⚠️⚠️ A program that needs an INTERPRETER could not be started, and it was first blamed on the emulator
 
-An `aarch64` build of this library runs on an `x86_64` machine through
-`qemu-user` and `binfmt_misc`, and every observation in this repository's probes
-holds there **except the ones that start a program built for the same foreign
-architecture**. That is a property of the emulator and not of this library, and
-it is stated here because the failure looks exactly like a defect:
+**Corrected in openkal-linux 0.12.0.** An earlier version of this section said
+that an `aarch64` build measured through `qemu-user` could not start a program of
+its own architecture, and that this was a property of the emulator. **That was
+wrong**, and the way it was wrong is worth more than the fact:
 
-| what a program starts | under emulation |
+- the symptom appeared only on `aarch64`, where *every* foreign binary needs the
+  `binfmt_misc` interpreter, so *every* start failed at once;
+- the release before it failed identically, which was read as "pre-existing,
+  therefore not ours";
+- a consumer's 108 tests passed on both architectures, which was read as "not
+  reaching users".
+
+⇒ Each of those was true. The conclusion drawn from them was not.
+
+**What it actually was.** `execveat` with a directory descriptor and a relative
+name gives the kernel the program's name as `/dev/fd/<dirfd>/<name>`. For an
+ordinary executable that spelling never surfaces — the kernel holds the file open
+already. For a program that needs an **interpreter** it does: the kernel starts
+the interpreter and hands it that name *to open*, after the replacement, by which
+time a close-on-exec descriptor is gone. The interpreter is told the file does
+not exist.
+
+⭐ Isolated in twenty lines of ordinary C, with nothing of openkal in it:
+
+```
+dirfd WITH O_CLOEXEC       execveat -> ENOENT
+dirfd WITHOUT O_CLOEXEC    STARTED ok
+```
+
+⚠️ **It was never about architecture.** Two kinds of program need an interpreter,
+and both were refused on every system:
+
+| program | needs an interpreter |
 | --- | --- |
-| a native binary of the host — `sh`, `git`, anything on `PATH` | works |
-| **another copy of the foreign-architecture program itself** | the start fails |
+| a `#!` script | yes — on **every** architecture, including a plain x86_64 machine |
+| a binary of another architecture, through `binfmt_misc` | yes — which is why `aarch64` showed it first |
+| an ordinary native executable | no — which is why nothing else failed |
 
-⭐ The distinction is the second exec. The kernel runs a native binary directly,
-and the emulated process simply stops being emulated; a foreign one has to be
-re-entered through `binfmt_misc` from inside an already-emulated process, which
-`qemu-user` does not do. Measured: `execveat` returns `ENOENT` for a path that
-exists, while the same call in the same run starts `/bin/sh` correctly, and the
-same failure appears on the release before this one.
-
-⇒ **A consumer measuring itself this way is not affected** unless its tests start
-copies of themselves. A suite that runs helper programs sees nothing wrong: one
-consumer's 108 tests pass identically on both architectures.
+⇒ The emulator only made it *visible*. A consumer running shell scripts on real
+`aarch64` hardware — or on x86_64 — met the same refusal. `examples/subprocess`
+now starts a script the shell made executable, and asserts it runs.
 
 `examples/wordcount` is an ordinary POSIX program whose source mentions nothing
 of any of this. Its three counts are compared against the system's own `wc`,
