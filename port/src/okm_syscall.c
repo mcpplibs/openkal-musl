@@ -1923,18 +1923,44 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * the two defects before it: a call that succeeds and changes nothing
 		 * observable is worse than one that refuses, because the caller proceeds.
 		 * `kill(-n)' answered ESRCH here while the unit existed. */
-		if (pid < 0 && pid != -1) {
+		/* ⚠️ `pid != INT_MIN' IS NOT DEFENSIVENESS. Negating it is undefined --- it
+		 * has no positive counterpart in the type --- and both this block and the
+		 * comparison at its end negate. A caller reaching here with that value
+		 * names no unit either way, so it takes the same route as any other
+		 * identifier that names none. */
+		if (pid < 0 && pid != -1 && pid != INT_MIN) {
 			const int gi = job_index(-pid);
 			if (gi >= 0 && g_child[gi].has_job) {
 				if (sig == 0) return 0;
 				const int e = okm_process_job_terminate(g_child[gi].job);
 				return e == kal_ok ? 0 : -okm_errno(e);
 			}
-			if (g_job_held) {
+			/* ⚠️⚠️ AND THIS PROGRAM'S OWN UNIT IS REACHED ONLY WHEN THE CALLER
+			 * NAMED IT, WHICH IS THE WHOLE OF THE 0.12.0 DEFECT.
+			 *
+			 * The condition used to be `g_job_held' alone. Every negative
+			 * identifier that matched no child therefore named the unit THIS
+			 * program holds: an enquiry about a unit that does not exist was
+			 * answered yes, and a signal aimed at one ended the caller together
+			 * with everything it leads. Measured by the probe beside this
+			 * library --- a program that formed a unit and called
+			 * `kill(-99999, SIGKILL)' ended on signal 9.
+			 *
+			 * ⭐ IT WAS WRITTEN TO SERVE `fork(); setpgid(0, 0); exec', AND IT
+			 * CANNOT. There the unit belongs to the copy, and its handle is the
+			 * copy's: openkal handles do not cross a spawn boundary --- clause
+			 * 6.7 constructs them from an index into the holder's own table --- so
+			 * the original has no way to name what the copy formed. Reaching for
+			 * a different unit because the right one is unreachable is the shape
+			 * `okm_opt.h' names: nothing here reports success having done
+			 * nothing, and nothing here acts on the wrong resource either.
+			 * README.md says plainly that the composition is not closed. */
+			if (g_job_held && -pid == g_self_pid) {
 				if (sig == 0) return 0;
 				const int e = okm_process_job_terminate(g_job);
 				return e == kal_ok ? 0 : -okm_errno(e);
 			}
+			return -ESRCH;
 		}
 		const int i = child_index(pid);
 		if (i >= 0) {

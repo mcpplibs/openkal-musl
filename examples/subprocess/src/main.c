@@ -123,6 +123,20 @@ static int child_mode(int argc, char** argv)
 			usleep((unsigned)atoi(argv[i + 1]) * 1000u);
 			_exit(7);
 		}
+		/* ⚠️⚠️ FORMS A UNIT AND THEN NAMES ONE THAT DOES NOT EXIST.
+		 *
+		 * This runs in a started program rather than in the probe because the
+		 * defect it observes is fatal: a `kill' that reaches the caller's OWN
+		 * unit ends the caller, and a probe cannot report having been killed.
+		 * Ending with status 0 is therefore the observation --- what it rules
+		 * out is this image dying on a signal it aimed elsewhere. */
+		if (strcmp(argv[i], "--child-unit-selfkill") == 0) {
+			if (setpgid(0, 0) != 0 && errno != ENOSYS) _exit(3);
+			/* 99999 names no program here: this library's identifiers begin at
+			 * 1001 and it has not started that many. */
+			(void)kill(-99999, SIGKILL);
+			_exit(0);
+		}
 		/* Two segments with a gap between them, so a reader that polls has to
 		 * come back twice and each arrival has a size worth measuring. */
 		if (strcmp(argv[i], "--child-two-segments") == 0) {
@@ -781,6 +795,132 @@ int main(int argc, char** argv)
 				int s = 0;
 				waitpid(sp, &s, 0);
 			}
+		}
+	}
+
+	/* --- units, which 0.12.0 added and no probe here ever looked at ------------
+	 *
+	 * ⚠️⚠️ THE WHOLE OF `setpgid'/`kill(-n)' SHIPPED WITH ITS ONLY WITNESS IN
+	 * SOMEBODY ELSE'S TEST SUITE. It was written against a consumer, measured
+	 * against that consumer, and released --- and the checks below are the ones
+	 * that would have been run here had this file been extended at the time.
+	 * The first of them fails on 0.12.0.
+	 *
+	 * A unit is what `kill(-n)' names, and the reason it exists is that it
+	 * reaches a program the caller never held a handle to. */
+	{
+		/* This program forms one, which is what `setpgid(0, 0)' is for. */
+		errno = 0;
+		const int formed = setpgid(0, 0);
+		check(formed == 0 || errno == ENOSYS,
+		      "a program forms a unit of its own, or says the environment has none");
+
+		/* ⭐⭐ AND NAMING A UNIT THAT DOES NOT EXIST IS REFUSED.
+		 *
+		 * Signal zero is the enquiry form --- it changes nothing and answers
+		 * whether the target is there --- so this asks about a unit this program
+		 * has no way to name and must be told there is none.
+		 *
+		 * ⚠️ ON 0.12.0 IT ANSWERED SUCCESS, and the reason is worth stating
+		 * because it is not a slip in one line. `kill(-n)' fell back to the unit
+		 * THIS program holds whenever `n' matched no child, so every negative
+		 * identifier named the caller's own unit --- an enquiry about anything
+		 * answered yes, and a signal to anything ended the caller and everything
+		 * it leads. The fallback was there to serve `fork(); setpgid(0, 0)',
+		 * where the unit belongs to the copy; it cannot serve it, because the
+		 * copy's handle is the copy's and openkal handles do not cross that
+		 * boundary. README.md states that plainly now. */
+		errno = 0;
+		const int enquiry = kill(-99999, 0);
+		check(enquiry == -1 && errno == ESRCH,
+		      "asking after a unit this program cannot name is refused, not answered yes");
+
+		/* And the same thing with a signal that would act, observed from a
+		 * started program because the failure ends whoever performs it. */
+		pid_t sk = -1;
+		char* av[] = { argv[0], (char*)"--child-unit-selfkill", NULL };
+		int st = 0;
+		if (posix_spawn(&sk, argv[0], NULL, NULL, av, environ) == 0 &&
+		    waitpid(sk, &st, 0) == sk) {
+			check(WIFEXITED(st) && WEXITSTATUS(st) == 0,
+			      "and signalling one does not end the program that asked");
+			if (!WIFEXITED(st))
+				printf("note: the copy ended on signal %d\n", WTERMSIG(st));
+		} else {
+			check(0, "a program that signals an absent unit starts");
+		}
+	}
+
+	/* ⭐ WHAT A UNIT IS FOR: REACHING A PROGRAM THE CALLER NEVER HELD.
+	 *
+	 * The shell exits at once and the work it backgrounded outlives it, so a
+	 * caller holding only the shell's handle has nothing to terminate. This is
+	 * the case `kal_spawn.job' was added for in 0.11, and it is the one a
+	 * timeout in a consumer has to be able to reach.
+	 *
+	 * ⚠️ Needs a shell, so the row without one does not run it. */
+	if (expect_shell) {
+		/* ⚠️ ABSOLUTE, BECAUSE THE WRITER IS A SHELL AND NOT THIS PROGRAM. A
+		 * relative name would be resolved against whatever directory the shell
+		 * runs in, and "the file was not written" is what this check reads as
+		 * success --- so a name that missed would pass it for the wrong reason. */
+		char here[512];
+		if (!getcwd(here, sizeof here)) here[0] = 0;
+		char marker[640];
+		snprintf(marker, sizeof marker, "%s/unit-survivor.tmp", here);
+		unlink(marker);
+
+		char script[768];
+		snprintf(script, sizeof script,
+		         "( sleep 3; echo x > %s ) & echo started; exit 0", marker);
+
+		/* ⚠️⚠️ THE CONTROL COMES FIRST, AND WITHOUT IT THE OBSERVATION BELOW IS
+		 * WORTHLESS. What that one reads as success is a file that is ABSENT ---
+		 * which is also what a missing shell, a mistyped script, a marker written
+		 * somewhere else and a background job that never ran all produce. So this
+		 * runs the same script and lets it finish: unless the file appears here,
+		 * its absence afterwards means nothing. */
+		{
+			pid_t c = -1;
+			char* av[] = { (char*)"sh", (char*)"-c", script, NULL };
+			int s = 0;
+			if (posix_spawnp(&c, "sh", NULL, NULL, av, environ) == 0 &&
+			    waitpid(c, &s, 0) == c) {
+				sleep(4);
+				check(access(marker, F_OK) == 0,
+				      "a shell's background work outlives the shell and writes where"
+				      " this program looks");
+			} else {
+				check(0, "the control shell starts");
+			}
+			unlink(marker);
+		}
+
+		posix_spawnattr_t at;
+		posix_spawnattr_init(&at);
+		posix_spawnattr_setflags(&at, POSIX_SPAWN_SETPGROUP);
+		posix_spawnattr_setpgroup(&at, 0);
+
+		pid_t sh = -1;
+		char* av[] = { (char*)"sh", (char*)"-c", script, NULL };
+		const int e = posix_spawnp(&sh, "sh", NULL, &at, av, environ);
+		posix_spawnattr_destroy(&at);
+
+		if (e != 0) {
+			check(0, "a unit with a background member starts");
+		} else {
+			int s = 0;
+			waitpid(sh, &s, 0);          /* the shell itself ends immediately */
+			usleep(200u * 1000u);
+			errno = 0;
+			const int reached = kill(-sh, SIGKILL);
+			check(reached == 0, "a unit a caller started can be named and signalled");
+			/* Longer than the background work's own delay, so that a member
+			 * which survived has had time to prove it. */
+			sleep(4);
+			check(access(marker, F_OK) != 0,
+			      "and terminating it reaches a program the caller never held");
+			unlink(marker);
 		}
 	}
 
