@@ -30,6 +30,7 @@
 #include <string.h>
 #include <time.h>
 #include "futex.h"
+#include "syscall.h"
 
 void      __okm_set_tp(uintptr_t value);
 void*     __okm_get_self(void);
@@ -151,6 +152,36 @@ syscall_arg_t __okm_task_exit(int code)
 	 * asked for and what Linux would have done. */
 	kal_exit(code);
 	return 0;
+}
+
+/* ⚠️⚠️ A DETACHED CONTEXT RELEASES ITS MAPPING FROM WHERE IT STANDS, AND THE
+ * STACK MUSL MOVED TO FIRST WAS OVERRUN FIFTY TIMES OVER.
+ *
+ * A detached thread releases its own mapping as the last thing it does. On Linux
+ * the thread is standing on that mapping, so musl's `__unmapself' first moves to
+ * a 256-byte stack shared by every exiting thread and makes the two system calls
+ * that end the thread from there --- two instructions each, which is what the
+ * size was chosen for.
+ *
+ * Neither premise holds here. `__clone' above never runs a context on the stack
+ * musl allocated, because kal_task_start supplies its own, so the move protects
+ * nothing. And the two calls are this port's: each passes through the
+ * dispatcher, the context table and openkal. Measured in an unoptimized build for
+ * x86_64 Linux, that path reached 13,640 bytes below the shared stack, writing
+ * over whatever the linker had placed beneath it. What that is depends on the
+ * target. On arm64 macOS it is musl's table of thread-specific keys and then this
+ * port's context table, so the thread looked up its own record in the table it
+ * had just overwritten and jumped into it: every program whose detached thread
+ * ended stopped there with an access violation (examples/threads-detached).
+ *
+ * ⇒ The mapping is released from the stack the context is on, and the end is
+ * reached the ordinary way. What musl's version guaranteed --- that nothing runs
+ * upon the mapping once it is released --- holds without the move, because
+ * nothing here ever ran upon it. */
+void __unmapself(void* base, size_t size)
+{
+	__syscall(SYS_munmap, base, size);
+	__syscall(SYS_exit, 0);
 }
 
 /* --- the suspension primitive ------------------------------------------------ */

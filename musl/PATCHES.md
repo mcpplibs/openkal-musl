@@ -93,9 +93,9 @@ carry it in a `long`.
 
 ## The sources this port replaces, and why each
 
-Eleven, and the list in the manifest carries the same reasons. Five read the shape
+Twelve, and the list in the manifest carries the same reasons. Five read the shape
 of one environment directly. Two carry a machine word through a variable
-declared `long`. Two more were found only by running the result. And one is
+declared `long`. Three more were found only by running the result. And one is
 replaced because another already was:
 
 `src/process/posix_spawnp.c` does not search a PATH. It stores `__execvpe` in
@@ -116,6 +116,18 @@ colon here because `execvp` — which this port does **not** replace — splits 
 one in musl's own source, and having the two ways of searching for one program
 disagree with each other is worse for a caller than having both wrong the same
 way. Nothing on that target searches a PATH today: its CI row declares no shell.
+
+⚠️⚠️ `src/thread/__unmapself.c` moves to a 256-byte stack shared by every exiting
+thread before it makes the two calls that end a detached one. On Linux the thread
+stands on the mapping it is about to release, and two raw system calls fit in
+256 bytes. Here the thread stands on the stack `kal_task_start` supplied, and
+the calls pass through this port's dispatcher, its context table and openkal:
+an unoptimized build reached **13,640 bytes** below the shared stack, measured on
+x86_64 Linux. The overflow lands on whatever the linker placed beneath it. On
+arm64 macOS that is the table of thread-specific keys and then the context
+table, so the exiting thread read its own record out of the bytes it had just
+written and jumped through them. `port/src/okm_thread.c` releases the mapping
+from the stack the thread is on; `examples/threads-detached` is the probe.
 
 `src/mman/mmap.c` returns a pointer through a `long`. It is replaced rather than
 patched because the replacement is also better where a `long` does hold a

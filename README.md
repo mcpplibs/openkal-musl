@@ -41,6 +41,11 @@ consumer needs to answer it without asking.
 
 | this package | is carried by |
 | --- | --- |
+| 0.13.3 | `openkal-llvm-runtime = "0.9.4"` |
+| 0.13.2 | `openkal-llvm-runtime = "0.9.3"` |
+| 0.13.1 | `openkal-llvm-runtime = "0.9.2"` |
+| 0.13.0 | `openkal-llvm-runtime = "0.9.0"` |
+| 0.12.0 | `openkal-llvm-runtime = "0.8.0"` |
 | 0.11.0 | `openkal-llvm-runtime = "0.7.0"` |
 | 0.10.0 | `openkal-llvm-runtime = "0.6.0"` |
 | 0.9.0 | `openkal-llvm-runtime = "0.5.0"` |
@@ -76,8 +81,8 @@ architecture. Replacing that one header is the whole of the redirection; the
 
 `musl/PATCHES.md` lists the whole of what is not unmodified: **five patched
 lines**, all of one kind — a machine word carried through a variable declared
-`long`, which is not a machine word on one of the three targets — and **eleven
-replaced sources**. Five of the eleven are replaced for the same reason: each
+`long`, which is not a machine word on one of the three targets — and **twelve
+replaced sources**. Five of the twelve are replaced for the same reason: each
 reads the shape of one particular environment rather than asking a kernel for
 something.
 

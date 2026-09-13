@@ -606,6 +606,19 @@ jobs:
           bash tools/run-probe.sh examples/threads-cxx threads-cxx
           grep -q 'value 42, result is the argument' examples/threads-cxx/run.log
 
+      # ⭐ A DETACHED THREAD ENDS, AND THE PROGRAM THAT STARTED IT GOES ON.
+      #
+      # musl's `__unmapself` left for a 256-byte shared stack before the calls
+      # that end a detached thread; this port's path for those calls needs far
+      # more, and on macOS the overflow overwrote the context table the exit then
+      # read. musl/PATCHES.md, `src/thread/__unmapself.c`.
+      - name: A detached thread ends and the program goes on
+        env:
+          MCPP_TARGET: ${{ matrix.target }}
+        run: |
+          bash tools/run-probe.sh examples/threads-detached threads-detached
+          grep -q 'detached: 8 started, 8 ended' examples/threads-detached/run.log
+
       - name: A program may use the names the internal overlay defines
         env:
           MCPP_TARGET: ${{ matrix.target }}
