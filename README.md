@@ -74,7 +74,7 @@ musl reaches its kernel through seven inline functions declared once per
 architecture. Replacing that one header is the whole of the redirection; the
 1345 sources that make up the library are compiled unmodified.
 
-`musl/PATCHES.md` lists the whole of what is not unmodified: **four patched
+`musl/PATCHES.md` lists the whole of what is not unmodified: **five patched
 lines**, all of one kind — a machine word carried through a variable declared
 `long`, which is not a machine word on one of the three targets — and **eleven
 replaced sources**. Five of the eleven are replaced for the same reason: each

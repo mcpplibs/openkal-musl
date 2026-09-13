@@ -1,6 +1,6 @@
 # What was changed in musl, and why
 
-musl 1.2.5 is vendored here unmodified except for the four lines below, and the
+musl 1.2.5 is vendored here unmodified except for the five lines below, and the
 list is exhaustive: `git log -p -- musl/` shows every one of them. Each is
 recorded with the reason, because a port that silently edits the library it
 ports is a port nobody can check.
@@ -30,6 +30,28 @@ offset beyond two gigabytes would be truncated, and both would happen silently.
 `syscall_arch.h` defines it per architecture, and two of musl's own targets
 already widen it because their arguments are wider than a `long`. On every
 target musl supports, the changed line says what the original said.
+
+## `include/alltypes.h.in`, one declaration
+
+```diff
+-TYPEDEF unsigned long pthread_t;
++TYPEDEF unsigned _Addr pthread_t;
+```
+
+musl declares `pthread_t` twice: as a pointer for C, and as an integer for C++,
+because C++ needs a type it can compare and hash. The integer was written
+`unsigned long`, which holds a pointer on every architecture musl supports.
+
+Windows is LLP64, so a C++ program above this library kept the lower half of the
+thread's address. `pthread_join` then read through the truncated value: libc++'s
+`std::thread` stores exactly this type, and every `std::thread` on that system
+ended in an access violation when it was joined (`0xC0000005`, measured on
+windows-2022 and under Wine). `_Addr` is the type musl already uses for
+`size_t`, `uintptr_t` and `ptrdiff_t`; it is `long` on every other target here,
+so the changed line says what the original said there.
+
+The five generated `alltypes.h` headers carry the same one-line change.
+`examples/threads-cxx` does not compile for `x86_64-windows-gnu` without it.
 
 ## `src/stdio/vfwscanf.c`, `src/stdlib/wcstol.c`, `src/stdlib/wcstod.c`
 

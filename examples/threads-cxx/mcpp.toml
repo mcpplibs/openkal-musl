@@ -1,0 +1,13 @@
+[package]
+name    = "threads-cxx"
+version = "0.1.0"
+
+[dependencies]
+openkal-musl = { path = "../.." }
+
+[targets.threads-cxx]
+kind = "bin"
+main = "src/main.cpp"
+
+[build]
+cxx_runtime = "host-coupled"
