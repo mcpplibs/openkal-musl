@@ -593,6 +593,19 @@ jobs:
       # compile. It is run as well as built so that something links afterwards,
       # which is what distinguishes a source that compiles from a package that
       # works.
+      # ⭐ A THREAD CREATED FROM C++ IS THE THREAD THAT IS JOINED.
+      #
+      # musl's C++ `pthread_t` was `unsigned long`, which is thirty-two bits on
+      # Windows, so every std::thread there faulted when joined. The probe's
+      # static_assert is the criterion and the run shows the value surviving a
+      # started context. musl/PATCHES.md, `include/alltypes.h.in`.
+      - name: A thread created from C++ is the thread that is joined
+        env:
+          MCPP_TARGET: ${{ matrix.target }}
+        run: |
+          bash tools/run-probe.sh examples/threads-cxx threads-cxx
+          grep -q 'value 42, result is the argument' examples/threads-cxx/run.log
+
       - name: A program may use the names the internal overlay defines
         env:
           MCPP_TARGET: ${{ matrix.target }}
