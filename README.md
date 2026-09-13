@@ -41,6 +41,11 @@ consumer needs to answer it without asking.
 
 | this package | is carried by |
 | --- | --- |
+| 0.13.3 | `openkal-llvm-runtime = "0.9.4"` |
+| 0.13.2 | `openkal-llvm-runtime = "0.9.3"` |
+| 0.13.1 | `openkal-llvm-runtime = "0.9.2"` |
+| 0.13.0 | `openkal-llvm-runtime = "0.9.0"` |
+| 0.12.0 | `openkal-llvm-runtime = "0.8.0"` |
 | 0.11.0 | `openkal-llvm-runtime = "0.7.0"` |
 | 0.10.0 | `openkal-llvm-runtime = "0.6.0"` |
 | 0.9.0 | `openkal-llvm-runtime = "0.5.0"` |
