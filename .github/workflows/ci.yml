@@ -619,6 +619,19 @@ jobs:
           bash tools/run-probe.sh examples/threads-detached threads-detached
           grep -q 'detached: 8 started, 8 ended' examples/threads-detached/run.log
 
+      # ⭐ A LARGE ALLOCATION IS A MAPPING, AND A MAPPING IS WHOLE PAGES.
+      #
+      # musl's allocator uses a mapping up to the end of its last page; the port
+      # obtained only the length asked for, and on Windows the rest of that page
+      # was the next heap block. port/src/okm_syscall.c, `do_mmap`.
+      - name: A large allocation is a mapping and a mapping is whole pages
+        env:
+          MCPP_TARGET: ${{ matrix.target }}
+        run: |
+          bash tools/run-probe.sh examples/malloc-large malloc-large
+          grep -q 'growth: 24 blocks up to 8390650 bytes' examples/malloc-large/run.log
+          grep -q -- '-- failures: 0 --' examples/malloc-large/run.log
+
       - name: A program may use the names the internal overlay defines
         env:
           MCPP_TARGET: ${{ matrix.target }}

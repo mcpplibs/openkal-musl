@@ -511,12 +511,37 @@ static syscall_arg_t do_getdents(int fd, void* buf, size_t cap)
 
 /* --- memory ---------------------------------------------------------------- */
 
+/* ⚠️ A MAPPING IS WHOLE PAGES, AND THE CALLER USES ALL OF THEM.
+ *
+ * `mmap' maps every page the length touches, so the bytes from the length to
+ * the end of its last page are the caller's too, and they read as zero. musl's
+ * allocator counts on it: an allocation of MMAP_THRESHOLD bytes or more is a
+ * mapping of `n + IB + UNIT' bytes whose slot is `pages * 4096 - UNIT' long, and
+ * it places the block up to a page into that slot and writes the slot's footer
+ * just below the end of the last page. This layer used to obtain exactly the
+ * length asked for. Where kal_alloc hands out that length and no more --- the
+ * process heap on Windows --- the footer and up to a page of the block were
+ * written past the end of what was obtained, over the header of the heap's
+ * next block, and the program stopped at a later free or allocation with an
+ * access violation, or ended without a word.
+ *
+ * ⭐ Measured under Wine: a std::string grown by push_back past 196,607 bytes
+ * ended the program, and it passes with the length rounded up here and at
+ * SYS_munmap, whose length is the caller's as well. On windows-2022 the same
+ * fault stopped lsp-mcpp's conformance runner while it read a build tree. */
+static size_t okm_whole_pages(size_t len)
+{
+	return (len + OKM_PAGE - 1) & ~(size_t)(OKM_PAGE - 1);
+}
+
 static syscall_arg_t do_mmap(void* addr, size_t len, int prot, int flags, int fd, off_t off)
 {
 	(void)prot;
 	if (addr != 0 || fd >= 0 || off != 0) return -ENOSYS;
 	if (!(flags & MAP_ANON) || !(flags & MAP_PRIVATE)) return -ENOSYS;
 	if (len == 0) return -EINVAL;
+	if (len > (size_t)-1 - (OKM_PAGE - 1)) return -ENOMEM;
+	len = okm_whole_pages(len);
 	void* p = kal_alloc(len, OKM_PAGE);
 	if (!p) return -ENOMEM;
 	/* An anonymous mapping reads as zero, and a caller relies on it: musl's
@@ -1695,7 +1720,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	/* --- memory ----------------------------------------------------------- */
 	case SYS_mmap:   return do_mmap((void*)a1, (size_t)a2, (int)a3, (int)a4, (int)a5, (off_t)a6);
 	case SYS_munmap:
-		kal_free((void*)a1, (size_t)a2, OKM_PAGE);
+		kal_free((void*)a1, okm_whole_pages((size_t)a2), OKM_PAGE);
 		return 0;
 	case SYS_mprotect:
 		/* openkal has no operation upon the protection of a mapping. Reporting
