@@ -62,7 +62,7 @@
 
 #include_next <features.h>
 
-/* ⚠️ THE INTERNAL HEADERS ARE MUSL'S, AND A CONSUMER IS NOT MUSL.
+/* THE INTERNAL HEADERS ARE MUSL'S, AND A CONSUMER IS NOT MUSL.
  *
  * musl's build reaches its own declarations through src/include, whose headers
  * add the hidden entries the public ones do not have. This package publishes
@@ -80,7 +80,7 @@
  * not be lost, and it was not: mcpp 2026.8.27.1 added
  * `[build] private_include_dirs`, and this package's manifest now uses it.
  *
- * ⚠️ SO WHY IS THE BLOCK BELOW STILL HERE? Because the two answer different
+ * SO WHY IS THE BLOCK BELOW STILL HERE? Because the two answer different
  * questions and only one of them is about visibility.
  *
  *   private_include_dirs  --- WHO SEES the internal overlay. A consumer no
@@ -95,14 +95,14 @@
  * use of undeclared identifier __weak__'. Removing either axis brings back a
  * defect that has already been paid for once.
  *
- * ⚠️ The rejected alternative is also kept: moving the two directories into
+ * The rejected alternative is also kept: moving the two directories into
  * per-glob flags places them AFTER include_dirs on the command line, and musl's
  * own build then finds the public <features.h> before the internal one and
  * fails with `unknown type name hidden'. That is why `private_include_dirs` is
  * a SUBSET of `include_dirs` rather than a second list --- the order is the
  * thing that cannot be given up.
  *
- * ⭐⭐ THE DISCRIMINATOR WAS WRONG ONCE, AND THE WRONG ONE HELD FOR A DAY.
+ * THE DISCRIMINATOR WAS WRONG ONCE, AND THE WRONG ONE HELD FOR A DAY.
  *
  * It used to be `#ifdef __cplusplus', with this reasoning written beside it:
  * musl's own sources are C and are never compiled as anything else, so a
@@ -137,7 +137,7 @@
  *                both named `restrict'. Given the spelling every compiler
  *                accepts in both languages.
  *
- *   hidden       ⭐ IN C++, GIVEN C LINKAGE rather than emptied. Every
+ *   hidden       IN C++, GIVEN C LINKAGE rather than emptied. Every
  *                declaration the internal overlay adds begins with it --- that
  *                is what it is for --- so one spelling gives all of them the
  *                linkage they were written with. The overlay's headers carry no
@@ -149,7 +149,7 @@
  *                ___errno_location'. In C there is no linkage to restore, so it
  *                is emptied.
  *
- *   weak         an attribute musl spells as a bare word. Emptied. ⚠️ This is
+ *   weak         an attribute musl spells as a bare word. Emptied. This is
  *                the one that bit compiler-rt: it writes
  *                `__attribute__((weak))' of its own, which became
  *                `__attribute__((__attribute__((__weak__))))'.
@@ -161,7 +161,7 @@
  *                libunwind does, in fifteen places, and reported
  *                `use of undeclared identifier __weak__'.
  *
- * ⚠️⚠️ THE FOUR DO NOT ALL COME FROM THE SAME PLACE, WHICH IS WHY THEY ARE NO
+ * THE FOUR DO NOT ALL COME FROM THE SAME PLACE, WHICH IS WHY THEY ARE NO
  * LONGER TREATED THE SAME. Reported as mcpplibs/openkal-musl#13: a program
  * above this library could not declare `static int hidden = 7;'.
  *
@@ -183,7 +183,7 @@
  * included" --- rather than the question it used to ask, which was "is this
  * unit musl's" and which answered the wrong way for every consumer.
  *
- * ⚠️ THE COMPILER-RT CASE STILL HOLDS, and it is the reason the block is scoped
+ * THE COMPILER-RT CASE STILL HOLDS, and it is the reason the block is scoped
  * rather than deleted. A board building compiler-rt here compiles C that is not
  * musl's WITH the overlay on its line --- `private_include_dirs' does not reach
  * it, because it is not a consumer of this package's public interface but a

@@ -11,7 +11,7 @@
 
 int main(int argc, char** argv)
 {
-	/* ⚠️ UNBUFFERED, AND THAT IS PART OF THE PROBE.
+	/* UNBUFFERED, AND THAT IS PART OF THE PROBE.
 	 *
 	 * Output to a pipe is fully buffered, so a program that dies part way
 	 * through loses everything it had printed --- and what the machine that
@@ -22,7 +22,7 @@ int main(int argc, char** argv)
 	setvbuf(stdout, NULL, _IONBF, 0);
 
 	int failures = 0;
-	/* ⚠️ THE CONDITION IS EVALUATED ONCE, AND THE FIRST VERSION DID NOT.
+	/* THE CONDITION IS EVALUATED ONCE, AND THE FIRST VERSION DID NOT.
 	 *
 	 * It read `(ok) ? "ok" : "FAIL"' and then `if (!(ok))', so an argument with
 	 * an effect happened twice --- and one of the arguments below is

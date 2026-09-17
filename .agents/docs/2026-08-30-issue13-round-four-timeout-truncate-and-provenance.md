@@ -436,7 +436,7 @@ banner:  FAIL  got=[]
 uname:   FAIL  got=[0.5.0]
 ```
 
-⚠️ The release field now MOVES AT EVERY RELEASE. Nothing here or in musl reads
+The release field now MOVES AT EVERY RELEASE. Nothing here or in musl reads
 it — `gethostname` and `getdomainname` are musl's only consumers of `uname` and
 both read `nodename` — but a program above that compares it against a fixed
 string will see it change. Recorded in `README.md`'s divergence table. The

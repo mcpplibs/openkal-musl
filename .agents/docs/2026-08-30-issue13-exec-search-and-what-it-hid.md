@@ -6,7 +6,7 @@
 (`aab97bc`)、openkal-linux **0.7.1**、openkal-llvm-runtime 0.5.0,
 目标 `x86_64-linux-musl`。
 
-> ⚠️ 写这份文档时本地检出停在 0.7.0(`250f002`),比 `origin/main` 落后两个提交。
+> 写这份文档时本地检出停在 0.7.0(`250f002`),比 `origin/main` 落后两个提交。
 > 已 `git fetch` 并核对 0.7.0→0.9.0 的差异:`port/src/okm_syscall.c` 只增加了版本
 > 横幅、`SYS_truncate` 和 `uname` 的 release 字段,`port/src/okm_spawn.c` 与
 > `musl/PATCHES.md` **一字未改**。本文所有行号均取自 **0.9.0**,所有读数均取自
@@ -60,7 +60,7 @@ execvp "sh"  PATH=/nope:/usr/bin     child said (nothing)       exit=127
 execvp "sh"  PATH=/usr/bin:/nope     child said hi              exit=7
 ```
 
-⭐ **`OPENKAL_MUSL_TRACE=enosys` 一行都没打。** 这条不是缺失的系统调用,所以
+**`OPENKAL_MUSL_TRACE=enosys` 一行都没打。** 这条不是缺失的系统调用,所以
 上一轮加的那个诊断通道看不见它——这一点本身值得记下来(§8)。
 
 ### 1.2 读码 —— 三环,每一环可复核
@@ -126,7 +126,7 @@ default:       return -1;
 这个循环**完全建立在「`execve` 失败会返回」之上**。这里它不返回,所以第一次未命中
 就是终点。名字里带 `/` 直接走 `execve`,这就是第一行为什么过。
 
-### 1.4 ⚠️ 两份文档现在说的话是错的,必须改
+### 1.4 两份文档现在说的话是错的,必须改
 
 `README.md:315` 和 `musl/PATCHES.md:114` 都写着 `execve` 这个表达
 **「A caller cannot distinguish that through this library」**。
@@ -209,7 +209,7 @@ return posix_spawn(res, file, fa, &spawnp_attr, argv, envp);
 musl 自己的 `posix_spawn.c:152` 在子进程里读这个字段:
 `attr->__fn ? (int (*)())attr->__fn : execve`。
 
-⚠️ **本端口替换掉了 `posix_spawn.c`,而 `okm_spawn.c:180-181` 只看 `__flags`:**
+**本端口替换掉了 `posix_spawn.c`,而 `okm_spawn.c:180-181` 只看 `__flags`:**
 
 ```c
 if (attr && (attr->__flags & ~(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK)))
@@ -257,7 +257,7 @@ waitpid = 1194981  raw status = 0x000f  WIFSIGNALED=1 WTERMSIG=15
 marker.txt absent                        <-- SIGTERM 打到了程序
 ```
 
-⚠️ **状态字一模一样(`0x000f`),两边都告诉调用者「它死于 SIGTERM」。**
+**状态字一模一样(`0x000f`),两边都告诉调用者「它死于 SIGTERM」。**
 一边是真的,一边是假的,而调用者手上没有任何东西能把两者分开。
 
 范围是精确的——只有 `fork`+`execve` 这条路:
@@ -282,7 +282,7 @@ posix_spawn     status=0x000f  program was killed
 
 而父亲收到的是「1001 死于 SIGTERM」,因为等待者确实死于 SIGTERM。
 
-### 3.3 ⚠️ 今天在本仓修不完,这一点要说清楚
+### 3.3 今天在本仓修不完,这一点要说清楚
 
 `kill` 发生在父亲这一侧,父亲**无法知道**自己的哪个孩子是等待者;等待者阻塞在
 `kal_process_wait` 里,**收不到任何东西也跑不了代码**。openkal 今天没有任何原子
@@ -293,7 +293,7 @@ posix_spawn     status=0x000f  program was killed
 - **C1(必做,先做)**:`README.md:315` 与 `musl/PATCHES.md:114` 那句
   「a caller cannot distinguish」**是错的,要改掉**,并在分歧表里如实写明:
   经 `fork`+`execve` 起的程序,`kill` 只到达中间映像,状态字仍报信号死亡。
-  ⚠️ 这一句现在读起来像是「已经想清楚且无代价」,而它正是这条缺陷藏身的地方。
+  这一句现在读起来像是「已经想清楚且无代价」,而它正是这条缺陷藏身的地方。
 - **C2(必做)**:补一条判据把当前行为钉住(§8),否则改好了也没人知道。
 - **C3(上报)**:向 openkal 要一个「寿命受调用者约束」的起法(Linux 侧是
   `PR_SET_PDEATHSIG`,Windows 侧是 job object),`execve` 用它起替身。
@@ -352,7 +352,7 @@ int e = okm_fs_open(at.base, at.rel, slen(at.rel),
 `openkal-linux/src/fs.cpp` 把 `READ|WRITE` 映射成 `O_RDWR`,对目录 → `EISDIR`
 → `kal_err_is_directory`(`sys.h:278`)→ `okm_fd.c:58` → `EISDIR`。
 
-### 4.4 ⭐ 实测:这件事身下**做得到**,只是我们要错了权限
+### 4.4 实测:这件事身下**做得到**,只是我们要错了权限
 
 直接调 openkal 层:
 
@@ -365,7 +365,7 @@ kal_fs_open(dir, READ)       -> 0  (ok)
 
 **目录的时间被真的改掉了。** 所以这不是「身下做不到」。
 
-⚠️ 但它**在规范说的话之外**:`fs.h:273` 明写
+但它**在规范说的话之外**:`fs.h:273` 明写
 「The file shall have been opened with KAL_OPEN_WRITE」,而 `kal_fs_open` 说的是
 「Opening a file」,目录归 `kal_fs_open_dir`(产出 `kal_dir`),而
 `kal_fs_set_modified` **没有收 `kal_dir` 的形式**。
@@ -386,7 +386,7 @@ kal_fs_open(dir, READ)       -> 0  (ok)
     自己的代码;`ENOSYS` 是在说「这个环境没有这个操作」。
   - 代价:一个每个身下环境都做得到的普通 POSIX 操作就此长期不可用。
 
-⚠️ 无论选哪条,`musl/PATCHES.md:125` 那段都要补:它今天只记了「要写权限而不是
+无论选哪条,`musl/PATCHES.md:125` 那段都要补:它今天只记了「要写权限而不是
 要所有权」,**没有记「目录的时间根本设不了」**。
 
 ---
@@ -407,7 +407,7 @@ getpid=1  getpgid(0)=1  getsid(0)=1
 `getpgid`/`getsid` 诚实地回答「就一个程序,它自成一组」。然后接着说
 「`setpgid` 与 `setsid` 仍然拒绝:造一个组和身处一个组不是一回事」。
 
-⚠️ **但这两个调用问的恰恰不是「造一个组」:**
+**但这两个调用问的恰恰不是「造一个组」:**
 
 - `setpgid(0, 0)` 请求的状态是「调用者自成一组」——按上面那三行读数,
   **这个状态已经成立**。它不是要求一个不存在的效果,它要求的是已经为真的事。
@@ -423,7 +423,7 @@ getpid=1  getpgid(0)=1  getsid(0)=1
 
 顺带:这会消掉报告者 trace 里 16 行(`setpgid` 12 + `setsid` 4)。
 
-> ⚠️ 这条是**判断**而不是读码结论,和 §1-§4 不同级别,单独列出来等 review 否决。
+> 这条是**判断**而不是读码结论,和 §1-§4 不同级别,单独列出来等 review 否决。
 
 ---
 
@@ -474,16 +474,16 @@ getpid=1  getpgid(0)=1  getsid(0)=1
 | 2 | `execve("/不存在")` **返回 -1 且 `errno==ENOENT`**,调用者活着 | A |
 | 3 | `execve("<一个目录>")` 返回 -1 且 `errno==EACCES` | A1 |
 | 4 | `posix_spawnp("sh", …)` 起得来;`posix_spawnp("/不存在")` 返回 ENOENT | B |
-| 5 | ⭐ `fork`+`execve` 起的程序被 `kill` 后**确实停了**(用它写不出的 marker 判) | C |
+| 5 | `fork`+`execve` 起的程序被 `kill` 后**确实停了**(用它写不出的 marker 判) | C |
 | 6 | 目录的 `last_write_time` 设得上(或按 D2 报 ENOSYS,二选一钉死) | D |
 | 7 | `setpgid(0,0)==0`、`setsid()==-1 && errno==EPERM` | E |
 | 8 | **控制项**:上述每一条都在宿主目标上跑同一份源码并给出同样读数 | 全部 |
 
-⚠️ **A/B 对照是必须的**:把 `port/src` 退回 `aab97bc` 只留新探针,1-7 必须**红**。
+**A/B 对照是必须的**:把 `port/src` 退回 `aab97bc` 只留新探针,1-7 必须**红**。
 一条在缺陷上就是绿的判据,证明不了任何事——上一轮的自我 review 已经在这上面栽过
 一次。
 
-⭐ 另外记一笔:**这一族缺陷 `OPENKAL_MUSL_TRACE=enosys` 一条都看不见**,因为它们
+另外记一笔:**这一族缺陷 `OPENKAL_MUSL_TRACE=enosys` 一条都看不见**,因为它们
 不是缺失的操作,而是**在场却答错的操作**。上一轮把诊断通道当成「下一轮更便宜」的
 答案,这一轮证明它只覆盖了一半。是否要一个「起程序失败」的 trace 位,留待 review。
 

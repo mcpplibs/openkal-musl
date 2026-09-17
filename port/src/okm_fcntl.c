@@ -1,6 +1,6 @@
 /* Operations upon an open file description.
  *
- * ⚠️⚠️ THE ELEVENTH SOURCE THIS PORT REPLACES, AND IT IS THE THIRD OF ONE KIND:
+ * THE ELEVENTH SOURCE THIS PORT REPLACES, AND IT IS THE THIRD OF ONE KIND:
  * A MACHINE WORD CARRIED THROUGH A VARIABLE DECLARED `long'.
  *
  * musl's own reads its variable argument as an `unsigned long':
@@ -15,7 +15,7 @@
  * thirty-two bits and a pointer holds sixty-four --- so a caller passing a
  * `struct flock *' had the top half of it discarded before the port saw it.
  *
- * ⭐⭐ AND IT WAS UNREACHABLE UNTIL 0.11.0, WHICH IS WHY IT SURVIVED THREE
+ * AND IT WAS UNREACHABLE UNTIL 0.11.0, WHICH IS WHY IT SURVIVED THREE
  * RELEASES OF A PORT THAT ALREADY NAMED THIS DEFECT TWICE.
  *
  * Every command this library answered before took an integer, or took a pointer
@@ -24,7 +24,7 @@
  * reports. openkal 0.10 gave this port a real lock, `F_SETLK' began following
  * the pointer, and the defect became a fault on the first attempt.
  *
- * ⚠️ MEASURED, and the register file names the type rather than the symptom:
+ * MEASURED, and the register file names the type rather than the symptom:
  *
  *     page fault on read access to 0x00000000fe2ffec2
  *     rax:00000000fe2ffec0   rsp:00007ffffe2fc7a0
@@ -39,7 +39,7 @@
  * integer at all. `uintptr_t' is the type that holds a pointer on every target,
  * and it is what `va_arg' is asked for.
  *
- * ⚠️ THE VARARG TYPE IS PART OF THE CALLING CONVENTION AND NOT A DETAIL.
+ * THE VARARG TYPE IS PART OF THE CALLING CONVENTION AND NOT A DETAIL.
  * `va_arg(ap, unsigned long)' and `va_arg(ap, uintptr_t)' read different numbers
  * of bytes where the two types differ, so this is not a cast applied afterwards
  * --- reading it as the narrower type has already lost the half by then.

@@ -1,6 +1,6 @@
 /* Readiness, and transfers bounded in time.
  *
- * ⚠️⚠️ openkal HAS NO OPERATION THAT REPORTS WHETHER A TRANSFER WOULD PROCEED,
+ * openkal HAS NO OPERATION THAT REPORTS WHETHER A TRANSFER WOULD PROCEED,
  * AND THAT IS DELIBERATE. Clause 6.3 records readiness notification among the
  * mechanisms considered and NOT adopted: an interface reporting readiness
  * obliges every implementation of it to maintain a set and a context of its
@@ -10,7 +10,7 @@
  * line: "a bounded read is a bounded wait for readiness followed by the
  * ordinary read".
  *
- * ⭐ SO `poll' IS ANSWERED BY ATTEMPTING THE TRANSFER AND KEEPING WHAT IT
+ * SO `poll' IS ANSWERED BY ATTEMPTING THE TRANSFER AND KEEPING WHAT IT
  * PRODUCED. One byte from a stream, one connection from a listener, one message
  * from a datagram endpoint --- held in the descriptor and delivered to the
  * operation that follows. POLLIN asserts that a read will not block, and a byte
@@ -22,7 +22,7 @@
  * openkal has no operation that returns an entry to an iterator, so an entry
  * that does not fit the caller's buffer is held rather than lost.
  *
- * ⚠️ WHAT IS NOT FAITHFUL, STATED HERE RATHER THAN DISCOVERED.
+ * WHAT IS NOT FAITHFUL, STATED HERE RATHER THAN DISCOVERED.
  *
  *   POLLOUT is reported for every descriptor that may be written, without an
  *   enquiry, because there is nothing to enquire of. A bounded write bounds the
@@ -164,7 +164,7 @@ long okm_poll(void* p, unsigned long n, int timeout_ms)
 	const int forever = timeout_ms < 0;
 	kal_u64 left = forever ? 0 : (kal_u64)timeout_ms * 1000000ull;
 
-	/* ⭐ A SET OF ONE IS THE CASE WORTH SEPARATING, AND IT IS THE COMMON ONE.
+	/* A SET OF ONE IS THE CASE WORTH SEPARATING, AND IT IS THE COMMON ONE.
 	 * With a single descriptor the caller's whole bound can be handed to the
 	 * one bounded operation, so the wait happens in the environment rather than
 	 * in this loop. Only a larger set has to be revisited. */
@@ -192,7 +192,7 @@ long okm_poll(void* p, unsigned long n, int timeout_ms)
 			}
 
 			if ((fds[i].events & POLLIN) && has_input_route(d)) {
-				/* ⚠️⚠️ ZERO MEANS THE OPPOSITE IN THE TWO INTERFACES, AND THE
+				/* ZERO MEANS THE OPPOSITE IN THE TWO INTERFACES, AND THE
 				 * COLLISION IS SILENT.
 				 *
 				 * `poll' spells "do not wait" as a timeout of zero; openkal
@@ -231,7 +231,7 @@ long okm_poll(void* p, unsigned long n, int timeout_ms)
 		}
 
 		if (ready) return ready;
-		/* ⚠️ A FAILURE IS REPORTED ONLY WHEN NOTHING WAS READY. A descriptor
+		/* A FAILURE IS REPORTED ONLY WHEN NOTHING WAS READY. A descriptor
 		 * whose environment refused the enquiry must not hide the readiness of
 		 * the others in the same set. */
 		if (failure) return failure;

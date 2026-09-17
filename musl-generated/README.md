@@ -56,7 +56,7 @@ Apple's platforms are LP64, exactly as musl's architectures are — a `long`
 holds a pointer — so `_Addr` and `_Reg` are unchanged. What differs is only
 which 64-bit type `int64_t` is spelled as: `long long` there, `long` on Linux.
 
-⚠️ Same width, different type, and the two do not convert. Measured
+Same width, different type, and the two do not convert. Measured
 2026-08-23, cross-compiling this port for `arm64-apple-macos` from Linux:
 
 ```

@@ -41,7 +41,7 @@ inc=(-Iport/include -Imusl/src/include -Imusl/src/internal
      -Imusl-generated/internal -Imusl-generated/"$arch"
      -Imusl/arch/"$arch" -Imusl/arch/generic -Imusl/include
      -I"$here"/../openkal/include)
-# ⚠️ `-DOKM_MUSL_INTERNAL=1` IS LOAD-BEARING AND WAS ADDED AFTER THIS LIST WAS
+# `-DOKM_MUSL_INTERNAL=1` IS LOAD-BEARING AND WAS ADDED AFTER THIS LIST WAS
 # WRITTEN, WHICH IS THE POINT.
 #
 # It says the unit being compiled is one of musl's own, which is what
@@ -50,7 +50,7 @@ inc=(-Iport/include -Imusl/src/include -Imusl/src/internal
 #
 #     crypt_r.c:23: type specifier missing  |  weak_alias(__crypt_r, crypt_r);
 #
-# ⭐ This list is a SECOND COPY of the manifest's, and the comment below already
+# This list is a SECOND COPY of the manifest's, and the comment below already
 # says keeping it in step is what makes the answer the configured one. It went
 # out of step the first time the manifest gained a flag, and continuous
 # integration is what said so. Two places for one decision, and this is the

@@ -6,7 +6,7 @@
 #
 # with the target, where the row needs one, in `MCPP_TARGET`.
 #
-# ⚠️ WHY THIS IS A SCRIPT AND NOT A STEP. There are five probes now and each
+# WHY THIS IS A SCRIPT AND NOT A STEP. There are five probes now and each
 # needs the same three things: a watchdog, because a program that does not
 # return is as much a failure as one that returns wrongly and the job would
 # otherwise spend its whole timeout finding out; a report of where a program
@@ -19,7 +19,7 @@
 set -euo pipefail
 
 dir="${1:?the example directory}"
-# ⚠️ NO APOSTROPHE IN THIS MESSAGE, AND THAT IS NOT STYLE. Bash parses `${2:?...}`
+# NO APOSTROPHE IN THIS MESSAGE, AND THAT IS NOT STYLE. Bash parses `${2:?...}`
 # with quoting active, so "the program's name" opens a single quote that never
 # closes --- and the report arrives thirty lines later as
 #
@@ -31,7 +31,7 @@ dir="${1:?the example directory}"
 name="${2:?the name of the program}"
 shift 2
 
-# ⚠️ RESOLVED BEFORE THE `cd' BELOW. `BASH_SOURCE' is the path this script was
+# RESOLVED BEFORE THE `cd' BELOW. `BASH_SOURCE' is the path this script was
 # invoked by, which is relative in every caller here, and a relative path stops
 # naming this directory the moment the working directory moves.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,7 +43,7 @@ extra=''
 # shellcheck disable=SC2086
 mcpp build $extra
 
-# ⚠️ THE ARTEFACT OF THE BUILD THAT JUST RAN. tools/one-artifact.sh records what
+# THE ARTEFACT OF THE BUILD THAT JUST RAN. tools/one-artifact.sh records what
 # a search across an accumulating `target/` answers instead, and what it cost.
 binary="$(bash "$here/one-artifact.sh" "$name")"
 
@@ -91,7 +91,7 @@ else
     exit 1
 fi
 
-# ⚠️ BOTH DIRECTIONS. That the program reported, and that nothing it observed
+# BOTH DIRECTIONS. That the program reported, and that nothing it observed
 # failed to hold. The first alone would pass for a program that printed its
 # failures; the second alone would pass for a program that printed nothing.
 grep -qE '^-- failures: 0 --$' run.log \

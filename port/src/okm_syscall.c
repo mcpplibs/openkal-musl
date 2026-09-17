@@ -28,7 +28,7 @@
 /* For pipe and pipe2, which are kal_process_channel. Included here rather than
  * through okm.h because this is the only source that reaches for it. */
 #include <openkal/process.h>
-/* ⚠️⚠️ WEAK, OR AN INTERFACE A BACKEND MAY DECLINE BECOMES ONE IT MUST PROVIDE.
+/* WEAK, OR AN INTERFACE A BACKEND MAY DECLINE BECOMES ONE IT MUST PROVIDE.
  *
  * Clause 6.1 expresses an interface an implementation does not provide as the
  * absence of a definition, and a bare-metal backend provides no `openkal.process'
@@ -39,7 +39,7 @@
  *     ld.lld: error: undefined symbol: kal_process_channel
  *     >>> referenced by okm_syscall.c:407
  *
- * ⚠️ Measured on openkal-opensbi through openkal-llvm-runtime's bare-metal row,
+ * Measured on openkal-opensbi through openkal-llvm-runtime's bare-metal row,
  * which is the row that has nothing to fall back on. The same rule is already
  * applied to `kal_random_fill' below, and it is the second time this port has
  * had to learn it. */
@@ -49,7 +49,7 @@ extern __typeof(kal_process_channel_close) kal_process_channel_close __attribute
  * optional, and an implementation that does not provide it is absent as a
  * definition rather than present and refusing. */
 extern __typeof(kal_random_fill) kal_random_fill __attribute__((__weak__));
-/* ⭐ WHAT `WNOHANG' IS EXPRESSED AS, AND IT WAS ALREADY IN THE SPECIFICATION.
+/* WHAT `WNOHANG' IS EXPRESSED AS, AND IT WAS ALREADY IN THE SPECIFICATION.
  *
  * `waitpid' discarded its options, so a caller polling for a child that had not
  * finished BLOCKED until it did --- the one thing `WNOHANG' exists to prevent.
@@ -126,7 +126,7 @@ static syscall_arg_t do_write(int fd, const void* buf, size_t len)
 	struct okm_desc* d = okm_desc_of(fd);
 	if (d->flags & O_NONBLOCK) return okm_timed_write(s, buf, len, OKM_NOW_NS);
 	struct kal_stream st; st.h = s;
-	/* ⭐ ONE SIGNED WORD, AND THIS IS THE CODE THAT ARGUED FOR IT. openkal
+	/* ONE SIGNED WORD, AND THIS IS THE CODE THAT ARGUED FOR IT. openkal
 	 * returned a count and a condition, and every consumer of that pair --- all
 	 * of them here --- collapsed it by hand and by the same rule: report what
 	 * moved, or the condition when nothing did. Version 0.9 returns that. */
@@ -142,14 +142,14 @@ static syscall_arg_t do_read(int fd, void* buf, size_t len)
 	if (len == 0) return 0;
 
 	struct okm_desc* d = okm_desc_of(fd);
-	/* ⭐ WHAT A READINESS ENQUIRY TOOK IS DELIVERED HERE, and delivering it is
+	/* WHAT A READINESS ENQUIRY TOOK IS DELIVERED HERE, and delivering it is
 	 * what made that enquiry's answer true rather than momentary. okm_poll.c
 	 * states why openkal leaves no other way to answer one. A short read is a
 	 * result every caller of `read' already handles. */
 	const long held = okm_take_ahead(d, buf, len);
 	if (held == OKM_AHEAD_EOF) return 0;
 	if (held) {
-		/* ⚠️⚠️ AND WHATEVER ELSE IS ALREADY THERE, BECAUSE ONE BYTE ON ITS OWN
+		/* AND WHATEVER ELSE IS ALREADY THERE, BECAUSE ONE BYTE ON ITS OWN
 		 * TURNED EVERY POLLED READ INTO A POLLED READ OF ONE BYTE.
 		 *
 		 * The enquiry takes a byte to make its answer true. Returning only that
@@ -161,14 +161,14 @@ static syscall_arg_t do_read(int fd, void* buf, size_t len)
 		 *     here    "o" "n" "e" "." "t" "w" "o" "."      eight chunks
 		 *     host    "one." "two."                        two
 		 *
-		 * ⚠️ Every byte is delivered and in order, so a caller that concatenates
+		 * Every byte is delivered and in order, so a caller that concatenates
 		 * sees the right bytes --- which is why this survived: the defect is
 		 * invisible to anyone who does not look at the BOUNDARIES. A caller that
 		 * scans a chunk for a word finds none, because `two' arrives as `t' and
 		 * `wo'. openkal-linux#13's first report said the program `only output
 		 * one byte', and this is that.
 		 *
-		 * ⭐ THE REMEDY IS THE OPERATION THE ENQUIRY ITSELF IS BUILT ON. A bound
+		 * THE REMEDY IS THE OPERATION THE ENQUIRY ITSELF IS BUILT ON. A bound
 		 * of `now' asks for whatever has already arrived and does not wait, so
 		 * the byte and the rest of what is there come back together. Where the
 		 * environment beneath declines `openkal.timeout' there is no such
@@ -197,7 +197,7 @@ static syscall_arg_t do_openat(int dirfd, const char* path, int flags, int mode)
 	if (r) return r;
 	const size_t n = slen(at.rel);
 
-	/* ⭐⭐ O_NOFOLLOW ON A LINK IS `ELOOP', AND ANSWERING `ENOENT' MADE A
+	/* O_NOFOLLOW ON A LINK IS `ELOOP', AND ANSWERING `ENOENT' MADE A
 	 * DIRECTORY UNREMOVABLE.
 	 *
 	 * openkal states that opening RESOLVES and offers no form that declines
@@ -205,12 +205,12 @@ static syscall_arg_t do_openat(int dirfd, const char* path, int flags, int mode)
 	 * bytes is asking what `kal_fs_link_read' answers. So this reached the
 	 * link's target, and for a link whose target is absent that is `ENOENT'.
 	 *
-	 * ⚠️ WHICH IS A DIFFERENT ANSWER TO A DIFFERENT QUESTION. POSIX says
+	 * WHICH IS A DIFFERENT ANSWER TO A DIFFERENT QUESTION. POSIX says
 	 * ELOOP: `the name is a link and you said not to follow one'. ENOENT
 	 * says `there is no such name', and the two are acted upon differently
 	 * by exactly the caller that passes this flag.
 	 *
-	 * ⭐ MEASURED THROUGH THREE LAYERS. libc++'s `remove_all' descends by
+	 * MEASURED THROUGH THREE LAYERS. libc++'s `remove_all' descends by
 	 * opening each entry O_DIRECTORY|O_NOFOLLOW: on ELOOP or ENOTDIR it
 	 * unlinks the entry, on ENOENT it concludes the entry has already gone
 	 * and moves on. Against this port it moved on, unlinked nothing, and
@@ -292,7 +292,21 @@ static void fill_kstat(const struct kal_node_info* in, struct kstat* out)
 	}
 	mode |= 0444u;
 	if (in->writable) mode |= 0222u;
+	/* A directory is always reported traversable: openkal answers
+	 * KAL_INFO_EXECUTABLE for a file only (fs.h, version 0.13), and a directory
+	 * a program can list at all has always been reported as one it can enter.
+	 * Everything else follows the enquiry: the execute bit is set for exactly
+	 * the classes that have the read bit above --- every one of them, since
+	 * `writable' is this port's only per-class distinction --- when the
+	 * enquiry reports KAL_INFO_EXECUTABLE set, and cleared when it reports the
+	 * position clear or does not answer it at all. "Does not answer" reads as
+	 * "not executable" here, as `stat' reported every file before 0.14.0.
+	 * `access(X_OK)' below reads the same absence as "yes", as it did before:
+	 * a program that asks before starting a name still attempts the start,
+	 * and the start reports the reason. The two readings of an unanswered
+	 * position differ, and README.md states both. */
 	if (in->kind == kal_node_directory) mode |= 0111u;
+	else if ((in->present & KAL_INFO_EXECUTABLE) && in->executable) mode |= 0111u;
 	out->st_mode = mode;
 	out->st_mtime_sec  = (kal_i64)(in->modified_ns / 1000000000u);
 	out->st_mtime_nsec = (kal_i64)(in->modified_ns % 1000000000u);
@@ -302,7 +316,7 @@ static void fill_kstat(const struct kal_node_info* in, struct kstat* out)
 	out->st_ctime_nsec = out->st_mtime_nsec;
 	out->st_uid = 1000; out->st_gid = 1000;
 
-	/* ⚠️⚠️ THE IDENTITY WAS A CONSTANT, SO EVERY FILE WAS THE SAME FILE.
+	/* THE IDENTITY WAS A CONSTANT, SO EVERY FILE WAS THE SAME FILE.
 	 *
 	 * `st_ino' was 0 and `st_dev' was 1 for every node, and nothing reported
 	 * that they were not answers. Measured through the C++ library above:
@@ -393,7 +407,7 @@ static syscall_arg_t do_readlink(int dirfd, const char* path, char* out, size_t 
 
 /* Makes a node whose content is another name.
  *
- * ⚠️ THE CONTENT IS NOT A NAME THIS INTERFACE RESOLVES. It is stored and read
+ * THE CONTENT IS NOT A NAME THIS INTERFACE RESOLVES. It is stored and read
  * later by whoever follows it, so it is not put through the resolution that
  * would refuse one that ascends --- and one that ascends is the ordinary case
  * for a relative target. Only the name being CREATED is resolved. */
@@ -414,7 +428,7 @@ static syscall_arg_t do_fstatat(int dirfd, const char* path, struct kstat* st, i
 	struct okm_at at;
 	const syscall_arg_t r = okm_resolve(dirfd, path, &at, 0);
 	if (r) return r;
-	/* ⭐⭐ `stat' AND `lstat' ARE TWO QUESTIONS AND THIS ANSWERED ONE OF THEM
+	/* `stat' AND `lstat' ARE TWO QUESTIONS AND THIS ANSWERED ONE OF THEM
 	 * TWICE. The flag was ignored, so both asked about the name itself while
 	 * `open' resolved --- a program was told a name referred to a link when
 	 * opening it would have reached a file. Through the C++ library above:
@@ -431,6 +445,83 @@ static syscall_arg_t do_fstatat(int dirfd, const char* path, struct kstat* st, i
 	if (info.kind == kal_node_absent) return -ENOENT;
 	fill_kstat(&info, st);
 	return 0;
+}
+
+/* --- whether a node may be started, expressed as a permission bit ----------
+ *
+ * openkal 0.13 gives this port one word to answer `chmod' with:
+ * `kal_fs_set_executable_at' sets or clears the execute property for every
+ * class of caller at once (fs.h states why it is one property and not a
+ * permission). musl's mode word has three read, three write and three
+ * execute bits, one triple per class, and this port's own report of that word
+ * --- `fill_kstat', just above --- can only ever hold the same bit in all
+ * three positions of a triple: `writable' is one boolean and the read bit is
+ * unconditional, so the read and write triples are always 000 or 111, never a
+ * mixture. That is the shape a request is judged against.
+ *
+ * A REQUEST THIS PORT CANNOT HONESTLY GRANT IS REFUSED, NOT ROUNDED.
+ * `chmod' reporting success for a mode it did not set is exactly the
+ * simulation clause 3.1 forbids --- SPEC.md's own `kal_err_exists' argument
+ * and entry 6's chmod paragraph make the same point about a mode word a
+ * volume does not store. So a request is granted only when
+ *
+ *   (a) every bit outside the three execute positions already equals what
+ *       this port would report today, and
+ *   (b) the three execute bits are exactly one of the two shapes the single
+ *       `kal_fs_set_executable_at' property can produce: all clear, or set in
+ *       exactly the classes that have a read bit (which, per the previous
+ *       paragraph, is either none of the three or all of them).
+ *
+ * A request equal to today's reported mode always satisfies both --- the
+ * current mode is itself one of the two shapes --- and is short-circuited
+ * before the underlying call, so it succeeds even where the volume does not
+ * claim KAL_FS_PROP_EXECUTABLE: nothing is being asked of that property, and
+ * refusing a caller that asked for nothing to change is not this port's
+ * decision to make. A request that asks for a change goes to
+ * `kal_fs_set_executable_at', which is where an unsupported volume's
+ * `kal_err_not_supported' --- ENOSYS --- comes from.
+ *
+ * Everything else --- a real 0644-style mode, where the read and write bits
+ * differ between classes --- fails rule (a) against EVERY reachable current
+ * mode, because this port never reports one. It is refused as ENOSYS, the
+ * same answer this port has always given `chmod', for the same reason: a
+ * mode word is not what a capability-shaped volume stores. README.md's limits
+ * table gives the four reachable modes and worked examples. */
+static syscall_arg_t do_chmod(int dirfd, const char* path, mode_t mode)
+{
+	struct okm_at at;
+	const syscall_arg_t r = okm_resolve(dirfd, path, &at, 0);
+	if (r) return r;
+
+	struct kal_node_info info = { .self_size = sizeof info };
+	const int qe = okm_fs_info(at.base, at.rel, slen(at.rel), 0,
+	                          KAL_INFO_KIND | KAL_INFO_WRITABLE
+	                          | KAL_INFO_EXECUTABLE, &info);
+	if (qe != kal_ok) return -okm_errno(qe);
+	if (info.kind == kal_node_absent) return -ENOENT;
+
+	/* The mode `fill_kstat' would report for this node today. */
+	unsigned current = 0444u;
+	if (info.writable) current |= 0222u;
+	if (info.kind == kal_node_directory) current |= 0111u;
+	else if ((info.present & KAL_INFO_EXECUTABLE) && info.executable) current |= 0111u;
+
+	const unsigned requested = (unsigned)mode & 07777u;
+	if (requested == current) return 0;   /* nothing to change; see above */
+	/* A directory's execute bits are its traversal, which openkal does not
+	 * record and this port always reports. A change to them is a change this
+	 * port cannot express, and it is refused the way every other one is. */
+	if (info.kind == kal_node_directory) return -ENOSYS;
+
+	const unsigned none = current & ~0111u;
+	const unsigned full = none | ((current & 0444u) >> 2);
+	int executable;
+	if      (requested == none) executable = 0;
+	else if (requested == full) executable = 1;
+	else return -ENOSYS;
+
+	const int e = okm_fs_set_executable_at(at.base, at.rel, slen(at.rel), executable);
+	return e == kal_ok ? 0 : -okm_errno(e);
 }
 
 /* --- directory enumeration -------------------------------------------------- */
@@ -511,7 +602,7 @@ static syscall_arg_t do_getdents(int fd, void* buf, size_t cap)
 
 /* --- memory ---------------------------------------------------------------- */
 
-/* ⚠️ A MAPPING IS WHOLE PAGES, AND THE CALLER USES ALL OF THEM.
+/* A MAPPING IS WHOLE PAGES, AND THE CALLER USES ALL OF THEM.
  *
  * `mmap' maps every page the length touches, so the bytes from the length to
  * the end of its last page are the caller's too, and they read as zero. musl's
@@ -525,7 +616,7 @@ static syscall_arg_t do_getdents(int fd, void* buf, size_t cap)
  * next block, and the program stopped at a later free or allocation with an
  * access violation, or ended without a word.
  *
- * ⭐ Measured under Wine: a std::string grown by push_back past 196,607 bytes
+ * Measured under Wine: a std::string grown by push_back past 196,607 bytes
  * ended the program, and it passes with the length rounded up here and at
  * SYS_munmap, whose length is the caller's as well. On windows-2022 the same
  * fault stopped lsp-mcpp's conformance runner while it read a build tree. */
@@ -567,7 +658,7 @@ static void to_timespec(kal_duration ns, struct timespec* ts)
 
 /* --- processes -------------------------------------------------------------- */
 
-/* ⚠️ THE BOUND IS PART OF THE CONTRACT, AND IT WAS NOT.
+/* THE BOUND IS PART OF THE CONTRACT, AND IT WAS NOT.
  *
  * An entry is taken when a program is started and released when it is waited
  * for, which is what a process table is; a program that starts programs and
@@ -575,7 +666,7 @@ static void to_timespec(kal_duration ns, struct timespec* ts)
  * EAGAIN. That is what POSIX says `fork' does when the table is full, so the
  * behaviour is right --- what was wrong is that the number was invisible.
  *
- * ⭐ Measured: the sixty-fifth `posix_spawn' failed with `Resource temporarily
+ * Measured: the sixty-fifth `posix_spawn' failed with `Resource temporarily
  * unavailable' on a program that had started sixty-four and waited for none,
  * and on one that polled each with WNOHANG once and did not come back --- and a
  * caller meeting that has an error on an operation with no evident relation to
@@ -587,7 +678,7 @@ static void to_timespec(kal_duration ns, struct timespec* ts)
  * others --- which is the kind of program that meets it --- and because each
  * entry is three words. */
 #define OKM_MAX_CHILD 256
-/* ⭐ AND THE UNIT THAT START FORMED, WHICH IS THE ONLY PLACE IT CAN LIVE.
+/* AND THE UNIT THAT START FORMED, WHICH IS THE ONLY PLACE IT CAN LIVE.
  * A caller ends a group by naming a negative identifier; openkal names a unit by
  * a handle whose meaning is the implementation's. The two are related here and
  * nowhere else --- openkal deliberately offers no way to recover a unit from a
@@ -598,7 +689,7 @@ static void to_timespec(kal_duration ns, struct timespec* ts)
 static struct { int used; int pid; struct kal_process h; struct kal_job job; int has_job; } g_child[OKM_MAX_CHILD];
 static int g_next_pid = 1000;
 
-/* ⭐ WHAT THIS PROGRAM ANSWERS WHEN ASKED WHO IT IS.
+/* WHAT THIS PROGRAM ANSWERS WHEN ASKED WHO IT IS.
  *
  * It was the constant 1 for every context, so a copy made by `fork' reported
  * the identifier of the image it was copied from --- two contexts, one answer,
@@ -611,7 +702,7 @@ static int g_next_pid = 1000;
  * `fork' returned it. */
 static int g_self_pid = 1;
 
-/* The unit this program formed, if it did. ⚠️ KEPT BECAUSE THE NUMBER A CALLER
+/* The unit this program formed, if it did. KEPT BECAUSE THE NUMBER A CALLER
  * WILL LATER USE IS NOT THE HANDLE: `kill(-n)' names a group by a POSIX
  * identifier, and openkal's unit is a handle whose meaning belongs to the
  * implementation. One per program, which is what one `setpgid(0, 0)' forms, so
@@ -624,12 +715,12 @@ void __okm_set_self_pid(int pid) { g_self_pid = pid; }
 
 /* Takes an entry and settles its identifier WITHOUT a resource to put in it.
  *
- * ⚠️ THE IDENTIFIER HAS TO EXIST BEFORE THE CONTEXT DOES. `fork' copies the
+ * THE IDENTIFIER HAS TO EXIST BEFORE THE CONTEXT DOES. `fork' copies the
  * address space at `kal_space_start', so anything the copy is to know must be
  * written before that call --- and the identifier used to be assigned after it,
  * from the handle it returned. Reserving first is what lets the copy be told.
  *
- * ⚠️ THE CALLER HOLDS THE LOCK. `__okm_child_record' takes it and this does
+ * THE CALLER HOLDS THE LOCK. `__okm_child_record' takes it and this does
  * not, because `__okm_fork' is already inside it when it reserves: the copy has
  * to be taken while no other context is part-way through a change to the table.
  * A second acquisition would not nest. */
@@ -666,7 +757,7 @@ void __okm_child_job(int slot, struct kal_job j)
 
 void __okm_child_release(int slot)
 {
-	/* ⚠️ THE UNIT IS NOT RELEASED WITH THE PROGRAM, AND THAT IS THE POINT OF IT.
+	/* THE UNIT IS NOT RELEASED WITH THE PROGRAM, AND THAT IS THE POINT OF IT.
 	 * A group outlives the program that formed it for exactly as long as it has
 	 * members --- which is the case a caller uses a unit FOR: the shell exits
 	 * immediately and the work it put in the background is what a timeout has to
@@ -697,7 +788,7 @@ int __okm_child_record(struct kal_process h)
 	return __okm_child_record_job(h, none);
 }
 
-/* ⚠️ A COPY OF THE CALLING IMAGE INHERITS THIS TABLE AND MUST NOT KEEP IT.
+/* A COPY OF THE CALLING IMAGE INHERITS THIS TABLE AND MUST NOT KEEP IT.
  *
  * The entries name programs the ORIGINAL started, and POSIX is explicit that a
  * duplicate has no children. Left in place they are worse than useless: a copy
@@ -731,7 +822,7 @@ static int job_index(int pid)
 
 /* --- what a signal aimed at this program means ------------------------------
  *
- * ⚠️⚠️ `abort' DID NOT END THE PROGRAM, AND WHAT ENDED IT WAS AN ILLEGAL
+ * `abort' DID NOT END THE PROGRAM, AND WHAT ENDED IT WAS AN ILLEGAL
  * INSTRUCTION.
  *
  * musl's `raise' is one line --- `syscall(SYS_tkill, self->tid, sig)' --- and
@@ -749,14 +840,14 @@ static int job_index(int pid)
  * openkal-linux#13; the report reasoned from the wrong half of it, because 139
  * looked like the null jump it had also seen.
  *
- * ⭐ THE ANSWER IS NOT SYNTHESISED. openkal-linux's `kal_abort' IS
+ * THE ANSWER IS NOT SYNTHESISED. openkal-linux's `kal_abort' IS
  * `tgkill(pid, tid, SIGABRT)', so routing `abort' onto it gives a real signal
  * death: a parent reads WIFSIGNALED and WTERMSIG == SIGABRT, and a core is
  * written, which is what `abort' means everywhere else. Choosing
  * `kal_exit(134)' instead would have produced a number that looks the same to a
  * shell and answers `WIFEXITED' to a program.
  *
- * ⭐⭐ AND THE TARGET IS DELIBERATELY NOT EXAMINED, WHICH IS THE OPPOSITE OF
+ * AND THE TARGET IS DELIBERATELY NOT EXAMINED, WHICH IS THE OPPOSITE OF
  * WHAT IT LOOKS LIKE.
  *
  * The default action of a terminating signal ends the PROCESS and not the
@@ -767,7 +858,7 @@ static int job_index(int pid)
  * identity, so the comparison would have failed for every context but the
  * first, and `abort' from a thread would have gone back to `hlt'.
  *
- * ⚠️⚠️ THREE NUMBERS ARE MUSL'S OWN AND MUST NOT TERMINATE ANYTHING.
+ * THREE NUMBERS ARE MUSL'S OWN AND MUST NOT TERMINATE ANYTHING.
  * pthread_impl.h reserves 32, 33 and 34 for the timer thread, cancellation and
  * `synccall', and each is sent with this same call. `pthread_cancel' is
  * `pthread_kill(t, SIGCANCEL)' --- so a table that made 33 a terminating signal
@@ -825,12 +916,12 @@ static syscall_arg_t do_wait4(int pid, int* status, int options, void* rusage)
 	int st = 0, terminated = 0;
 	int e;
 	if (options & WNOHANG) {
-		/* ⚠️ NOT ZERO. openkal spells "no bound" as zero (timeout.h), so a
+		/* NOT ZERO. openkal spells "no bound" as zero (timeout.h), so a
 		 * caller asking not to wait must ask for the smallest bound there is
 		 * and not for none. `OKM_NOW_NS' is that bound and is what this port
 		 * already passes for a non-blocking read.
 		 *
-		 * ⚠️ An implementation rounds a bound up to its own granularity, so
+		 * An implementation rounds a bound up to its own granularity, so
 		 * `WNOHANG' here waits at most one polling interval of the environment
 		 * beneath rather than not at all --- a millisecond on openkal-linux,
 		 * which has no bounded wait for a child and polls. Recorded in
@@ -838,7 +929,7 @@ static syscall_arg_t do_wait4(int pid, int* status, int options, void* rusage)
 		 * what the environment distinguishes is a promise it cannot keep. */
 		if (!kal_timeout_wait_process) return -ENOSYS;
 
-		/* ⚠️ EVERY CHILD, WHERE THE CALLER NAMED NONE. `waitpid(-1, …, WNOHANG)'
+		/* EVERY CHILD, WHERE THE CALLER NAMED NONE. `waitpid(-1, …, WNOHANG)'
 		 * asks after ANY child, and asking after the first recorded one would
 		 * report "none has finished" while a later one had --- the reading a
 		 * caller draining its children in a loop acts upon. The blocking form
@@ -874,7 +965,7 @@ static syscall_arg_t do_wait4(int pid, int* status, int options, void* rusage)
 
 /* --- the report of an operation this library does not have ------------------
  *
- * ⭐ THE DEFAULT ARM ANSWERS ENOSYS IN SILENCE, AND A CONSUMER CANNOT ACT ON A
+ * THE DEFAULT ARM ANSWERS ENOSYS IN SILENCE, AND A CONSUMER CANNOT ACT ON A
  * SILENCE.
  *
  * The answer itself is right --- POSIX has a word for a facility that is not
@@ -883,12 +974,12 @@ static syscall_arg_t do_wait4(int pid, int* status, int options, void* rusage)
  * rounds of openkal-linux#13 were spent on exactly that question, and reading a
  * dispatcher is not a thing a consumer of a C library should have to do.
  *
- * ⚠️ NOT ON BY DEFAULT, AND NOT A BUILD OPTION EITHER. A consumer meets this on
+ * NOT ON BY DEFAULT, AND NOT A BUILD OPTION EITHER. A consumer meets this on
  * a binary it already has; rebuilding the C library to find out what the binary
  * needed is the cost this is here to remove. So it is a variable of the
  * environment, read once.
  *
- * ⚠️ AND ONLY THIS ARM. `mprotect' and `rt_sigreturn' answer ENOSYS from cases
+ * AND ONLY THIS ARM. `mprotect' and `rt_sigreturn' answer ENOSYS from cases
  * of their own, and each is a decision with a reason recorded beside it rather
  * than a gap. Tracing those would report a facility as missing that this port
  * deliberately does not have, which is a different sentence.
@@ -957,7 +1048,7 @@ static void trace_absent(syscall_arg_t n)
 {
 	if (!trace_wanted()) return;
 
-	/* ⚠️ EACH NUMBER ONCE, AND THE DOCUMENTATION SAYS SO. A program that retries
+	/* EACH NUMBER ONCE, AND THE DOCUMENTATION SAYS SO. A program that retries
 	 * a refused operation in a loop would otherwise bury the report in copies of
 	 * itself, and a reader counting the lines would conclude it happened once. */
 	if (n >= 0 && n < 8192) {
@@ -966,7 +1057,7 @@ static void trace_absent(syscall_arg_t n)
 		if (__atomic_fetch_or(&seen[n >> 3], bit, __ATOMIC_ACQ_REL) & bit) return;
 	}
 
-	/* ⚠️ WRITTEN TO THE STREAM DIRECTLY, NOT THROUGH THIS LIBRARY'S OWN OUTPUT.
+	/* WRITTEN TO THE STREAM DIRECTLY, NOT THROUGH THIS LIBRARY'S OWN OUTPUT.
 	 * What failed may be the operation that stdio was about to perform, and a
 	 * report that reaches stdio from inside the failure of stdio is a report
 	 * that arrives as a second failure. Nothing here allocates either. */
@@ -1085,13 +1176,13 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * offsets, and a caller copying sequentially passes none. */
 	/* pipe and pipe2, upon kal_process_channel.
 	 *
-	 * ⭐ THIS BECAME POSSIBLE IN openkal 0.8 AND WAS NOT BEFORE. A pipe is a
+	 * THIS BECAME POSSIBLE IN openkal 0.8 AND WAS NOT BEFORE. A pipe is a
 	 * pair of streams of which one end is meant to cross a spawn, which is
 	 * exactly what that interface provides and what openkal previously had no
 	 * way to express. Until then `pipe` belonged with the facilities the port
 	 * withholds; now it is supplied like any other.
 	 *
-	 * ⚠️ AND THE CLOSURE SAID SO BEFORE THE REASONING DID. Withholding it broke
+	 * AND THE CLOSURE SAID SO BEFORE THE REASONING DID. Withholding it broke
 	 * `faccessat`, which forks and reports its answer back through a pipe:
 	 *
 	 *     ld64.lld: error: undefined symbol: pipe2
@@ -1102,7 +1193,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 *
 	 * The two ends are bound as ordinary stream descriptors, so read, write,
 	 * close, dup and poll reach them through the paths they already take. */
-	/* ⚠️ `SYS_pipe` DOES NOT EXIST EVERYWHERE. The architectures that gained
+	/* `SYS_pipe` DOES NOT EXIST EVERYWHERE. The architectures that gained
 	 * their numbering after pipe2 have only the later call, so naming the older
 	 * one unconditionally does not compile there:
 	 *
@@ -1121,7 +1212,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * have. Refusing is the honest answer; silently ignoring it would give
 		 * a caller a byte stream where it asked for messages. */
 		if (flags & ~(O_CLOEXEC | O_NONBLOCK)) return -EINVAL;
-		/* ⚠️ AND `O_NONBLOCK' USED TO BE ACCEPTED AND CARRIED NO FURTHER. The
+		/* AND `O_NONBLOCK' USED TO BE ACCEPTED AND CARRIED NO FURTHER. The
 		 * flag was stored in the description and nothing read it, so a caller
 		 * asked for a pipe that would not wait, was told it had one, and waited.
 		 * That is the one shape the head of this file forbids. It is expressed
@@ -1275,7 +1366,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			const long r = okm_resolve((int)a1, (const char*)a2, &at, 0);
 			if (r) return r;
 		}
-		/* ⚠️⚠️ A DIRECTORY COULD NOT HAVE ITS TIME SET, AND IT IS AN ORDINARY
+		/* A DIRECTORY COULD NOT HAVE ITS TIME SET, AND IT IS AN ORDINARY
 		 * THING TO WANT.
 		 *
 		 * `KAL_OPEN_READ | KAL_OPEN_WRITE' was asked for unconditionally, and
@@ -1286,19 +1377,19 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * one name, so the failure read as though READING the time had failed.
 		 * Reading it was never broken.
 		 *
-		 * ⭐ AND THE OPERATION IS PERFORMABLE. Measured directly against
+		 * AND THE OPERATION IS PERFORMABLE. Measured directly against
 		 * openkal-linux: opening the directory with KAL_OPEN_READ succeeds and
 		 * `kal_fs_set_modified' upon it succeeds and the directory's time
 		 * really changes.
 		 *
-		 * ⚠️ WHICH IS OUTSIDE WHAT `fs.h' STATES, AND IS RECORDED RATHER THAN
+		 * WHICH IS OUTSIDE WHAT `fs.h' STATES, AND IS RECORDED RATHER THAN
 		 * CONCEALED. The interface says the file "shall have been opened with
 		 * KAL_OPEN_WRITE", and names `kal_fs_open_dir' --- which yields a
 		 * `kal_dir' --- as the way to open a directory, while
 		 * `kal_fs_set_modified' takes a `kal_file' and has no `kal_dir' form.
 		 * So there is no stated route to a directory's time at all.
 		 *
-		 * ⭐⭐ ASKED OF THE SPECIFICATION, AND openkal 0.10 ANSWERED IT.
+		 * ASKED OF THE SPECIFICATION, AND openkal 0.10 ANSWERED IT.
 		 * `kal_fs_set_modified_at' takes a NAME, so a directory is now reached by
 		 * a stated route rather than by opening it for reading and hoping. The
 		 * older way is kept below for a backend that has not followed yet, and is
@@ -1306,7 +1397,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		struct kal_node_info kind = { .self_size = sizeof kind };
 		const int ke = okm_fs_info(at.base, at.rel, slen(at.rel), 0,
 		                           KAL_INFO_KIND, &kind);
-		/* ⚠️ AN ENQUIRY THAT CANNOT BE MADE IS NOT AN ANSWER OF `NO', so a build
+		/* AN ENQUIRY THAT CANNOT BE MADE IS NOT AN ANSWER OF `NO', so a build
 		 * without `openkal.fs' asks for what the interface requires and lets the
 		 * open answer, exactly as it did before this enquiry was added. */
 		if (ke != kal_ok && ke != kal_err_not_supported) return -okm_errno(ke);
@@ -1513,10 +1604,19 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		if (r) return r;
 		struct kal_node_info info = { .self_size = sizeof info };
 		const int e = okm_fs_info(at.base, at.rel, slen(at.rel), 0,
-		                          KAL_INFO_KIND | KAL_INFO_WRITABLE, &info);
+		                          KAL_INFO_KIND | KAL_INFO_WRITABLE
+		                          | KAL_INFO_EXECUTABLE, &info);
 		if (e != kal_ok) return -okm_errno(e);
 		if (info.kind == kal_node_absent) return -ENOENT;
 		if (((int)a3 & W_OK) && !info.writable) return -EACCES;
+		/* Version 0.13: X_OK follows the same field `fstat' now reports.
+		 * Before it, and still where the enquiry does not answer the
+		 * position (a directory, or a volume that does not claim
+		 * KAL_FS_PROP_EXECUTABLE), this answers yes for anything that
+		 * exists --- README.md records both halves. */
+		if (((int)a3 & X_OK) && info.kind != kal_node_directory
+		    && (info.present & KAL_INFO_EXECUTABLE) && !info.executable)
+			return -EACCES;
 		return 0;
 	}
 #ifdef SYS_access
@@ -1526,13 +1626,39 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		if (r) return r;
 		struct kal_node_info info = { .self_size = sizeof info };
 		const int e = okm_fs_info(at.base, at.rel, slen(at.rel), 0,
-		                          KAL_INFO_KIND | KAL_INFO_WRITABLE, &info);
+		                          KAL_INFO_KIND | KAL_INFO_WRITABLE
+		                          | KAL_INFO_EXECUTABLE, &info);
 		if (e != kal_ok) return -okm_errno(e);
 		if (info.kind == kal_node_absent) return -ENOENT;
 		if (((int)a2 & W_OK) && !info.writable) return -EACCES;
+		if (((int)a2 & X_OK) && info.kind != kal_node_directory
+		    && (info.present & KAL_INFO_EXECUTABLE) && !info.executable)
+			return -EACCES;
 		return 0;
 	}
 #endif
+
+	/* Version 0.13. `chmod' and `fchmodat' both name a path, and `do_chmod'
+	 * above states the judgement. `fchmod' names a descriptor instead, and
+	 * this port has no name for one: a regular file's own name is not kept
+	 * anywhere in `struct okm_desc' (only a directory's is, for resolving a
+	 * name that ascends out of it --- `okm_dir_remember'), so there is
+	 * nothing to pass `kal_fs_set_executable_at'. ENOSYS, as this port has
+	 * always answered `fchmod'.
+	 *
+	 * THIS IS WHY musl's OWN `fchmod' NEVER TRIES A NAME EITHER. Its
+	 * fallback path re-reads `/proc/self/fd/<n>' only when the direct call
+	 * reports EBADF (musl/src/stat/fchmod.c); ENOSYS reports here instead,
+	 * so the fallback --- which this port could not serve anyway, having no
+	 * `/proc' --- is never reached. */
+#ifdef SYS_fchmod
+	case SYS_fchmod: return -ENOSYS;
+#endif
+#ifdef SYS_chmod
+	case SYS_chmod: return do_chmod(AT_FDCWD, (const char*)a1, (mode_t)a2);
+#endif
+	case SYS_fchmodat: return do_chmod((int)a1, (const char*)a2, (mode_t)a3);
+
 	case SYS_getcwd: {
 		const char* p = okm_cwd_path();
 		const size_t n = slen(p) + 1;
@@ -1544,10 +1670,10 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_chdir:  return okm_chdir(AT_FDCWD, (const char*)a1);
 	case SYS_fchdir: return okm_chdir((int)a1, 0);
 
-	/* ⭐ NODES WHOSE CONTENT IS ANOTHER NAME. openkal 0.9 carries the two
+	/* NODES WHOSE CONTENT IS ANOTHER NAME. openkal 0.9 carries the two
 	 * operations, so these answer rather than refusing.
 	 *
-	 * ⚠️ THE ENQUIRY IS ASKED FIRST AND IT TAKES THE DIRECTORY, which is the
+	 * THE ENQUIRY IS ASKED FIRST AND IT TAKES THE DIRECTORY, which is the
 	 * whole reason these can be operations of `openkal.fs' at all: the same
 	 * implementation succeeds on one volume and fails on another, so a caller
 	 * that could not ask would be left to discover it by the attempt. */
@@ -1594,7 +1720,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		case F_GETFL: return d->flags;
 		case F_SETFL: {
 			const int want = (int)a3;
-			/* ⚠️ REFUSED WHERE IT CANNOT BE HONOURED, AND ONLY WHEN IT IS BEING
+			/* REFUSED WHERE IT CANNOT BE HONOURED, AND ONLY WHEN IT IS BEING
 			 * ASKED FOR. A descriptor that was asked to be non-blocking and is
 			 * not would make every subsequent transfer wait where the caller
 			 * arranged not to. `O_NONBLOCK' is expressed here as the smallest
@@ -1607,7 +1733,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			         | (want & (O_APPEND | O_NONBLOCK));
 			return 0;
 		}
-		/* ⚠️⚠️ THESE THREE ANSWERED `0' AND DID NOTHING, SO EVERY LOCK WAS
+		/* THESE THREE ANSWERED `0' AND DID NOTHING, SO EVERY LOCK WAS
 		 * GRANTED AND NO LOCK EXISTED. Measured with the host as control: two
 		 * programs took one exclusive lock and BOTH were told they had it.
 		 *
@@ -1615,7 +1741,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * permission one is not --- every environment beneath openkal can lock a
 		 * byte range, and what was missing was a word in the specification.
 		 *
-		 * ⭐ openkal 0.10 IS THAT WORD. `kal_fs_lock' states the holder as the
+		 * openkal 0.10 IS THAT WORD. `kal_fs_lock' states the holder as the
 		 * open FILE and requires release when the program ends however it ends,
 		 * which is the half a caller could never have built for itself. */
 		case F_SETLK: case F_SETLKW: {
@@ -1639,7 +1765,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 				 * size that may already have changed. */
 				return -EINVAL;
 			}
-			/* ⭐ ZERO MEANS `TO THE END, HOWEVER FAR THAT COMES TO BE' IN BOTH,
+			/* ZERO MEANS `TO THE END, HOWEVER FAR THAT COMES TO BE' IN BOTH,
 			 * so it is passed rather than translated. */
 			const kal_u64 len = (kal_u64)fl->l_len;
 
@@ -1653,7 +1779,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			const int e = okm_fs_lock(d->file, start, len, mode);
 			return e == kal_ok ? 0 : -okm_errno(e);
 		}
-		/* ⚠️ AND THE ENQUIRY IS STILL REFUSED, WHICH IS NOT AN OVERSIGHT.
+		/* AND THE ENQUIRY IS STILL REFUSED, WHICH IS NOT AN OVERSIGHT.
 		 *
 		 * `F_GETLK' asks whether a lock WOULD block without taking one, and
 		 * openkal has no operation that answers a question without performing
@@ -1662,7 +1788,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * the caller did not ask for, hand a spurious `no' to a caller that
 		 * already holds one, and be stale the moment it returned.
 		 *
-		 * ⭐ A refusal is what a caller can act upon; `F_SETLK' answers the
+		 * A refusal is what a caller can act upon; `F_SETLK' answers the
 		 * question `F_GETLK' is usually asked in order to answer. */
 		case F_GETLK: return -ENOSYS;
 		default: return -EINVAL;
@@ -1682,7 +1808,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			 * terminal can be asked to do beyond that is not an operation
 			 * openkal has.
 			 *
-			 * ⚠️⚠️ AND THE REQUEST IT ASKS IT WITH IS NOT THE ONE THIS BRANCH
+			 * AND THE REQUEST IT ASKS IT WITH IS NOT THE ONE THIS BRANCH
 			 * FIRST RECOGNISED. `TCGETS' is the request a C library uses to
 			 * READ a terminal's settings; the one it uses to ASK WHETHER
 			 * something is a terminal is musl's own `isatty':
@@ -1703,7 +1829,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			 * that decides on colour or on line buffering by asking decided
 			 * wrongly and in silence.
 			 *
-			 * ⭐ THE SIZE IS REPORTED AS UNKNOWN RATHER THAN GUESSED. openkal
+			 * THE SIZE IS REPORTED AS UNKNOWN RATHER THAN GUESSED. openkal
 			 * has no operation that answers it, and `winsize' is already
 			 * zeroed by the caller; a fabricated 80x24 would be this file's one
 			 * forbidden shape --- reporting success having done nothing.
@@ -1786,14 +1912,14 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	/* --- execution contexts ------------------------------------------------ */
 	case SYS_futex:
 		return __okm_futex((const int*)a1, (int)a2, (int)a3, (const struct timespec*)a4);
-	/* ⭐ THROUGH THE INTERFACE, NOT THROUGH THE PLATFORM.
+	/* THROUGH THE INTERFACE, NOT THROUGH THE PLATFORM.
 	 *
 	 * musl's own `src/linux/getrandom.c` issues SYS_getrandom directly, which
 	 * is right where a Linux kernel is underneath and wrong here: this port
 	 * exists so that every request reaches the environment through openkal.
 	 * The call below is the whole difference.
 	 *
-	 * ⚠️ AND IT IS WHY `openkal.random` HAD TO EXIST. Entropy is not derivable
+	 * AND IT IS WHY `openkal.random` HAD TO EXIST. Entropy is not derivable
 	 * from the other interfaces --- a clock reading is unpredictable to a
 	 * reader of the source and not to an adversary, which the AT_RANDOM note
 	 * in okm_start.c already says about the bytes it derives, and openkal.fs
@@ -1804,7 +1930,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * `kal_random_fill` has no partial success to report. An environment that
 	 * blocks says so in `kal_random_props`.
 	 *
-	 * ⭐⭐ AND THE REFERENCE IS WEAK, BECAUSE THE INTERFACE IS OPTIONAL.
+	 * AND THE REFERENCE IS WEAK, BECAUSE THE INTERFACE IS OPTIONAL.
 	 *
 	 * `openkal.random` is optional, and clause 6.1 expresses an implementation
 	 * that does not provide it as the absence of a link-time definition. This
@@ -1818,7 +1944,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * measured on a bare-metal program over openkal-opensbi, which provides
 	 * eight interfaces and not this one.
 	 *
-	 * ⚠️ A WEAK REFERENCE IS NOT THE RUN-TIME REFUSAL CLAUSE 6.1 FORBIDS. That
+	 * A WEAK REFERENCE IS NOT THE RUN-TIME REFUSAL CLAUSE 6.1 FORBIDS. That
 	 * clause governs an IMPLEMENTATION of openkal: one shall not offer an
 	 * interface whose operations report a lack of support while running. What
 	 * happens below is on the other side of the layer --- this file implements
@@ -1838,7 +1964,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_gettid:      return (syscall_arg_t)OKM_CONTEXT_ID();
 	case SYS_getpid:      return (syscall_arg_t)g_self_pid;
 
-	/* ⚠️⚠️ THE SAME DEFECT `getpgrp' HAD, IN THE SAME FAMILY, MISSED ONCE.
+	/* THE SAME DEFECT `getpgrp' HAD, IN THE SAME FAMILY, MISSED ONCE.
 	 *
 	 * musl's `getppid' is `return __syscall(SYS_getppid);' WITHOUT
 	 * `__syscall_ret', deliberately, because POSIX says the call cannot fail.
@@ -1849,7 +1975,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * was not looked for. The criterion added with this change sweeps the whole
 	 * family rather than this member of it.
 	 *
-	 * ⭐ ZERO RATHER THAN ONE. openkal names nothing that started this program,
+	 * ZERO RATHER THAN ONE. openkal names nothing that started this program,
 	 * so there is no identifier to give. Zero is what the first process of a
 	 * system answers on the environment this library's callers come from, and
 	 * it means what is true here: there is no parent to name. One would be a
@@ -1886,7 +2012,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * recorded in musl/PATCHES.md. */
 	case SYS_execve: {
 		pid_t child = 0;
-		/* ⭐ BOUND, WHICH IS THE THING `execve' MEANS. The started program
+		/* BOUND, WHICH IS THE THING `execve' MEANS. The started program
 		 * stands in for this one, so it does not outlive it --- and until
 		 * openkal 0.10 there was no way to say so, which is why a `kill' aimed
 		 * at this image reached the copy that waits and left the program
@@ -1895,7 +2021,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		                                 (char* const*)a2, (char* const*)a3, 1);
 		if (e) return -e;
 
-		/* ⚠️⚠️ THE WAITER LETS GO OF EVERY STREAM IT HOLDS, AND WITHOUT THIS THE
+		/* THE WAITER LETS GO OF EVERY STREAM IT HOLDS, AND WITHOUT THIS THE
 		 * FAR END OF A PIPE NEVER SAW THE END OF INPUT.
 		 *
 		 * A replacement leaves ONE image. This composition leaves two, and the
@@ -1906,14 +2032,14 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * the other side saw a stream that was still open, from a program that
 		 * had already ended.
 		 *
-		 * ⭐ Measured through a consumer: an MCP server that exits while a
+		 * Measured through a consumer: an MCP server that exits while a
 		 * request is in flight should be reported as "Connection closed", and was
 		 * reported as "Timed out after 1000ms" --- the client waited its full
 		 * deadline for an end of input that this image was holding shut. The
 		 * server was long gone; nobody was writing; the pipe stayed open because
 		 * of a waiter neither side knew existed.
 		 *
-		 * ⚠️ THIS IS THE 0.10 DEFECT'S THIRD FACE. `kal_process_spawn_bound' was
+		 * THIS IS THE 0.10 DEFECT'S THIRD FACE. `kal_process_spawn_bound' was
 		 * added because a SIGNAL reached the middle image; this is the middle
 		 * image holding a RESOURCE. Both come from the same fact --- the
 		 * composition has an image the interface never told anyone about --- and
@@ -1936,7 +2062,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 #ifdef SYS_kill
 	case SYS_kill: {
 		const int pid = (int)a1, sig = (int)a2;
-		/* ⭐⭐ A NEGATIVE IDENTIFIER NAMES A UNIT, AND THIS IS THE OTHER HALF OF
+		/* A NEGATIVE IDENTIFIER NAMES A UNIT, AND THIS IS THE OTHER HALF OF
 		 * `setpgid(0, 0)' ABOVE.
 		 *
 		 * `kill(-n)' is how a caller ends a group, and the identifier it uses is
@@ -1944,11 +2070,11 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * copy formed the unit. Both reach the unit this library holds, because
 		 * a program forms at most one and a copy carries its parent's.
 		 *
-		 * ⚠️ WITHOUT THIS THE FORMING WOULD BE INVISIBLE. That is the shape of
+		 * WITHOUT THIS THE FORMING WOULD BE INVISIBLE. That is the shape of
 		 * the two defects before it: a call that succeeds and changes nothing
 		 * observable is worse than one that refuses, because the caller proceeds.
 		 * `kill(-n)' answered ESRCH here while the unit existed. */
-		/* ⚠️ `pid != INT_MIN' IS NOT DEFENSIVENESS. Negating it is undefined --- it
+		/* `pid != INT_MIN' IS NOT DEFENSIVENESS. Negating it is undefined --- it
 		 * has no positive counterpart in the type --- and both this block and the
 		 * comparison at its end negate. A caller reaching here with that value
 		 * names no unit either way, so it takes the same route as any other
@@ -1960,7 +2086,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 				const int e = okm_process_job_terminate(g_child[gi].job);
 				return e == kal_ok ? 0 : -okm_errno(e);
 			}
-			/* ⚠️⚠️ AND THIS PROGRAM'S OWN UNIT IS REACHED ONLY WHEN THE CALLER
+			/* AND THIS PROGRAM'S OWN UNIT IS REACHED ONLY WHEN THE CALLER
 			 * NAMED IT, WHICH IS THE WHOLE OF THE 0.12.0 DEFECT.
 			 *
 			 * The condition used to be `g_job_held' alone. Every negative
@@ -1971,7 +2097,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			 * library --- a program that formed a unit and called
 			 * `kill(-99999, SIGKILL)' ended on signal 9.
 			 *
-			 * ⭐ IT WAS WRITTEN TO SERVE `fork(); setpgid(0, 0); exec', AND IT
+			 * IT WAS WRITTEN TO SERVE `fork(); setpgid(0, 0); exec', AND IT
 			 * CANNOT. There the unit belongs to the copy, and its handle is the
 			 * copy's: openkal handles do not cross a spawn boundary --- clause
 			 * 6.7 constructs them from an index into the holder's own table --- so
@@ -1989,7 +2115,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		}
 		const int i = child_index(pid);
 		if (i >= 0) {
-			/* ⚠️ SIGNAL ZERO IS AN ENQUIRY AND USED TO TERMINATE THE CHILD.
+			/* SIGNAL ZERO IS AN ENQUIRY AND USED TO TERMINATE THE CHILD.
 			 * Every value reached `kal_process_terminate', so the one form of
 			 * `kill' whose whole purpose is to change nothing --- the test that
 			 * a program is still there --- killed it. */
@@ -2002,7 +2128,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * reported ESRCH --- including for SIGABRT. Zero and minus one name
 		 * groups that contain this program, and it is the only member this
 		 * library can reach. */
-		/* ⚠️ AND IT IS `g_self_pid' RATHER THAN THE CONSTANT. A copy made by
+		/* AND IT IS `g_self_pid' RATHER THAN THE CONSTANT. A copy made by
 		 * `fork' answers the identifier its parent recorded, so comparing
 		 * against 1 would make `raise' and `abort' report ESRCH in every copy. */
 		if (pid == g_self_pid || pid == 0 || pid == -1) return signal_self(sig);
@@ -2022,13 +2148,13 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 #endif
 
 	/* --- duplicating the calling image -------------------------------------- */
-	/* ⭐ `fork' IS COMPOSED ABOVE `openkal.space' AND THE SPECIFICATION SAYS SO.
+	/* `fork' IS COMPOSED ABOVE `openkal.space' AND THE SPECIFICATION SAYS SO.
 	 * okm_fork.c carries the composition and the header it quotes. What reaches
 	 * here is musl's `_Fork', which issues this call with a termination signal
 	 * and no stack; every other shape asks for a context that SHARES the
 	 * caller's address space, which is `openkal.task' and reaches this library
 	 * through `__clone' rather than through this seam. */
-	/* ⚠️ TWO NUMBERS AND NOT ONE, AND THE SECOND IS THE ONE THAT MATTERED.
+	/* TWO NUMBERS AND NOT ONE, AND THE SECOND IS THE ONE THAT MATTERED.
 	 * musl's `_Fork' issues `SYS_fork' where the architecture has it and
 	 * `SYS_clone' where it does not, so an implementation of the second alone
 	 * is reached on aarch64 and riscv64 and never on x86_64. Measured: the
@@ -2162,7 +2288,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		fd_set* ex = (fd_set*)a4;
 		if (nfds < 0 || nfds > FD_SETSIZE) return -EINVAL;
 
-		/* ⚠️ A BOUND ON THE SET, STATED RATHER THAN SILENT. Each descriptor in
+		/* A BOUND ON THE SET, STATED RATHER THAN SILENT. Each descriptor in
 		 * the set costs one bounded operation per round, and the set has to be
 		 * held somewhere while that happens. A larger one is refused; it is not
 		 * truncated, because a `select' that watched some of what it was given
@@ -2185,7 +2311,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			watched++;
 		}
 
-		/* ⚠️ THE TWO CALLS STATE THE BOUND IN DIFFERENT STRUCTURES, and which
+		/* THE TWO CALLS STATE THE BOUND IN DIFFERENT STRUCTURES, and which
 		 * one was written is decided by the number rather than by the machine:
 		 * `select' passes a `timeval' and `pselect6' a `timespec'. Reading one
 		 * as the other would misread the fractional field by a factor of a
@@ -2230,7 +2356,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_getuid: case SYS_geteuid: case SYS_getgid: case SYS_getegid:
 		return 1000;
 
-	/* ⚠️ `getpgrp' HANDED A NEGATED ERROR TO ITS CALLER AS A PROCESS GROUP.
+	/* `getpgrp' HANDED A NEGATED ERROR TO ITS CALLER AS A PROCESS GROUP.
 	 *
 	 * There was no case for this number, so the default arm answered -ENOSYS
 	 * --- and musl's `getpgrp' is `return __syscall(SYS_getpgid, 0);' WITHOUT
@@ -2245,7 +2371,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * program's is a group this environment has no way to name, and is
 	 * refused.
 	 *
-	 * ⚠️⚠️ THIS PARAGRAPH USED TO END "`setpgid' AND `setsid' REMAIN REFUSED:
+	 * THIS PARAGRAPH USED TO END "`setpgid' AND `setsid' REMAIN REFUSED:
 	 * MAKING A GROUP IS NOT THE SAME AS BEING IN ONE", AND THAT ANSWERED A
 	 * QUESTION NEITHER OF THEM ASKS.
 	 *
@@ -2260,7 +2386,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * already a process group leader. `getpgid(0) == getpid()' is that
 	 * assertion, so EPERM is the true answer rather than a polite one.
 	 *
-	 * ⭐ AND THE DIFFERENCE IS NOT COSMETIC. The `fork'-then-`setsid' dance
+	 * AND THE DIFFERENCE IS NOT COSMETIC. The `fork'-then-`setsid' dance
 	 * exists BECAUSE of EPERM, so every daemonising library handles it; not one
 	 * handles ENOSYS. A written-down failure is one a caller can act on. */
 	case SYS_getpgid:
@@ -2271,7 +2397,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_getsid:
 		return (a1 == 0 || a1 == g_self_pid) ? g_self_pid : -ESRCH;
 
-	/* ⭐⭐ A REAL GROUP SINCE 0.12, AND IT IS THE CALL A SHELL RUNNER MAKES.
+	/* A REAL GROUP SINCE 0.12, AND IT IS THE CALL A SHELL RUNNER MAKES.
 	 *
 	 * `setpgid(0, 0)' asks that THIS program lead a unit of its own, which
 	 * openkal 0.11 spells `kal_process_job_enter'. It used to answer 0 and form
@@ -2279,7 +2405,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * trivially alone --- and the caller's next act, `kill(-pid)', found nothing
 	 * to kill.
 	 *
-	 * ⚠️ THE UNIT IS KEPT, BECAUSE THE NUMBER THE CALLER WILL USE IS NOT ENOUGH.
+	 * THE UNIT IS KEPT, BECAUSE THE NUMBER THE CALLER WILL USE IS NOT ENOUGH.
 	 * A caller ends a group by naming a negative identifier, and openkal's unit
 	 * is a handle whose meaning is the implementation's --- a process group's
 	 * identifier on one system, a job object on another. `g_job' is where this
@@ -2304,7 +2430,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_setsid:
 		return -EPERM;   /* already a process group leader; see above */
 
-	/* ⭐ THE BOUND IS THIS LIBRARY'S OWN AND IT WAS REFUSING TO STATE IT.
+	/* THE BOUND IS THIS LIBRARY'S OWN AND IT WAS REFUSING TO STATE IT.
 	 *
 	 * musl answers `sysconf(_SC_OPEN_MAX)' from this call, so with no case here
 	 * the answer was ZERO --- and a program sizing a set of descriptors, or
@@ -2319,7 +2445,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 *
 	 * musl reaches this through `prlimit64' first and falls back to
 	 * `getrlimit' only on ENOSYS, so answering this one answers both. */
-	/* ⭐⭐ IT ANSWERED 1, SILENTLY, AND A POOL OF WORKERS WAS SIZED AGAINST IT.
+	/* IT ANSWERED 1, SILENTLY, AND A POOL OF WORKERS WAS SIZED AGAINST IT.
 	 *
 	 * musl's `sysconf(_SC_NPROCESSORS_ONLN)' reaches this, and with no case it
 	 * fell back to 1 --- so `std::thread::hardware_concurrency()' answered 1
@@ -2328,7 +2454,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * openkal 0.10 adds the enquiry, and it reports the set THIS context may
 	 * run on rather than the set the machine has.
 	 *
-	 * ⚠️ ZERO IS `CANNOT SAY' AND IS NOT ONE, so it is reported as a refusal
+	 * ZERO IS `CANNOT SAY' AND IS NOT ONE, so it is reported as a refusal
 	 * rather than as a bitmap of one processor: musl would read the latter as a
 	 * fact and this port would be inventing it. */
 #ifdef SYS_sched_getaffinity
@@ -2403,7 +2529,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	}
 #endif
 
-	/* ⭐ REFUSED FROM A CASE OF ITS OWN RATHER THAN FROM THE DEFAULT ARM, SO
+	/* REFUSED FROM A CASE OF ITS OWN RATHER THAN FROM THE DEFAULT ARM, SO
 	 * THAT THE TRACE DOES NOT REPORT IT.
 	 *
 	 * musl's `pthread_create' calls `__membarrier_init' the first time a
@@ -2412,7 +2538,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * optimisation and failing it costs nothing. Nothing in this port's musl
 	 * ever calls `__membarrier' itself.
 	 *
-	 * ⚠️ It reached the default arm, so `OPENKAL_MUSL_TRACE=enosys' reported it
+	 * It reached the default arm, so `OPENKAL_MUSL_TRACE=enosys' reported it
 	 * beside five operations that a program actually wanted, and the first
 	 * consumer to use that switch had to work out which of the six mattered.
 	 * A trace whose reader must filter it is a trace that costs its reader
@@ -2470,7 +2596,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * accepted and can never run is exactly the silent wrongness clause 3.1
 	 * names, so the request is refused and the program learns it. */
 	case SYS_rt_sigprocmask: {
-		/* ⚠️⚠️ THE SIZE IS THE CALLER'S, AND TAKING IT FROM THE TYPE INSTEAD
+		/* THE SIZE IS THE CALLER'S, AND TAKING IT FROM THE TYPE INSTEAD
 		 * DESTROYED THE CALLER'S RETURN ADDRESS.
 		 *
 		 * This wrote `sizeof(sigset_t)' --- 128 bytes --- into whatever `a3'
@@ -2485,7 +2611,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * -0x20 in a frame of 0x30, so 120 bytes past it lay the saved frame
 		 * pointer and the return address, and `__sigaction' returned to zero.
 		 *
-		 * ⭐ MEASURED, and the whole of the reproduction is three lines:
+		 * MEASURED, and the whole of the reproduction is three lines:
 		 *
 		 *     int main(void) { signal(SIGABRT, h); return 0; }
 		 *
@@ -2495,7 +2621,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * a null pointer, and reads as the second. Every other signal number
 		 * returns SIG_ERR and exits 0.
 		 *
-		 * ⚠️ AND IT WAS NOT ONLY INSTALLING A HANDLER. `signal(SIGABRT, SIG_IGN)'
+		 * AND IT WAS NOT ONLY INSTALLING A HANDLER. `signal(SIGABRT, SIG_IGN)'
 		 * and a plain enquiry, `sigaction(SIGABRT, NULL, &old)', died the same
 		 * way: musl takes the lock for any change to that disposition, and
 		 * blocking signals around it is how it takes it. So a program that only
@@ -2509,7 +2635,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		return 0;
 	}
 	case SYS_rt_sigaction: {
-		/* ⚠️ THE SAME DEFECT'S OTHER HALF, IN THE OTHER DIRECTION. The
+		/* THE SAME DEFECT'S OTHER HALF, IN THE OTHER DIRECTION. The
 		 * old-action was cleared for the size of a structure declared HERE ---
 		 * three fields --- while `struct k_sigaction' is four, so eight bytes
 		 * of the caller's structure were left holding whatever the stack held
@@ -2532,7 +2658,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		return -ENOSYS;
 	}
 #ifdef SYS_sigaltstack
-	/* ⚠️ IT ANSWERED `0' AND INSTALLED NOTHING, AND THE ENQUIRY LIED TOO.
+	/* IT ANSWERED `0' AND INSTALLED NOTHING, AND THE ENQUIRY LIED TOO.
 	 * Measured: install a stack, ask for it back, and the answer is a zeroed
 	 * record --- reported as success, with `ss_sp' and `ss_size' both zero,
 	 * rather than as "none is installed". An alternate stack is where a signal

@@ -1,7 +1,7 @@
 /* The seam between the C library and the openkal interfaces that need not be
  * there.
  *
- * ⚠️ WHY A SEAM RATHER THAN A GUARD AT EACH CALL.
+ * WHY A SEAM RATHER THAN A GUARD AT EACH CALL.
  *
  * `openkal.fs' and `openkal.process' are called from about forty places in
  * okm_syscall.c, spread through a switch on the system call number. Guarding
@@ -13,7 +13,7 @@
  * `okm_process_*'. Where the interface is present these are the interface, with
  * no code generated for the indirection. Where it is not, they are the answer.
  *
- * ⭐ AND THE ANSWER IS AN ERROR, WHICH IS ALLOWED HERE AND FORBIDDEN BELOW.
+ * AND THE ANSWER IS AN ERROR, WHICH IS ALLOWED HERE AND FORBIDDEN BELOW.
  *
  * openkal clause 6.2 says an operation that is present and always fails is a
  * defect, and that the remedy is that its absence be expressed by its absence.
@@ -28,7 +28,7 @@
  * absence becomes, one layer up, an absence expressed by a defined error, and
  * the program that never opens a file never notices either.
  *
- * ⚠️ THE ONE WAY THIS COULD GO WRONG IS NOT PRESENT: nothing below reports
+ * THE ONE WAY THIS COULD GO WRONG IS NOT PRESENT: nothing below reports
  * SUCCESS having done nothing. Every operation that could have done something
  * fails. The exceptions are marked where they appear and each is an operation
  * that is COMPLETE when there is nothing to do --- releasing a handle that
@@ -60,13 +60,14 @@
 #define okm_fs_file_info     kal_fs_file_info
 #define okm_fs_set_modified  kal_fs_set_modified
 #define okm_fs_set_modified_at kal_fs_set_modified_at
+#define okm_fs_set_executable_at kal_fs_set_executable_at
 #define okm_fs_lock          kal_fs_lock
 #define okm_fs_unlock        kal_fs_unlock
 #define okm_fs_capacity      kal_fs_capacity
 #define okm_fs_list_begin    kal_fs_list_begin
 #define okm_fs_list_next     kal_fs_list_next
 
-/* ⚠️ WEAK, BECAUSE A VOLUME MAY HAVE NO SUCH NODES AND AN IMPLEMENTATION MAY
+/* WEAK, BECAUSE A VOLUME MAY HAVE NO SUCH NODES AND AN IMPLEMENTATION MAY
  * NOT BE ABLE TO MAKE ONE. These are operations of `openkal.fs' and are present
  * wherever it is, so the weakness is not about the interface --- it is about a
  * backend built before they existed. `kal_fs_props' answers, per directory,
@@ -74,7 +75,7 @@
 extern __typeof(kal_fs_link_create) kal_fs_link_create __attribute__((__weak__));
 extern __typeof(kal_fs_link_read)   kal_fs_link_read   __attribute__((__weak__));
 
-/* ⚠️⚠️ AND THEY GO THROUGH THE SEAM LIKE EVERYTHING ELSE, WHICH THEY DID NOT.
+/* AND THEY GO THROUGH THE SEAM LIKE EVERYTHING ELSE, WHICH THEY DID NOT.
  *
  * The two call sites named `kal_fs_link_*' directly and tested the weak symbol
  * themselves. That is correct where `openkal.fs' is present and is not a
@@ -85,7 +86,7 @@ extern __typeof(kal_fs_link_read)   kal_fs_link_read   __attribute__((__weak__))
  *     ld.lld: error: undefined symbol: kal_fs_link_read
  *     >>> referenced by okm_syscall.c:340 ... (do_readlink)
  *
- * ⭐ WHICH IS THE FAILURE THIS FILE'S OWN OPENING COMMENT PREDICTS, IN THE
+ * WHICH IS THE FAILURE THIS FILE'S OWN OPENING COMMENT PREDICTS, IN THE
  * WORDS IT PREDICTS IT IN: "a forty-first added later would be the one that was
  * missed --- and missed silently, because the way it shows is a link failure on
  * a target nobody was building at the time". It was found by openkal-opensbi's
@@ -124,7 +125,7 @@ static inline int okm_fs_open(struct kal_dir, const char*, kal_uintptr, kal_uint
  * release and nothing to report --- the openkal operations are void too. */
 static inline void okm_fs_close_dir(struct kal_dir) {}
 static inline void okm_fs_close_file(struct kal_file) {}
-/* ⚠️ Zero, which is not a valid stream, and it is only ever reached with a file
+/* Zero, which is not a valid stream, and it is only ever reached with a file
  * handle no operation above can have produced. A caller that reaches here has
  * already ignored a failure, and zero is what it then passes to
  * `kal_stream_write', which refuses it. */
@@ -155,6 +156,8 @@ static inline int okm_fs_file_info(struct kal_file, kal_u32,
 static inline int okm_fs_set_modified(struct kal_file, kal_u64) { return kal_err_not_supported; }
 static inline int okm_fs_set_modified_at(struct kal_dir, const char*, kal_uintptr,
                                          kal_u64) { return kal_err_not_supported; }
+static inline int okm_fs_set_executable_at(struct kal_dir, const char*, kal_uintptr,
+                                           int) { return kal_err_not_supported; }
 static inline int okm_fs_lock(struct kal_file, kal_u64, kal_u64,
                               kal_uintptr) { return kal_err_not_supported; }
 static inline int okm_fs_unlock(struct kal_file, kal_u64,
@@ -176,7 +179,7 @@ static inline int okm_fs_list_next(struct kal_dir, kal_uintptr*, char*, kal_uint
 #define okm_process_terminate kal_process_terminate
 #define okm_process_close     kal_process_close
 
-/* ⭐⭐ THIS WAS THE ONE WEAK REFERENCE THAT NEEDED A DIFFERENT SPELLING, AND
+/* THIS WAS THE ONE WEAK REFERENCE THAT NEEDED A DIFFERENT SPELLING, AND
  * openkal 0.9 REMOVED THE REASON.
  *
  * `kal_process_props' was an OBJECT. Every other weak reference in this port
@@ -224,7 +227,7 @@ static inline void okm_process_close(struct kal_process) {}
 #define okm_task_wait  kal_task_wait
 #define okm_task_wake  kal_task_wake
 
-/* ⭐ WEAK, BECAUSE openkal 0.10 ADDED IT AND A BACKEND MAY NOT HAVE FOLLOWED.
+/* WEAK, BECAUSE openkal 0.10 ADDED IT AND A BACKEND MAY NOT HAVE FOLLOWED.
  * Every route in this port that reaches an optional operation tests the
  * reference before calling; this one is reached from `sched_getaffinity', which
  * a program asks once at startup and must not fault in. */
@@ -251,7 +254,7 @@ static inline int okm_task_join(struct kal_task) { return kal_ok; }
  * accurate rather than a stand-in: the caller asked to let something else run,
  * everything else has already run, and control comes back. */
 static inline void okm_task_yield(void) {}
-/* ⚠️ THE ONE ANSWER HERE THAT WOULD HANG RATHER THAN FAIL IF IT WERE WRONG.
+/* THE ONE ANSWER HERE THAT WOULD HANG RATHER THAN FAIL IF IT WERE WRONG.
  *
  * musl waits like this: `while (*addr == val) futex(WAIT)'. With one execution
  * context nothing can change *addr while this call is in progress, so a caller
@@ -261,7 +264,7 @@ static inline void okm_task_yield(void) {}
  * wait did not happen. */
 static inline int okm_task_wait(const kal_u32*, kal_u32,
                                 kal_u64) { return kal_err_not_supported; }
-/* ⚠️ SUCCESS, AND IT IS THE THIRD AND LAST OPERATION HERE THAT REPORTS ANY.
+/* SUCCESS, AND IT IS THE THIRD AND LAST OPERATION HERE THAT REPORTS ANY.
  *
  * Waking every waiter is complete when there are none, and zero is the count
  * rather than a refusal --- a wake with no waiter is an ordinary outcome on

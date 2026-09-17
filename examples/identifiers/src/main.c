@@ -5,14 +5,14 @@
  * header overlay defines it as an attribute and this package published the path
  * it is built from.
  *
- * ⭐ THIS IS A COMPILE-TIME CRITERION AND IT IS THE WHOLE OF THE TEST. If any
+ * THIS IS A COMPILE-TIME CRITERION AND IT IS THE WHOLE OF THE TEST. If any
  * of the three below is still a macro, this file does not compile: in C they
  * were emptied, so `static int hidden = 7;' becomes `static int  = 7;'. There
  * is nothing to run and nothing to compare --- the program exists so that
  * something LINKS and RUNS afterwards, which is what distinguishes a source
  * that compiles from a package that works.
  *
- * ⚠️ `restrict' IS NOT AMONG THEM, and its absence here is deliberate rather
+ * `restrict' IS NOT AMONG THEM, and its absence here is deliberate rather
  * than an oversight. musl's PUBLIC headers write it --- <stdio.h> declares
  * `fprintf(FILE *restrict, const char *restrict, ...)' --- so a C++ program
  * above this library needs the spelling defined and cannot have the name. That

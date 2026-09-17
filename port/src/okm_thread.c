@@ -154,7 +154,7 @@ syscall_arg_t __okm_task_exit(int code)
 	return 0;
 }
 
-/* ⚠️⚠️ A DETACHED CONTEXT RELEASES ITS MAPPING FROM WHERE IT STANDS, AND THE
+/* A DETACHED CONTEXT RELEASES ITS MAPPING FROM WHERE IT STANDS, AND THE
  * STACK MUSL MOVED TO FIRST WAS OVERRUN FIFTY TIMES OVER.
  *
  * A detached thread releases its own mapping as the last thing it does. On Linux
@@ -206,7 +206,7 @@ syscall_arg_t __okm_futex(const int* addr, int op, int val, const struct timespe
 		if (e != kal_ok) return -okm_errno(e);
 		return (long)woken;
 	}
-	/* ⚠️⚠️ WOKEN HERE RATHER THAN MOVED THERE, AND WITHOUT THIS CASE A CONDITION
+	/* WOKEN HERE RATHER THAN MOVED THERE, AND WITHOUT THIS CASE A CONDITION
 	 * VARIABLE WITH TWO WAITERS STOPPED FOR EVER.
 	 *
 	 * `FUTEX_REQUEUE' asks for `val' waiters upon `addr' to be woken and a
@@ -216,7 +216,7 @@ syscall_arg_t __okm_futex(const int* addr, int op, int val, const struct timespe
 	 * nothing that moves a waiter between two addresses --- so this used to reach
 	 * the arm below and answer ENOSYS.
 	 *
-	 * ⚠️ AND MUSL DOES NOT CHECK. `unlock_requeue' in pthread_cond_timedwait.c
+	 * AND MUSL DOES NOT CHECK. `unlock_requeue' in pthread_cond_timedwait.c
 	 * releases the barrier and then makes this request; when it fails there is no
 	 * remaining path that wakes anyone, so the next waiter in the list sleeps
 	 * until the program is killed:
@@ -226,7 +226,7 @@ syscall_arg_t __okm_futex(const int* addr, int op, int val, const struct timespe
 	 *     else __syscall(SYS_futex, l, FUTEX_REQUEUE|FUTEX_PRIVATE, 0, 1, r) != -ENOSYS
 	 *         || __syscall(SYS_futex, l, FUTEX_REQUEUE, 0, 1, r);
 	 *
-	 * ⭐ IT TAKES TWO WAITERS, WHICH IS WHY IT SURVIVED. That call is reached only
+	 * IT TAKES TWO WAITERS, WHICH IS WHY IT SURVIVED. That call is reached only
 	 * when `node.prev' is set --- when a second context is queued behind the one
 	 * being released. One waiter upon a condition variable never reaches it, and
 	 * one waiter is what almost every program has. Measured against a host: a
@@ -240,7 +240,7 @@ syscall_arg_t __okm_futex(const int* addr, int op, int val, const struct timespe
 	 * upon the mutex, where a move would have left it blocked once. That is a cost
 	 * in scheduling and not in correctness, and it is the whole difference.
 	 *
-	 * ⚠️ `val2' arrives in the argument this port declares as a deadline, because
+	 * `val2' arrives in the argument this port declares as a deadline, because
 	 * that is the register the operation puts it in. It is a count here. */
 	case FUTEX_REQUEUE: {
 		const kal_intptr move = (kal_intptr)t;

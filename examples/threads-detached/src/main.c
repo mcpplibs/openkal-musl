@@ -12,7 +12,7 @@
  * overwritten and jumped into it: every program whose detached thread ended
  * stopped with an access violation.
  *
- * ⭐ WHAT IS OBSERVED. Detached threads that end one after another, then the
+ * WHAT IS OBSERVED. Detached threads that end one after another, then the
  * two tables beneath the shared stack in use: a key with a destructor, and a
  * joinable thread's own error value, which is reached through the context table.
  */

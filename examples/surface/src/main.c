@@ -1,7 +1,7 @@
 /* The surface a program reaches for that is neither a file nor another program,
  * asked by a program that names no openkal symbol.
  *
- * ⭐⭐ WHY THIS FILE EXISTS, AND IT IS THE WHOLE POINT OF IT.
+ * WHY THIS FILE EXISTS, AND IT IS THE WHOLE POINT OF IT.
  *
  * Every probe in this repository until now asked whether something WORKED. None
  * of them asked whether an answer was TRUE. Those are different questions, and
@@ -21,13 +21,13 @@
  *                    answered 0 --- a bound this library sets itself and was
  *                    refusing to state
  *
- * ⚠️ NOT ONE of those is a missing operation, so not one of them appears in
+ * NOT ONE of those is a missing operation, so not one of them appears in
  * `OPENKAL_MUSL_TRACE=enosys'. They are operations that are PRESENT AND ANSWER
  * WRONGLY, which no diagnostic here can see and no probe here was asking about.
  * They were found by writing this file and comparing every answer against the
  * host's, and that comparison is what the file preserves.
  *
- * ⚠️ SO EVERY OBSERVATION BELOW STATES THE ANSWER IT EXPECTS, and a refusal is
+ * SO EVERY OBSERVATION BELOW STATES THE ANSWER IT EXPECTS, and a refusal is
  * an expected answer wherever a refusal is the truth. "It returned" is not an
  * observation this file makes.
  *
@@ -63,7 +63,7 @@ static void check(int ok, const char* what)
 
 /* A call that must fail, and must fail WITH A PARTICULAR REASON.
  *
- * ⚠️ THE REASON IS HALF THE OBSERVATION. `setsid' answering ENOSYS and `setsid'
+ * THE REASON IS HALF THE OBSERVATION. `setsid' answering ENOSYS and `setsid'
  * answering EPERM are both refusals and are not the same answer: every
  * daemonising library in existence handles the second, because the
  * `fork'-then-`setsid' dance exists for it, and none handles the first. */
@@ -90,7 +90,7 @@ int main(int argc, char** argv)
 
 	/* --- an identifier is a number, and never a negated error -------------- */
 
-	/* ⚠️⚠️ THE FAMILY AND NOT THE MEMBER. `getpgrp' had exactly this defect and
+	/* THE FAMILY AND NOT THE MEMBER. `getpgrp' had exactly this defect and
 	 * was fixed; `getppid', three lines away in the same dispatch, was not
 	 * looked for and had it too. Both are written in musl WITHOUT
 	 * `__syscall_ret' --- deliberately, because POSIX says they cannot fail ---
@@ -118,7 +118,7 @@ int main(int argc, char** argv)
 	const long open_max = sysconf(_SC_OPEN_MAX);
 	check(open_max > 0, "the greatest number of descriptors is answered");
 
-	/* ⚠️⚠️ IT ANSWERED 1, SILENTLY. `hardware_concurrency()' reads this, so a
+	/* IT ANSWERED 1, SILENTLY. `hardware_concurrency()' reads this, so a
 	 * program sizing a pool of workers got one worker and no error. openkal 0.10
 	 * added the enquiry beneath it. This asserts only that it is a real count
 	 * and not the fallback, because the number itself is the machine's. */
@@ -133,7 +133,7 @@ int main(int argc, char** argv)
 
 	/* --- a lock that is not taken is not reported as taken ----------------- */
 
-	/* ⚠️⚠️ THESE THREE ANSWERED 0 AND DID NOTHING. Measured against the host:
+	/* THESE THREE ANSWERED 0 AND DID NOTHING. Measured against the host:
 	 * two programs took one exclusive lock and BOTH were told they had it.
 	 *
 	 * 0.10.0 refused them and said the refusal was TEMPORARY in a way `chmod'
@@ -142,7 +142,7 @@ int main(int argc, char** argv)
 	 * observation was the one that would change when the word arrived, and that
 	 * it should change to "a second holder is refused" rather than be deleted.
 	 *
-	 * ⭐ openkal 0.10 IS THAT WORD, so it changed, and this is now the
+	 * openkal 0.10 IS THAT WORD, so it changed, and this is now the
 	 * observation it said it would become. `kal_fs_lock' states the holder as
 	 * the open FILE, which is why a SECOND open file of one name is refused
 	 * here --- the older process-held form would have granted it, and a library
@@ -158,7 +158,7 @@ int main(int argc, char** argv)
 			errno = 0;
 			check(fcntl(fd, F_SETLK, &fl) == 0, "an exclusive lock is taken");
 
-			/* ⭐ THE OBSERVATION THAT TELLS THE TWO FORMS APART, and it needs no
+			/* THE OBSERVATION THAT TELLS THE TWO FORMS APART, and it needs no
 			 * second program: a SECOND OPEN FILE of the same name, here. The
 			 * process-held form grants this, because the holder is the process
 			 * and the process already holds it. The open-file form refuses it,
@@ -181,7 +181,7 @@ int main(int argc, char** argv)
 			un.l_type = F_UNLCK; un.l_whence = SEEK_SET; un.l_start = 0; un.l_len = 0;
 			check(fcntl(fd, F_SETLK, &un) == 0, "the lock is released");
 
-			/* ⚠️ AND THE ENQUIRY IS STILL REFUSED, WHICH IS NOT AN OVERSIGHT.
+			/* AND THE ENQUIRY IS STILL REFUSED, WHICH IS NOT AN OVERSIGHT.
 			 * `F_GETLK' asks whether a lock WOULD block without taking one, and
 			 * openkal has no operation that answers a question without
 			 * performing it. Taking the lock and releasing it would answer, and
@@ -215,7 +215,7 @@ int main(int argc, char** argv)
 
 	/* --- a group of one is a group this program is already in --------------- */
 
-	/* ⚠️ BOTH OF THESE USED TO ANSWER ENOSYS, on the ground that "making a group
+	/* BOTH OF THESE USED TO ANSWER ENOSYS, on the ground that "making a group
 	 * is not the same as being in one" --- which answers a question neither of
 	 * them asks. `setpgid(0, 0)' asks for the calling program to be in a group
 	 * of its own, and `getpgid(0) == getpid()' above says it already is. */

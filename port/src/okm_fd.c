@@ -24,7 +24,7 @@
 #include "okm.h"
 /* For kal_process_channel_close: a channel end is owned and is released here.
  *
- * ⚠️ WEAK, for the reason okm_syscall.c states beside the same pair: a backend
+ * WEAK, for the reason okm_syscall.c states beside the same pair: a backend
  * that provides no `openkal.process' provides neither, and a strong reference
  * would make an interface clause 6.1 permits a backend to decline into one every
  * program must have. A descriptor of this kind cannot exist without the
@@ -57,17 +57,26 @@ int okm_errno(int e)
 	case kal_err_not_empty:     return ENOTEMPTY;
 	case kal_err_is_directory:  return EISDIR;
 	case kal_err_not_directory: return ENOTDIR;
+	/* Version 0.13. The name exists, may be started, and is not in a form this
+	 * environment can start --- ENOEXEC is the native condition on every host
+	 * this port targets, and folding it into EIO would report a medium failure
+	 * for a name that read perfectly well. openkal SPEC.md 5.2 states the
+	 * argument; issue 28 is the consumer that measured the absence of it.
+	 * musl's own `execvp' has no `/bin/sh' fallback for ENOEXEC
+	 * (musl/src/process/execvp.c) and this port does not add one --- see
+	 * musl/PATCHES.md, which already declines the analogous case for `:'. */
+	case kal_err_not_program:   return ENOEXEC;
 	default:                    return EIO;
 	}
 }
 
 /* How a program's open(2) flags are said in openkal's vocabulary.
  *
- * ⭐ ONE DECISION IN ONE PLACE. Two callers reach it --- `open' itself and the
+ * ONE DECISION IN ONE PLACE. Two callers reach it --- `open' itself and the
  * file action a spawn may carry --- and a second derivation of the same table
  * would agree with this one until one of them was extended.
  *
- * ⚠️ The mode a caller supplies is not among the inputs, and its absence is not
+ * The mode a caller supplies is not among the inputs, and its absence is not
  * an oversight: `kal_fs_open' takes what a file is opened FOR and not who may
  * later reach it. README.md records what a program observes as a result. */
 kal_uintptr okm_open_flags(int flags)
@@ -104,7 +113,7 @@ static struct { int desc; int cloexec; } g_fd[OKM_MAX_FD];
 static char g_dirpath[OKM_MAX_DIRS][OKM_DIR_PATH];
 static int  g_dirpath_used[OKM_MAX_DIRS];
 
-/* ⭐ THE THREE STREAMS THE PROGRAM WAS STARTED WITH, KEPT BECAUSE A LATER
+/* THE THREE STREAMS THE PROGRAM WAS STARTED WITH, KEPT BECAUSE A LATER
  * QUESTION IS ABOUT HISTORY RATHER THAN ABOUT THE PRESENT.
  *
  * When this library starts another program it must say what that program's
@@ -147,7 +156,7 @@ static void desc_release(int d)
 	struct okm_desc* p = &g_desc[d];
 	if (p->kind == OKM_FILE) okm_fs_close_file(p->file);
 	else if (p->kind == OKM_DIR) okm_fs_close_dir(p->dir);
-	/* ⚠️ A CHANNEL END IS OWNED AND A STREAM IS NOT, WHICH IS WHY THEY ARE TWO
+	/* A CHANNEL END IS OWNED AND A STREAM IS NOT, WHICH IS WHY THEY ARE TWO
 	 * KINDS. openkal draws the same division: the three standard streams are
 	 * borrowed and have no release, while a channel end is obtained and must be
 	 * given back.
@@ -525,7 +534,7 @@ int okm_absolute(int dirfd, const char* path, char* out, size_t cap)
 /* Every stream this image holds, released --- used by the one place that has an
  * image with nothing left to do.
  *
- * ⚠️⚠️ IT EXISTS BECAUSE `execve' HERE LEAVES AN IMAGE BEHIND. A replacement
+ * IT EXISTS BECAUSE `execve' HERE LEAVES AN IMAGE BEHIND. A replacement
  * leaves one image; this library composes it as start, wait, end, which leaves
  * two --- and the second still holds every file description the caller had. A pipe
  * reports the end of input when the LAST writer lets go, so a waiter holding the
@@ -533,7 +542,7 @@ int okm_absolute(int dirfd, const char* path, char* out, size_t cap)
  * already ended. Measured through a consumer: a server that exits mid-request was
  * reported as a timeout rather than as a closed connection.
  *
- * ⚠️ NOT A GENERAL `close everything'. The standard streams are released too,
+ * NOT A GENERAL `close everything'. The standard streams are released too,
  * which is right HERE and wrong anywhere else: this image writes nothing more.
  * The one caller is the `execve' composition, immediately before it waits. */
 void __okm_close_all_for_exec(void)

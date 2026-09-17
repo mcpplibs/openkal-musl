@@ -1,6 +1,6 @@
 /* fork(2), composed above openkal.space.
  *
- * ⭐ THE SPECIFICATION DESCRIBES THIS COMPOSITION AND DECLINES TO PERFORM IT,
+ * THE SPECIFICATION DESCRIBES THIS COMPOSITION AND DECLINES TO PERFORM IT,
  * WHICH IS WHY THE CODE IS HERE AND NOT BENEATH. openkal/include/openkal/space.h
  * says so in terms:
  *
@@ -15,7 +15,7 @@
  * carries in okm_setjmp.S, and the restoring is `longjmp' in the started
  * context. Nothing beneath changes and the specification does not move.
  *
- * ⚠️ AN EARLIER READING OF openkal-linux#13 CONCLUDED THAT THE SPECIFICATION HAD
+ * AN EARLIER READING OF openkal-linux#13 CONCLUDED THAT THE SPECIFICATION HAD
  * DELIBERATELY DECLINED fork, on the ground that duplicating an address space
  * AND ITS EXECUTION STATE cannot be required of every environment. Half of that
  * is right and the conclusion drawn from it was wrong: clause 7.1 declines the
@@ -68,19 +68,19 @@ void __okm_set_self_pid(int pid);
 
 /* The context the started child resumes into.
  *
- * ⚠️ ONE, AND THE PORT'S OWN LOCK AROUND IT. Two contexts forking at once would
+ * ONE, AND THE PORT'S OWN LOCK AROUND IT. Two contexts forking at once would
  * otherwise record over each other and the second child would resume into the
  * first one's frame. This port's table lock is the one taken rather than a lock
  * of this file's, and holding it does a second job worth having: the copy is
  * taken while no other context is part-way through a change to the descriptor
  * table, so the child begins with a table that is whole.
  *
- * ⚠️ THE CHILD RELEASES ITS COPY OF THE LOCK. It was taken before the copy, so
+ * THE CHILD RELEASES ITS COPY OF THE LOCK. It was taken before the copy, so
  * the copy holds it too, and a child that did not release it would stop at the
  * first descriptor it touched. */
 static jmp_buf g_resume;
 
-/* ⚠️⚠️ WHAT THE COPY CARRIES AND WHAT IT DOES NOT: THE IDENTITY IS NOT CARRIED.
+/* WHAT THE COPY CARRIES AND WHAT IT DOES NOT: THE IDENTITY IS NOT CARRIED.
  *
  * okm_context.c keeps this library's per-context state --- its error value, its
  * locale, its thread record --- in a table keyed on `kal_task_current()'. The
@@ -98,7 +98,7 @@ static jmp_buf g_resume;
  * interface asks, and the assumption that a copy keeps its identity was this
  * port's.
  *
- * ⭐ MEASURED, AND THE PORT'S OWN DIAGNOSTIC NAMED IT. On the macOS row the
+ * MEASURED, AND THE PORT'S OWN DIAGNOSTIC NAMED IT. On the macOS row the
  * copy stopped with
  *
  *     openkal-musl: this execution context has no per-context state --- the
@@ -116,7 +116,7 @@ static jmp_buf g_resume;
 static volatile uintptr_t g_carried_tp;
 static void* volatile     g_carried_self;
 
-/* ⭐ AND THE IDENTIFIER, WHICH IS CARRIED FOR THE SAME REASON AND BY THE SAME
+/* AND THE IDENTIFIER, WHICH IS CARRIED FOR THE SAME REASON AND BY THE SAME
  * MEANS. `getpid' answered the constant 1 in every context, so a copy reported
  * the identifier of the image it was copied from: two contexts, one answer, and
  * no way for the copy to name itself. The number the copy should give is the one
@@ -145,12 +145,12 @@ syscall_arg_t __okm_fork(void)
 	g_carried_tp   = __okm_get_tp();
 	g_carried_self = __okm_get_self();
 
-	/* ⚠️ THE ENTRY IS TAKEN BEFORE THE CONTEXT EXISTS, so that the identifier
+	/* THE ENTRY IS TAKEN BEFORE THE CONTEXT EXISTS, so that the identifier
 	 * settled here is the one the copy reads out of its own copy of this global.
 	 * The lock this function already holds is the table's, which is what makes
 	 * reserving here safe and what makes a second acquisition wrong.
 	 *
-	 * ⚠️ `volatile', although both are written BEFORE the `setjmp' below and are
+	 * `volatile', although both are written BEFORE the `setjmp' below and are
 	 * read only on the path that does not resume through it. That is enough to
 	 * be correct and is not enough to be obviously correct: this file's rule is
 	 * that a local live across that call says so, and a reader checking the rule
@@ -161,12 +161,12 @@ syscall_arg_t __okm_fork(void)
 	const volatile int reserved_pid = scratch;
 	g_carried_pid = reserved_pid;
 
-	/* ⚠️ NOTHING BELOW THIS LINE MAY READ A LOCAL VARIABLE THAT WAS WRITTEN
+	/* NOTHING BELOW THIS LINE MAY READ A LOCAL VARIABLE THAT WAS WRITTEN
 	 * AFTER IT. A variable modified between `setjmp' and `longjmp' and not
 	 * declared volatile is indeterminate in the resumed context; the child path
 	 * therefore reads nothing but the two globals above and returns a constant. */
 	if (setjmp(g_resume) != 0) {
-		/* ⚠️ THIS IS THE FIRST THING THE COPY DOES, AND THE ORDER IS THE POINT.
+		/* THIS IS THE FIRST THING THE COPY DOES, AND THE ORDER IS THE POINT.
 		 * `okm_unlock' is an atomic store and touches no per-context state;
 		 * everything after it does. */
 		__okm_set_tp(g_carried_tp);
@@ -175,7 +175,7 @@ syscall_arg_t __okm_fork(void)
 		 * and POSIX is explicit that a duplicate has no children. okm_syscall.c
 		 * records what keeping them would cost. */
 		__okm_forget_children();
-		/* ⭐ AND THE COPY NAMES ITSELF. Read from this file's own global, which
+		/* AND THE COPY NAMES ITSELF. Read from this file's own global, which
 		 * the copy carries because it was written before the copy was taken;
 		 * `__okm_forget_children' above cleared the TABLE and not this. */
 		__okm_set_self_pid((int)g_carried_pid);
@@ -186,7 +186,7 @@ syscall_arg_t __okm_fork(void)
 	struct kal_process child;
 	const int e = kal_space_start(child_entry, 0,
 	                              g_entry_stack + sizeof g_entry_stack, &child);
-	/* ⚠️ THE ENTRY WAS TAKEN BEFORE THE CONTEXT WAS STARTED, so a start that
+	/* THE ENTRY WAS TAKEN BEFORE THE CONTEXT WAS STARTED, so a start that
 	 * failed has to give it back --- otherwise a program whose every `fork'
 	 * fails would exhaust the table and begin reporting EAGAIN for a reason
 	 * that has nothing to do with how many children it has. */
