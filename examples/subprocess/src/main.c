@@ -1018,6 +1018,20 @@ int main(int argc, char** argv)
 		}
 		unlink(path);
 
+		/* A directory's execute bits are its traversal, which openkal does not
+		 * record; a change to them is refused rather than routed to an
+		 * operation that refuses directories with a different error. */
+		if (mkdir("chmod-dir-probe.tmp", 0777) == 0) {
+			struct stat ds;
+			if (stat("chmod-dir-probe.tmp", &ds) == 0) {
+				errno = 0;
+				const int de = chmod("chmod-dir-probe.tmp", (ds.st_mode & 07777) & ~0111u);
+				check(de == -1 && errno == ENOSYS,
+				      "a chmod that would change a directory's execute bits reports ENOSYS");
+			}
+			rmdir("chmod-dir-probe.tmp");
+		}
+
 		/* fchmod has no name to work with: this port keeps none for an open
 		 * file (only a directory's is remembered, for resolving a name that
 		 * ascends out of it), so it is ENOSYS unconditionally. */

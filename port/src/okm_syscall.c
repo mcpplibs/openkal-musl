@@ -300,8 +300,11 @@ static void fill_kstat(const struct kal_node_info* in, struct kstat* out)
 	 * `writable' is this port's only per-class distinction --- when the
 	 * enquiry reports KAL_INFO_EXECUTABLE set, and cleared when it reports the
 	 * position clear or does not answer it at all. "Does not answer" reads as
-	 * "not executable", which is the same reading `access(X_OK)' gives it
-	 * below and is documented in README.md. */
+	 * "not executable" here, as `stat' reported every file before 0.14.0.
+	 * `access(X_OK)' below reads the same absence as "yes", as it did before:
+	 * a program that asks before starting a name still attempts the start,
+	 * and the start reports the reason. The two readings of an unanswered
+	 * position differ, and README.md states both. */
 	if (in->kind == kal_node_directory) mode |= 0111u;
 	else if ((in->present & KAL_INFO_EXECUTABLE) && in->executable) mode |= 0111u;
 	out->st_mode = mode;
@@ -505,6 +508,10 @@ static syscall_arg_t do_chmod(int dirfd, const char* path, mode_t mode)
 
 	const unsigned requested = (unsigned)mode & 07777u;
 	if (requested == current) return 0;   /* nothing to change; see above */
+	/* A directory's execute bits are its traversal, which openkal does not
+	 * record and this port always reports. A change to them is a change this
+	 * port cannot express, and it is refused the way every other one is. */
+	if (info.kind == kal_node_directory) return -ENOSYS;
 
 	const unsigned none = current & ~0111u;
 	const unsigned full = none | ((current & 0444u) >> 2);
