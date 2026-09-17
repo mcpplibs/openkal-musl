@@ -144,7 +144,7 @@ static int startable(struct kal_dir base, const char* rel)
 static int startable_name(struct okm_at* at)
 {
 	const int e = startable(at->base, at->rel);
-#ifdef _WIN32
+#ifdef OKM_TARGET_WINDOWS
 	/* Tried second rather than first, so a file that genuinely bears the name
 	 * is preferred to one that bears the name and the suffix --- the rule the
 	 * spawn below already followed, moved up so that the enquiry follows it

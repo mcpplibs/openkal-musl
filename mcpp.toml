@@ -501,6 +501,29 @@ include_dirs = ["musl-generated/riscv64", "musl/arch/riscv64", "musl/arch/generi
 # library's, and the implementation beneath it names the libraries its own
 # interfaces live in.
 [target.'cfg(windows)'.build]
+# WHICH TARGET THIS IS, STATED BY THE MANIFEST RATHER THAN READ OFF THE
+# COMPILER.
+#
+# `_WIN32` used to answer this for the four sites port/src and
+# port/include/features.h ask it at (OKM_MUSL_INTERNAL is already required
+# alongside it there, so the definition below reaches only this package's own
+# build): argv's shape in okm_start.c, the object-format shims in
+# okm_format.c, the `.exe` retry in okm_spawn.c, and the weak_alias fallback
+# in features.h. `[c-abi] presents = "posix"` (mcpp.toml, above) now leaves
+# `_WIN32` undefined on this target, correctly --- the C environment a
+# program sees is POSIX, and Win32 was never one of the three things that
+# macro used to be asked to mean here. What each of those four sites actually
+# needs to know did not go away with it: this states it directly.
+#
+# THIS DOES NOT REACH A CONSUMER. `defines` under `[build]` is applied to
+# this package's own sources and is not carried to a program built above it
+# --- see the comment beside `OKM_MUSL_INTERNAL=1` for the general rule and
+# the measurement behind it. A consumer that needs to know the target asks
+# openkal's own `[target.'cfg(windows)']`, as every other consumer of this
+# port already does; it does not read this macro, which is why it is not
+# named `OKM_WINDOWS` or anything a program might reach for.
+defines = ["OKM_TARGET_WINDOWS=1"]
+
 # The port's own dl_iterate_phdr is for ELF and is excluded here, as musl's was:
 # this format has no program headers.
 sources = [
