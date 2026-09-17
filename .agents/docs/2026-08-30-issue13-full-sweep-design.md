@@ -26,7 +26,7 @@ openkal-linux **0.7.1**、openkal-llvm-runtime 0.5.0,目标 `x86_64-linux-musl`�
 
 其中**七条是「接受了、没执行、报成功」**——这个端口反复声明要拒绝的那个形状。
 
-⚠️ **最重的一条不在报告者的清单里:文件锁形同虚设。** 两个进程可以同时持有同一把
+**最重的一条不在报告者的清单里:文件锁形同虚设。** 两个进程可以同时持有同一把
 排他锁,而且 `F_GETLK` 报告的锁状态**与事实相反**。
 
 ---
@@ -100,7 +100,7 @@ openkal-linux **0.7.1**、openkal-llvm-runtime 0.5.0,目标 `x86_64-linux-musl`�
   收尾路径(`:314-318`),不要另开 return。
 - 前置检查写成 `startable()` 小函数,`_WIN32` 的 `.exe` 重试(`:342-357`)复用它,
   否则那条路再也走不到。
-- ⚠️ **残留**:名字在但不可执行,前置检查放行,仍以 127 结束调用者。openkal 没有
+- **残留**:名字在但不可执行,前置检查放行,仍以 127 结束调用者。openkal 没有
   可执行位——这和 **F5** 是同一个缺口的两面,两处要一起记进分歧表。
 - 完整修法在 openkal-linux(CLOEXEC 回报管道),另开 issue,**不阻塞本次发布**。
 
@@ -115,14 +115,14 @@ openkal-linux **0.7.1**、openkal-llvm-runtime 0.5.0,目标 `x86_64-linux-musl`�
 
 ### 3.3 C —— `kill` 打不到 `fork`+`execve` 起的程序
 
-⚠️ **本仓今天修不完,而且现在有证据说明为什么。**
+**本仓今天修不完,而且现在有证据说明为什么。**
 `openkal-linux/src/process.cpp` 的 `kal_process_terminate` 是
 `kill(pid, SIGTERM)` ——**单个 pid,不是进程组**;而中间那个等待者阻塞在
 `kal_process_wait` 里,这个端口没有信号投递,它跑不了任何转发代码。
 
 #### 3.3.0 这是规范的缺口,不是后端的缺陷
 
-⭐ **`kal_process_terminate` 没有做错任何事。** 它被要求终止某个被起的程序,它就
+**`kal_process_terminate` 没有做错任何事。** 它被要求终止某个被起的程序,它就
 终止了那一个。规范说的就是这个,后端做的就是这个。缺的是**一种表达不出来的意图**:
 「这个程序是我为了表达『替换我自己』而起的,它的寿命应当以我为界」。openkal 今天
 没有任何原子说得出这句话。
@@ -133,7 +133,7 @@ openkal-linux **0.7.1**、openkal-llvm-runtime 0.5.0,目标 `x86_64-linux-musl`�
 接受了这个判断,就没人再去找可观察的差别。目前已知两处:
 **A(exec 失败时)** 与 **C(信号能不能打到)**。
 
-⚠️ **和 A3 要分清,那一条恰恰相反,是后端缺陷。**
+**和 A3 要分清,那一条恰恰相反,是后端缺陷。**
 `kal_process_spawn` 的子进程**已经知道** `execveat` 失败了(它紧接着
 `exit_group(127)`),却没有把这件事回报给父亲;而 `kal_err_not_found` 这个值早就
 存在,本端口的 `okm_spawn.c:342` 还专门为它写了一条分支。
@@ -148,7 +148,7 @@ openkal-linux **0.7.1**、openkal-llvm-runtime 0.5.0,目标 `x86_64-linux-musl`�
 3. **上报**:向 openkal 要一个「寿命受调用者约束」的起法。
    映射:Linux `PR_SET_PDEATHSIG`、Windows job object、macOS `kqueue`/`NOTE_EXIT` 看门狗。
 
-> ⚠️ 排除一个看似可行的替代:让 `kal_process_terminate` 杀进程组。要让它成立,
+> 排除一个看似可行的替代:让 `kal_process_terminate` 杀进程组。要让它成立,
 > `kal_space_start` 得给复制出的 space 开新组——而**新组会脱离终端的前台组**,
 > 一个带终端界面的程序里,任何读终端的子上下文会拿到 SIGTTIN 而停住。
 > **换了一个更难查的错,不是修好。**
@@ -167,7 +167,7 @@ openkal-linux **0.7.1**、openkal-llvm-runtime 0.5.0,目标 `x86_64-linux-musl`�
   `KAL_OPEN_READ`;失败如实上报。
   - 这不是模拟:调用者要的效果实实在在发生,做不到的实现会返回错误而我们照实翻译。
     与 `chmod` 的情形**不同**——`chmod` 被拒是因为会「报成功而做了别的事」。
-  - ⚠️ 踩在 `fs.h:273` 的前置条件之外(「shall have been opened with
+  - 踩在 `fs.h:273` 的前置条件之外(「shall have been opened with
     KAL_OPEN_WRITE」),**必须记进分歧表并上报规范**(要一个目录形式,或把
     `kal_fs_set_modified` 改述在名字上)。openkal-windows 很可能做不到,那里如实失败。
 - **备选 D2(纯粹派)**:报 `ENOSYS` 而不是 `EISDIR`。`EISDIR` 在说「你传错了类型」,
@@ -183,7 +183,7 @@ openkal-linux **0.7.1**、openkal-llvm-runtime 0.5.0,目标 `x86_64-linux-musl`�
 `getpid=1 getpgid(0)=1 getsid(0)=1`)。然后接着拒绝 `setpgid`/`setsid`,
 理由是「造一个组和身处一个组不是一回事」。
 
-⚠️ **但这两个调用问的不是「造一个组」:**
+**但这两个调用问的不是「造一个组」:**
 
 - `setpgid(0, 0)` 请求的状态是「调用者自成一组」——**按上面三行读数这已经成立**。
   ⇒ 返回 **0**。这不是报告一个不存在的效果,是报告一个**已经存在**的效果。
@@ -195,7 +195,7 @@ openkal-linux **0.7.1**、openkal-llvm-runtime 0.5.0,目标 `x86_64-linux-musl`�
 就是为它存在的),**没有一份处理 `ENOSYS`**。成文的失败调用者接得住,陌生的接不住。
 顺带消掉报告者 trace 里 16 行(`setpgid` 12 + `setsid` 4)。
 
-### 3.6 ⚠️⚠️ F1 / F2 —— 文件锁形同虚设(本轮最重的一条)
+### 3.6 F1 / F2 —— 文件锁形同虚设(本轮最重的一条)
 
 #### 读码
 
@@ -230,7 +230,7 @@ child   F_SETLK(F_WRLCK) -> -1 errno=11 Resource temporarily unavailable
   `F_WRLCK`,于是**读回 `F_WRLCK`,结论是「有人持锁」**——永远。
   一个「等到锁释放为止」的循环**永不退出**。
 
-#### ⭐ 「按理应该支持得了吧?」—— 对,而且这一条**不该学 `chmod` 长期拒绝**
+#### 「按理应该支持得了吧?」—— 对,而且这一条**不该学 `chmod` 长期拒绝**
 
 先把结论摆清楚,因为它和 `chmod` 是**两种完全不同的情形**:
 
@@ -256,7 +256,7 @@ int kal_fs_lock(struct kal_file, kal_u64 start, kal_u64 len, kal_uintptr mode);
 int kal_fs_unlock(struct kal_file, kal_u64 start, kal_u64 len);
 ```
 
-⭐ **关键的一点:实现放在身下,「持有者死了就释放」就是白拿的**——三个环境的内核
+**关键的一点:实现放在身下,「持有者死了就释放」就是白拿的**——三个环境的内核
 都自带这条。而这恰恰是端口自己造不出来的那一条(见下)。
 
 #### 为什么**不能**在端口里模拟
@@ -270,7 +270,7 @@ int kal_fs_unlock(struct kal_file, kal_u64 start, kal_u64 len);
 2. **它会在用户的名字空间里凭空造文件**。sidecar 会出现在 `readdir` 里、
    出现在 `remove_all` 里、出现在校验和里、出现在报告者自己的目录清单里。
    一个 C 库不该往调用者的目录树里放东西。
-3. ⚠️⚠️ **没有崩溃恢复,而这是致命的。** 内核锁由内核在进程死亡时释放;sidecar
+3. **没有崩溃恢复,而这是致命的。** 内核锁由内核在进程死亡时释放;sidecar
    没有人释放。**一个持锁时段错误的程序会把自己永久锁死**,而且下一次运行看到的
    只是「打不开」。这个端口自己的历史里就有段错误的程序。
    ——加「陈旧超时」能绕过,但**一个 C 库没有资格替调用者选那个秒数**
@@ -290,7 +290,7 @@ int kal_fs_unlock(struct kal_file, kal_u64 start, kal_u64 len);
 - **F2 `F_GETLK` 无论如何都要修**:要么一起 ENOSYS,要么至少把 `l_type` 写成
   `F_UNLCK`。「假装没有锁」是自洽的;「假装永远有锁」不是——后者让等锁的循环
   **永不退出**。
-- ⚠️ **代价,以及消费者可以怎么办**:sqlite 拿到 `ENOSYS` 会 `SQLITE_IOERR_LOCK`
+- **代价,以及消费者可以怎么办**:sqlite 拿到 `ENOSYS` 会 `SQLITE_IOERR_LOCK`
   而拒绝打开。**它有出口**:URI 参数 `nolock=1`,或 `unix-none` VFS。
   单实例守卫、状态文件互斥这类用法则要改用报告者已经在用的那种 `mkdir` 协议。
   ⇒ 这是从**静默的数据损坏**换成**响亮的打不开加一个成文的出口**,方向对。
@@ -322,7 +322,7 @@ pid_t getppid(void) { return __syscall(SYS_getppid); }
   意思是「这个环境没有可命名的父亲」,不会触发那条路径。
 - 关键的是**不能再返回 -38**。
 
-⭐ **并且要做一次同族普查**:musl 里所有**不经 `__syscall_ret`** 的调用点,
+**并且要做一次同族普查**:musl 里所有**不经 `__syscall_ret`** 的调用点,
 在 default 支下都会把 `-38` 当结果交出去。这是一类而不是一个,§4 的判据里
 单列一条。
 
@@ -345,11 +345,11 @@ pid_t getppid(void) { return __syscall(SYS_getppid); }
 ### 3.9 F7 / F8 —— 两条小的
 
 - **F7 `sigaltstack` 报成功而什么都没装**:实测装完再查,`ss_sp=0 ss_size=0`
-  (宿主 `ss_sp=0x4040a0 ss_size=65536`)。⚠️ **查询这一半也是虚构的**:它返回 0 并
+  (宿主 `ss_sp=0x4040a0 ss_size=65536`)。**查询这一半也是虚构的**:它返回 0 并
   交出一个全零的 `stack_t`,而不是「没有装过」。这个环境没有信号,备用栈没有意义,
   按本端口自己的规矩改成 **ENOSYS**。风险低(libc++/libunwind 不把失败当致命)。
 - **F8 `getrlimit(RLIMIT_NOFILE)` / `sysconf(_SC_OPEN_MAX)`**:
-  ⚠️ 现在 `sysconf(_SC_OPEN_MAX)` 返回 **0**,而程序会拿它去循环关 fd、定尺寸。
+  现在 `sysconf(_SC_OPEN_MAX)` 返回 **0**,而程序会拿它去循环关 fd、定尺寸。
   **端口自己就知道答案**:`OKM_MAX_FD = 1024`(`okm.h:83`)。
   ⇒ `case SYS_getrlimit/prlimit64`:`RLIMIT_NOFILE` 答 1024;其余仍拒绝。
   一并把 `OKM_MAX_CHILD = 256` 写进 README 的界限表(已有 fd/open-description 两行)。
@@ -360,7 +360,7 @@ pid_t getppid(void) { return __syscall(SYS_getppid); }
 
 | 操作 | 记录要点 | 上报 |
 | --- | --- | --- |
-| **F4** `sched_getaffinity` | ⚠️ 后果是**静默的**:`hardware_concurrency()` 答 1(宿主 32),线程池按 1 开 | `openkal.task` 加一个处理器数量的询问,紧挨 `KAL_TASK_PROP_PARALLEL` |
+| **F4** `sched_getaffinity` | 后果是**静默的**:`hardware_concurrency()` 答 1(宿主 32),线程池按 1 开 | `openkal.task` 加一个处理器数量的询问,紧挨 `KAL_TASK_PROP_PARALLEL` |
 | F9 `statvfs` | `fs::space()` 不可用 | `openkal.fs` 加卷容量询问 |
 | F10 `link` | 只有符号链接,没有硬链接 | 与 `symlink` 那条合并上报 |
 | F11 `mkfifo` | 无 | 低优先 |
@@ -375,7 +375,7 @@ pid_t getppid(void) { return __syscall(SYS_getppid); }
 
 ## 4. 判据(与修复同批,缺一条都不算修完)
 
-⚠️ **现有 `examples/subprocess` 正是漏掉这一整族的那个**:它从不按裸名字起程序、
+**现有 `examples/subprocess` 正是漏掉这一整族的那个**:它从不按裸名字起程序、
 从不 `kill` 一个 `fork`+`execve` 起的程序、从不加锁、从不问自己的身份。
 
 | # | 判据 | 对应 |
@@ -384,13 +384,13 @@ pid_t getppid(void) { return __syscall(SYS_getppid); }
 | 2 | `execve("/不存在")` 返回 -1 且 `errno==ENOENT`,**调用者活着** | A |
 | 3 | `execve("<目录>")` 返回 -1 且 `errno==EACCES` | A |
 | 4 | `posix_spawnp("sh")` 起得来;`posix_spawnp("/不存在")` 返回 ENOENT | B |
-| 5 | ⭐ `fork`+`execve` 起的程序被 `kill` 后**确实停了**(用它写不出的 marker 判) | C |
+| 5 | `fork`+`execve` 起的程序被 `kill` 后**确实停了**(用它写不出的 marker 判) | C |
 | 6 | 目录 `last_write_time` 设得上(D1)/ 报 ENOSYS(D2),二选一钉死 | D |
 | 7 | `setpgid(0,0)==0`;`setsid()==-1 && errno==EPERM` | E |
-| 8 | ⭐ 两个进程,第二个 `F_SETLK` **拿不到**锁(或两个都拿到 ENOSYS) | F1 |
-| 9 | ⭐ 无人持锁时 `F_GETLK` 把 `l_type` 写成 `F_UNLCK`(或返回 ENOSYS) | F2 |
-| 10 | ⭐ `getppid() >= 0` | F3 |
-| 11 | ⭐ **同族普查**:musl 里每个不走 `__syscall_ret` 的调用点都不返回负的 errno | F3 类 |
+| 8 | 两个进程,第二个 `F_SETLK` **拿不到**锁(或两个都拿到 ENOSYS) | F1 |
+| 9 | 无人持锁时 `F_GETLK` 把 `l_type` 写成 `F_UNLCK`(或返回 ENOSYS) | F2 |
+| 10 | `getppid() >= 0` | F3 |
+| 11 | **同族普查**:musl 里每个不走 `__syscall_ret` 的调用点都不返回负的 errno | F3 类 |
 | 12 | `sysconf(_SC_OPEN_MAX) > 0` 且等于 README 记的界限 | F8 |
 | 13 | `sigaltstack()` 返回 ENOSYS | F7 |
 | 14 | `fork` 的复制自称的标识 == 父亲拿到的那个,且嵌套复制也各自成立 | §6 |
@@ -399,17 +399,17 @@ pid_t getppid(void) { return __syscall(SYS_getppid); }
 
 | # | **回归护栏**(两边都必须绿,红了说明修复弄坏了别的) | 对应 |
 | --- | --- | --- |
-| G1 | ⭐ **复制里的 `abort()` 仍是 SIGABRT**,`kill(getpid(),0)` 仍返回 0 | §6 的 ③ —— 改标识会牵动 `signal_self` 那条路 |
+| G1 | **复制里的 `abort()` 仍是 SIGABRT**,`kill(getpid(),0)` 仍返回 0 | §6 的 ③ —— 改标识会牵动 `signal_self` 那条路 |
 | G2 | `fork` 失败时表槽被退还(连续失败不会耗尽表) | §6 的 ② —— 表槽提前占用引入的新失效模式 |
 | G3 | `examples/subprocess --fork --shell --abort-signal` 与 `examples/posix` 全绿 | 全部 |
 | G4 | **控制项**:每条判据都在宿主目标上跑同一份源码 | 全部 |
 
-⚠️ **A/B 对照是必须的**:把 `port/src` 退回 `aab97bc` 只留新探针,**1-14 必须红,
+**A/B 对照是必须的**:把 `port/src` 退回 `aab97bc` 只留新探针,**1-14 必须红,
 G1-G4 必须绿**。一条在缺陷上就是绿的判据证明不了任何事——上一轮的自我 review 已经在
-这上面栽过一次。⭐ 而**把护栏和判据分开列**正是为了不再栽第二次:
+这上面栽过一次。而**把护栏和判据分开列**正是为了不再栽第二次:
 §6 实测时 7 条里有 5 条两边都绿,它们是护栏而不是成绩。
 
-⭐ **并且要记一笔**:这一族**没有一条**能被 `OPENKAL_MUSL_TRACE=enosys` 看见,
+**并且要记一笔**:这一族**没有一条**能被 `OPENKAL_MUSL_TRACE=enosys` 看见,
 因为它们不是缺失的操作,而是**在场却答错的操作**。上一轮把诊断通道当成「下一轮更
 便宜」的答案,这一轮证明它只覆盖了一半。是否加一个「答案可疑」的 trace 位,请 review。
 
@@ -421,9 +421,9 @@ G1-G4 必须绿**。一条在缺陷上就是绿的判据证明不了任何事—
 
 | 候选 | 解释力 | 本轮是否消失 |
 | --- | --- | --- |
-| **F2** `F_GETLK` 永远报「有锁」 | ⭐ 最契合那处 hang:**无子进程、无缺失系统调用、无输出** 三条全中 | ✅ 修掉 |
-| **C** 孤儿仍持有输出端,EOF 永不到来 | 契合「后台任务不终结」:超时 kill 之后程序还活着 | ❌ 需后端 |
-| **pid 恒为 1** | 实测:父、fork 子、被起的程序 `getpid()` **全是 1**。若监督方从 pidfile 读 pid 再 `kill(pid,0)` 轮询,`kill(1,0)` 永远答「活着」 | ❌ 需设计,§6 |
+| **F2** `F_GETLK` 永远报「有锁」 | 最契合那处 hang:**无子进程、无缺失系统调用、无输出** 三条全中 | 修掉 |
+| **C** 孤儿仍持有输出端,EOF 永不到来 | 契合「后台任务不终结」:超时 kill 之后程序还活着 | 需后端 |
+| **pid 恒为 1** | 实测:父、fork 子、被起的程序 `getpid()` **全是 1**。若监督方从 pidfile 读 pid 再 `kill(pid,0)` 轮询,`kill(1,0)` 永远答「活着」 | 需设计,§6 |
 
 ⇒ **建议:先发修复,再问。** F2 修掉之后那处 hang 若消失,就不必再往下查。
 若仍在,要的观察只有三个:
@@ -471,7 +471,7 @@ parent:            getpid()=1   父亲看到 fork 子是 1001
 `__okm_child_reserve(&pid)` / `__okm_child_commit(slot, h)` / `__okm_child_release(slot)`,
 `__okm_child_record` 用它们重写(对 `okm_spawn.c` 的调用者签名不变)。
 
-⚠️ `reserve` **不取锁**,因为 `__okm_fork` 调用它时已经持有——那把锁不可重入,
+`reserve` **不取锁**,因为 `__okm_fork` 调用它时已经持有——那把锁不可重入,
 而复制必须在「没有别的上下文正改到一半」的时刻取,所以本来就得在锁内。
 
 **② `okm_fork.c` —— 标识在复制之前就存在**
@@ -491,10 +491,10 @@ if (e != kal_ok) { __okm_child_release(slot); okm_unlock(); return -okm_errno(e)
 __okm_child_commit(slot, child);
 ```
 
-⚠️ **表槽是在上下文之前拿的,所以启动失败必须退还**,否则一个每次 `fork` 都失败的
+**表槽是在上下文之前拿的,所以启动失败必须退还**,否则一个每次 `fork` 都失败的
 程序会把表耗尽,然后为一个与「它有几个孩子」毫无关系的理由开始报 EAGAIN。
 
-**③ ⚠️ 被牵出来的:所有拿 `1` 当「自己」的比较都得跟着改**
+**③ 被牵出来的:所有拿 `1` 当「自己」的比较都得跟着改**
 
 这是我一开始没预见、写的时候才撞上的。`SYS_kill` 用
 `if (pid == 1 || ...) return signal_self(sig);` 判断「打给自己」——
@@ -521,7 +521,7 @@ a nested copy also names itself                 FAIL grandchild says 1
 -- failures: 2 --
 ```
 
-⭐ **A/B 干净**:退回 `aab97bc` 只留探针,红的**正好是**这次要修的两条,
+**A/B 干净**:退回 `aab97bc` 只留探针,红的**正好是**这次要修的两条,
 其余五条(含 `abort`、`kill(getpid(),0)`)两边都绿——说明判据卡住了改动本身,
 而不是卡住了一堆无关的东西。
 
@@ -541,11 +541,11 @@ a nested copy also names itself                 FAIL grandchild says 1
 
 ⇒ **建议纳入本次发布(P1)**。风险已经从「未评估」变成「已跑过」:改动集中在
 `__okm_fork` 的时序和三处 `1` 的比较,判据 7 条 + 回归 2 套全绿。
-⚠️ 唯一要 review 盯的是 ③ ——**它说明这个改动会牵动 `abort` 那条路**,
+唯一要 review 盯的是 ③ ——**它说明这个改动会牵动 `abort` 那条路**,
 合入时判据里必须保留「复制里的 abort 仍是 SIGABRT」这一条。
 
 （下面是这条最初被列为未决时写的理由,保留不改。）
-⚠️ 这条**只有读码和实测,没有做过改动**,风险未评估(改的是 fork 的时序),
+这条**只有读码和实测,没有做过改动**,风险未评估(改的是 fork 的时序),
 **请 review 决定是否纳入本次发布**,还是单独一轮。
 
 ---
@@ -557,7 +557,7 @@ a nested copy also names itself                 FAIL grandchild says 1
 | **P0** | A、B、F1、F2、F3 | 全是「报了成功而没做」或「把错误当结果返回」。F1/F2 是数据完整性级别 |
 | **P1** | D、E、F7、F8、**§6 `getpid`** | 答得出却没答,或答得不诚实。改动都很小;`getpid` 已实现并跑过判据与回归 |
 | **P2** | 文档:C、F5、F6、F4、F9-F13 全部进分歧表;改掉 `execve` 那句错话 | 不改行为,但**没有它这次发布是在重复上一轮的错误**——上一轮的分歧表漏了正是这些 |
-| **P3** | 上报:openkal(**`kal_fs_lock` + `KAL_FS_PROP_LOCKS`**、寿命受限的起法、目录时间、处理器数量、卷容量、fd 位置一般化)、openkal-linux(CLOEXEC 回报管道) | 不阻塞发布。⭐ 锁这一条**优先级最高**:它是唯一一条「三个环境都做得到、只差一个词」的 |
+| **P3** | 上报:openkal(**`kal_fs_lock` + `KAL_FS_PROP_LOCKS`**、寿命受限的起法、目录时间、处理器数量、卷容量、fd 位置一般化)、openkal-linux(CLOEXEC 回报管道) | 不阻塞发布。锁这一条**优先级最高**:它是唯一一条「三个环境都做得到、只差一个词」的 |
 | 待定 | §3.6:F1 接受 ENOSYS(推荐),还是暂时只修 F2 | 请 review 拍板 |
 
 ---
@@ -593,9 +593,9 @@ a nested copy also names itself                 FAIL grandchild says 1
 | **`xprobe`** | **F5、F7**,两条都要「装了再查」才看得出,单看返回值全是 0 |
 | **`pidfix`** | §6 的实现验证:打了补丁的端口副本 + A/B 对照 + 回归 |
 
-⭐ §6 的补丁在 `scratchpad/musl-patched/`(`port/src/okm_syscall.c`、
+§6 的补丁在 `scratchpad/musl-patched/`(`port/src/okm_syscall.c`、
 `port/src/okm_fork.c` 两个文件),**工作树未动**。合入时直接取这两个文件的差异即可。
 
-⭐ 落地时 `surface` 应当**整个搬进 `examples/`**,而不只是搬那 13 条:
+落地时 `surface` 应当**整个搬进 `examples/`**,而不只是搬那 13 条:
 它的价值在于**下一族缺陷会先撞上它**,而不在于它这次命中了什么。
 这正是上一轮 `examples/subprocess` 七条全绿却漏掉整族的反面。

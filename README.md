@@ -14,7 +14,7 @@ openkal-musl = "0.11.0"
 It names no implementation and no platform: a C library is the one consumer that
 must know which implementation it needs, so it declares that itself.
 
-⚠️⚠️ **That line is for a C program. A C++ program names the runtime instead, and
+**That line is for a C program. A C++ program names the runtime instead, and
 naming both is an error rather than a redundancy.**
 
 `openkal-llvm-runtime` supplies libc++, libc++abi and libunwind configured for
@@ -34,7 +34,7 @@ error: dependency 'mcpplibs.openkal-musl' has irreconcilable versions:
 openkal-llvm-runtime = "0.6.0"   # carries openkal-musl 0.10.0
 ```
 
-⭐ Recorded here because it was got wrong by the people who maintain this
+Recorded here because it was got wrong by the people who maintain this
 package: the consumer who reported openkal-linux#13 builds C++, and was told to
 change the line above rather than this one. The version table below is what a
 consumer needs to answer it without asking.
@@ -137,7 +137,7 @@ four is now composed above them rather than refused. `examples/net` and
 `examples/subprocess` assert them, written against POSIX and naming no openkal
 symbol.
 
-**⚠️ Every one of those four depends on what is beneath.** Clause 3 permits an
+**Every one of those four depends on what is beneath.** Clause 3 permits an
 implementation to provide an interface in whole or not at all, and the four
 interfaces are optional. Where a backend declines one, the routes that use it
 report `ENOSYS` — the port takes a weak reference and tests it before calling,
@@ -155,8 +155,8 @@ answer that leaves a program wrong without telling it.
 | out-of-band data | `MSG_OOB`, `MSG_PEEK`, and `POLLPRI` are never reported and `recv` refuses the flags | openkal's transfer operations move bytes and have no second channel and no non-destructive read. |
 | readiness *sets* | `epoll` is not built at all, so the link names it | a set held by the environment is a facility of one kernel rather than a capability. `poll` and `select` ask each descriptor in turn, which is what an interface without a set permits. |
 | ~~symbolic links~~ | **answered since 0.7.0** — `symlink`, `readlink`, and `stat`/`lstat` telling the two questions apart | openkal 0.9 carries `kal_fs_link_create` and `kal_fs_link_read` as operations of `openkal.fs`, and `kal_fs_props` takes the directory, so this port asks whether the volume has such nodes before it uses them. Where it does not, the refusal is what the enquiry already said. |
-| permission bits | `chmod` reports `ENOSYS`; `stat` reports a mode assembled from what openkal knows | `kal_node_info` carries `writable` — one boolean, not a mode word — and `kal_fs_open` takes flags rather than a mode. Mapping the owner-write bit onto it would make `chmod(0600)` succeed and `stat` report something else, which is the shape this port exists to avoid. |
-| the identity of a node | `st_dev` and `st_ino` are the implementation's answer where it has one, and **zero for both where it has none** | ⚠️ They were the constants 0 and 1, so every file compared equal to every other: `std::filesystem::equivalent` on two separately created files answered `true` **with no error**. openkal 0.9 carries an identity and reports whether it knows one; a caller must not read two zeroes as sameness, which is why nothing is invented for an implementation that cannot distinguish nodes. |
+| permission bits | `chmod`/`fchmodat` report `ENOSYS` for a request whose read or write bits differ from what `stat` already reports for the node; **since 0.14.0** a request that changes only the execute bits, to the one shape a class with a read bit can be given — all three set, or all three clear — succeeds and round-trips through `stat`. A request equal to the mode already reported always succeeds, even where the volume does not claim `KAL_FS_PROP_EXECUTABLE`, because nothing is then being asked of it. `fchmod` still reports `ENOSYS` unconditionally: this port keeps no name for an open file to hand `kal_fs_set_executable_at` | `kal_node_info` carries `writable` — one boolean, not a mode word — so the read and write bits this port can report are always the same across the three classes, and a request for anything else would report success for a mode `stat` does not then show, which is the shape this port exists to avoid. openkal 0.13 added `kal_fs_set_executable_at` for exactly the one bit this port *can* honestly change; SPEC.md clause 11 entry 6 states why it is a property of the node and not a permission. |
+| the identity of a node | `st_dev` and `st_ino` are the implementation's answer where it has one, and **zero for both where it has none** | They were the constants 0 and 1, so every file compared equal to every other: `std::filesystem::equivalent` on two separately created files answered `true` **with no error**. openkal 0.9 carries an identity and reports whether it knows one; a caller must not read two zeroes as sameness, which is why nothing is invented for an implementation that cannot distinguish nodes. |
 | ownership | `chown` reports `ENOSYS`; `stat` reports 1000 for both | as the row above: a capability-oriented environment has no principal for an owner to name. |
 | a mode given at creation | `open(…, O_CREAT, 0600)` and `mkdir(path, 0700)` **succeed** and `stat` afterwards reports 0666 and 0777 | the row above, in the one place where it does not read as a refusal. openkal opens a file for a purpose and not for an audience, so the argument has nowhere to go. Refusing every mode but the one `stat` will report would refuse nearly every program; what a caller can rely on instead is stated below. |
 | entropy | `getrandom` reports `ENOSYS` where the backend declines `openkal.random` | openkal has no source of one to require, and this port does not invent one. The allocator's cookie and the stack canary are derived from the clock and from an address; neither is a security property here. |
@@ -164,19 +164,21 @@ answer that leaves a program wrong without telling it.
 | an immediate answer about a started program | `waitpid(…, WNOHANG)` returns without the program having finished, but may wait up to one polling interval of the implementation beneath (one millisecond on Linux) | `kal_timeout_wait_process` takes a bound and openkal spells "no bound" as zero, so a caller that does not want to wait asks for the smallest bound there is. An environment rounds a bound up to what its clock can distinguish; a bound shorter than the clock is a promise no environment can keep. |
 | closing a standard stream in a program being started | `posix_spawn_file_actions_addclose(&fa, 0…2)` makes the spawn report `ENOSYS`; above position two it is performed, because nothing there is inherited | openkal has no value meaning "no stream", and the value that looks like one — zero — means the opposite: the stream the caller has. Accepting the action and not performing it would hand a program the standard input its caller had just taken away. |
 | starting a program upon a stream whose handle is zero | a caller that redirects its **output** onto its own standard input and then starts a program gets `ENOSYS` | `kal_spawn_streams` reserves zero for inheritance and `kal_stream` reserves nothing, so an implementation whose streams are the environment's own descriptors hands out zero for standard input. The two agree at position zero and cannot be told apart anywhere else. Reported upstream; refused here rather than answered wrongly. |
-| ~~a version a program can read~~ | **answered since 0.9.0.** `uname`'s `release` field is this package's version, and `OPENKAL_MUSL_TRACE=enosys` names it on the error stream once per process before the program runs | It was the string literal `0.5.0` through every release after 0.5.0, so a program that asked was not left without an answer -- it was given a false one. ⚠️ It therefore MOVES AT EVERY RELEASE: nothing here or in musl reads it (`gethostname` and `getdomainname` are musl's only consumers of `uname` and both read `nodename`), but a program above it that compares the field against a fixed string will see it change. `sysname` is `openkal` and not `Linux`, so nothing can have been reading it as a kernel version. |
-| ~~**setting** the modification time of a directory~~ | **answered everywhere since 0.11.0.** ⚠️ 0.10.0 answered it only where the implementation could open a directory --- Linux and macOS could and Windows could not, because its `kal_fs_open` names `FILE_NON_DIRECTORY_FILE`. **Reading** it was never affected | 0.10.0 reached a directory's time by opening the directory for READING and stamping that, which worked and was **outside anything `fs.h` stated** --- there was no route to a directory's time at all. openkal 0.10 added `kal_fs_set_modified_at`, which takes a NAME, and every implementation answers it: the Windows one opens for the attribute alone, which reaches a directory where opening a FILE cannot. ⭐ The divergence this row recorded was caused by a missing declaration, and it went away when the declaration arrived. |
-| ~~a lock on a file~~ | **`fcntl(F_SETLK)` and `F_SETLKW` take a real lock since 0.11.0.** ⚠️ They used to answer 0 and do nothing, so **two programs took one exclusive lock and both were told they had it**. ⭐ The holder is the **open file**, not the program: a SECOND open file of one name is refused here, where the older process-held form would have granted it and a library that opened one file twice would have destroyed its own lock. `F_GETLK` is still refused, and `flock` has no case | 0.10.0 refused all three and said the refusal was **temporary** in a way the permission row is not — every environment beneath openkal can lock a byte range and what was missing was a word. openkal 0.10 added `kal_fs_lock` with `KAL_FS_PROP_LOCKS`, and this is what that record said would happen. `F_GETLK` remains refused because it asks whether a lock **would** block without taking one, and openkal has no operation that answers a question without performing it — the absence clause 6.3 records for readiness. |
-| whether a file may be executed | `access(path, X_OK)` answers **yes for anything that exists**, and starting a name that exists and cannot be run still ends the caller with 127 | `kal_node_info` carries `writable` and no other permission, so "it is there" is the whole of what this port can answer. The two halves are the same gap: the enquiry cannot tell, and neither can the check `posix_spawn` makes before starting. openkal-linux knows — its own duplicate is the thing that fails — and has been asked to report it. |
+| ~~a version a program can read~~ | **answered since 0.9.0.** `uname`'s `release` field is this package's version, and `OPENKAL_MUSL_TRACE=enosys` names it on the error stream once per process before the program runs | It was the string literal `0.5.0` through every release after 0.5.0, so a program that asked was not left without an answer -- it was given a false one. It therefore MOVES AT EVERY RELEASE: nothing here or in musl reads it (`gethostname` and `getdomainname` are musl's only consumers of `uname` and both read `nodename`), but a program above it that compares the field against a fixed string will see it change. `sysname` is `openkal` and not `Linux`, so nothing can have been reading it as a kernel version. |
+| ~~**setting** the modification time of a directory~~ | **answered everywhere since 0.11.0.** 0.10.0 answered it only where the implementation could open a directory --- Linux and macOS could and Windows could not, because its `kal_fs_open` names `FILE_NON_DIRECTORY_FILE`. **Reading** it was never affected | 0.10.0 reached a directory's time by opening the directory for READING and stamping that, which worked and was **outside anything `fs.h` stated** --- there was no route to a directory's time at all. openkal 0.10 added `kal_fs_set_modified_at`, which takes a NAME, and every implementation answers it: the Windows one opens for the attribute alone, which reaches a directory where opening a FILE cannot. The divergence this row recorded was caused by a missing declaration, and it went away when the declaration arrived. |
+| ~~a lock on a file~~ | **`fcntl(F_SETLK)` and `F_SETLKW` take a real lock since 0.11.0.** They used to answer 0 and do nothing, so **two programs took one exclusive lock and both were told they had it**. The holder is the **open file**, not the program: a SECOND open file of one name is refused here, where the older process-held form would have granted it and a library that opened one file twice would have destroyed its own lock. `F_GETLK` is still refused, and `flock` has no case | 0.10.0 refused all three and said the refusal was **temporary** in a way the permission row is not — every environment beneath openkal can lock a byte range and what was missing was a word. openkal 0.10 added `kal_fs_lock` with `KAL_FS_PROP_LOCKS`, and this is what that record said would happen. `F_GETLK` remains refused because it asks whether a lock **would** block without taking one, and openkal has no operation that answers a question without performing it — the absence clause 6.3 records for readiness. |
+| whether a file may be executed | **Answered on both halves since openkal 0.13.** `access(path, X_OK)` and `stat`'s execute bits follow `KAL_INFO_EXECUTABLE` when the enquiry reports the position filled (a file, on a volume that claims `KAL_FS_PROP_EXECUTABLE`, since 0.14.0 also settable — see the row above) and answer **yes** where it does not — a directory, or a volume that does not claim the property. Starting a name that exists and cannot be run no longer ends the caller at 127 either: `posix_spawn` reports a reason and returns no pid — `ENOENT`, `EACCES`, `EISDIR`, and, since openkal 0.13's `kal_err_not_program`, **`ENOEXEC`** for a name that is there, may be started, and is not in a form this environment recognises | `kal_node_info` carried `writable` and no other permission before 0.13, so "it is there" was the whole of what this port could answer, and a start that could not happen was folded into `kal_err_io` — reporting a device failure when none occurred, and giving a C library above no way to map the failure back to `ENOEXEC`, which every environment this port targets has natively. **Versioned, because the three implementations did not move together.** openkal-linux has reported the reason for a start that did not happen since 0.8.0, and reports `kal_err_not_program` for it since 0.13.0. openkal-macos reported `kal_ok` and a handle for **every** name that could not be started — including one that does not exist at all — until 0.10.0; a program above an older openkal-macos still meets 127, indistinguishable from a program that ran and returned that status. openkal-windows fails synchronously in the caller (`CreateProcessW` needs no pipeline for it) and maps the condition to `kal_err_not_program` since 0.8.0. |
 | descriptors above 2 crossing into a started program | a started program receives standard input, output and error and **nothing else**; a non-close-on-exec descriptor 4 is not there, and `fcntl(F_SETFD, 0)` upon one therefore changes nothing | `kal_spawn_streams` has exactly three positions and openkal has no general form for placing a stream at position *n*. `posix_spawn_file_actions_adddup2` above position two is already refused rather than accepted, so the two agree; only implicit inheritance is lost. A general form has been asked for. |
-| ~~**the working directory a started program runs in**~~ | **answered since 0.12.0**, together with `posix_spawn_file_actions_addchdir_np` and `addfchdir_np`. openkal 0.11 gave `kal_spawn` a second directory — `base` resolves the program's NAME, `work` is where it RUNS — and a copy that called `chdir` carries its own into the `execve` it then performs. The rest of this row is what it said before | ⚠️ this one was silent, and it is the one a consumer is most likely to meet: the call reported success, the caller's own paths followed it, and only the started program disagreed. `kal_process_spawn`'s `base` is what the program's NAME resolves against, and resolving a name is not entering a directory — so naming a program and naming where it runs are two directories and openkal 0.10 carried one. ⭐ It could not be composed here either: `chdir` in a copy before starting would need openkal to have an operation that moves a running program's working directory, and it deliberately has none. The route was a declaration rather than a composition, which is the same shape as the directory-time row above. | ⚠️ this one is silent, and it is the one a consumer is most likely to meet: the call reports success, the caller's own paths follow it, and only the started program disagrees. `kal_process_spawn`'s `base` is what the program's NAME resolves against, and resolving a name is not entering a directory — so naming a program and naming where it runs are two directories and openkal 0.10 carries one. ⭐ It cannot be composed here either: `chdir` in a copy before starting would need openkal to have an operation that moves a running program's working directory, and it deliberately has none. A per-spawn form has been asked for; see `.agents/docs/2026-08-30-openkal-0.11-start-design.md`. |
-| ~~**terminating what a started program itself started**~~ | **answered since 0.12.0 for the form that works**, which is `posix_spawn` with `POSIX_SPAWN_SETPGROUP` and a zero group: the started program forms a unit, what it starts inherits the unit, and `kill(-n)` upon the identifier `posix_spawn` returned reaches all of it — including a shell's backgrounded work, which is the case a timeout has to reach. `setpgid(0, 0)` in **this** program forms a unit too. Naming another program's group is still `EPERM`, and `setsid` is still `EPERM` | openkal 0.11 gave `kal_spawn` a `job`, which is where a unit is established: the caller says which unit, and the implementation performs the placement. ⭐ What this costs is stated in the row below, because it is one composition and not a general gap. |
-| **`fork(); setpgid(0, 0); exec …`** | the copy forms a unit and the original **cannot name it**, so `kill(-n)` from the original reports `ESRCH`. Use `posix_spawn` with `POSIX_SPAWN_SETPGROUP`, which is the row above | ⭐⭐ this is a property of the interface and not a shortfall of this port. A unit is named by a handle, openkal handles are built from an index into the holder's own table (clause 6.7), and nothing conveys one across a spawn (clause 11 entry 9) — so the unit the copy forms is the copy's, and the original never learns of it. ⚠️ **0.12.0 reached for the nearest unit it could name, which was its own**, and every negative identifier that matched no child therefore named the caller's group: an enquiry about a unit that did not exist was answered *yes*, and a signal aimed at one **ended the caller together with everything it led**. 0.13.0 answers `ESRCH` and `examples/subprocess` checks it. openkal 0.12 records the whole of it in clause 11 entry 9, so the next implementation meets it in the specification. |
-| ~~how many processors there are~~ | **answered since 0.11.0.** `sched_getaffinity`, and therefore `std::thread::hardware_concurrency()` and `sysconf(_SC_NPROCESSORS_ONLN)`, report the real count | ⚠️ it used to be **silent**: a program sizing a pool of workers got one worker and no error. openkal 0.10 added `kal_task_parallelism`. ⭐ Zero from that enquiry means *cannot say* and is reported here as a refusal rather than as a bitmap of one processor, because musl would read the latter as a fact this port had invented. |
+| ~~**the working directory a started program runs in**~~ | **answered since 0.12.0**, together with `posix_spawn_file_actions_addchdir_np` and `addfchdir_np`. openkal 0.11 gave `kal_spawn` a second directory — `base` resolves the program's NAME, `work` is where it RUNS — and a copy that called `chdir` carries its own into the `execve` it then performs. The rest of this row is what it said before | this one was silent, and it is the one a consumer is most likely to meet: the call reported success, the caller's own paths followed it, and only the started program disagreed. `kal_process_spawn`'s `base` is what the program's NAME resolves against, and resolving a name is not entering a directory — so naming a program and naming where it runs are two directories and openkal 0.10 carried one. It could not be composed here either: `chdir` in a copy before starting would need openkal to have an operation that moves a running program's working directory, and it deliberately has none. The route was a declaration rather than a composition, which is the same shape as the directory-time row above. | this one is silent, and it is the one a consumer is most likely to meet: the call reports success, the caller's own paths follow it, and only the started program disagrees. `kal_process_spawn`'s `base` is what the program's NAME resolves against, and resolving a name is not entering a directory — so naming a program and naming where it runs are two directories and openkal 0.10 carries one. It cannot be composed here either: `chdir` in a copy before starting would need openkal to have an operation that moves a running program's working directory, and it deliberately has none. A per-spawn form has been asked for; see `.agents/docs/2026-08-30-openkal-0.11-start-design.md`. |
+| ~~**terminating what a started program itself started**~~ | **answered since 0.12.0 for the form that works**, which is `posix_spawn` with `POSIX_SPAWN_SETPGROUP` and a zero group: the started program forms a unit, what it starts inherits the unit, and `kill(-n)` upon the identifier `posix_spawn` returned reaches all of it — including a shell's backgrounded work, which is the case a timeout has to reach. `setpgid(0, 0)` in **this** program forms a unit too. Naming another program's group is still `EPERM`, and `setsid` is still `EPERM` | openkal 0.11 gave `kal_spawn` a `job`, which is where a unit is established: the caller says which unit, and the implementation performs the placement. What this costs is stated in the row below, because it is one composition and not a general gap. |
+| **`fork(); setpgid(0, 0); exec …`** | the copy forms a unit and the original **cannot name it**, so `kill(-n)` from the original reports `ESRCH`. Use `posix_spawn` with `POSIX_SPAWN_SETPGROUP`, which is the row above | this is a property of the interface and not a shortfall of this port. A unit is named by a handle, openkal handles are built from an index into the holder's own table (clause 6.7), and nothing conveys one across a spawn (clause 11 entry 9) — so the unit the copy forms is the copy's, and the original never learns of it. **0.12.0 reached for the nearest unit it could name, which was its own**, and every negative identifier that matched no child therefore named the caller's group: an enquiry about a unit that did not exist was answered *yes*, and a signal aimed at one **ended the caller together with everything it led**. 0.13.0 answers `ESRCH` and `examples/subprocess` checks it. openkal 0.12 records the whole of it in clause 11 entry 9, so the next implementation meets it in the specification. |
+| ~~how many processors there are~~ | **answered since 0.11.0.** `sched_getaffinity`, and therefore `std::thread::hardware_concurrency()` and `sysconf(_SC_NPROCESSORS_ONLN)`, report the real count | it used to be **silent**: a program sizing a pool of workers got one worker and no error. openkal 0.10 added `kal_task_parallelism`. Zero from that enquiry means *cannot say* and is reported here as a refusal rather than as a bitmap of one processor, because musl would read the latter as a fact this port had invented. |
 | hard links, named pipes, a bidirectional pair | `link` (`create_hard_link`), `mkfifo` and `socketpair` report `ENOSYS`. **`statvfs` (`std::filesystem::space`) is answered since 0.11.0** | openkal has no operation for the first three. `kal_fs_link_create` makes a node whose content is a name — a symbolic link — and there is no hard link; `kal_process_channel` is a pipe in one direction, so a bidirectional pair is not one of them. Volume capacity was in this row until openkal 0.10 added `kal_fs_capacity`. |
 | an alternate signal stack | `sigaltstack` reports `ENOSYS` since 0.10.0 | it used to report success and install nothing, and the enquiry that would have caught it answered 0 with a zeroed record. There are no signals here, so there is nothing for such a stack to be. |
+| one C runtime and one C++ runtime per image | a static library compiled against the platform's own C runtime, or an object that runtime owns crossing the boundary — a `FILE*`, memory one side allocates and the other frees, `errno` — is not supported. Only handles and values may cross into a platform's own system interfaces | this package supplies the whole of a program's C library; a second one linked in beside it duplicates every piece of global state each keeps (the allocator's own arena, `errno`, locale) and the two do not agree about any of it. A vendor SDK distributed only as a static library built against another C runtime is `n/a` on this target — a design consequence and not a defect. openkal's own README states the same rule for every implementation built above it; the ecosystem design record (`.agents/docs/2026-09-17-openkal-ecosystem-cross-repo-design.md`, R1) states why it binds a package and not the specification. |
+| a context a platform library creates | code reached from it has no C library state — no `errno`, no locale, no `pthread_self` — and must not rely on any, because none of it exists until `kal_task_start` builds it, and such a context was not built by it | musl's per-context state lives in thread-local storage this port's own thread start fills in. A callback from a platform's own thread pool, from COM, or from a framework's own callback thread (Windows, macOS's GCD) arrives on a context this library never started. A package reached this way confines such a callback to work that does not touch this library, or hands the work to a context of its own before it does (R2 of the design record above). |
 
-**⭐ What carries confinement here, since a mode word does not.** A program that
+**What carries confinement here, since a mode word does not.** A program that
 writes "only I may read this" as a mode is stating it in a vocabulary this
 environment does not have. What it does have is stronger and is not the
 program's to weaken: a program reaches only the directories the environment
@@ -184,7 +186,7 @@ supplied it, and `port/src/okm_fd.c` states the rule — confinement is a proper
 of what was supplied, not of the program's cooperation. A caller with that
 requirement expresses it by being started with fewer directories.
 
-**⭐ The permission row is a decision and not an omission.** The alternative was
+**The permission row is a decision and not an omission.** The alternative was
 to ask the specification for a permission operation. It was declined: a FAT
 volume, a UEFI system partition and a Windows access-control list do not share a
 model, so an operation upon permissions is one that some resources of the
@@ -192,7 +194,7 @@ interface can never satisfy — which is what clause 6.4 excludes. Refusing here
 and stating why is the answer; `.agents/docs` in the specification's repository
 records the reasoning.
 
-**⭐⭐ And what to write instead, which a refusal by itself does not tell you.**
+**And what to write instead, which a refusal by itself does not tell you.**
 A program that means *only I may read this* is stating it in a vocabulary this
 environment does not have: a permission presupposes an identity, and openkal
 models no identity for one to name. This is not a gap peculiar to openkal — it is
@@ -211,13 +213,19 @@ are defending against rather than by mechanism:
 | another user of the machine | **the party that STARTS the program**, through the preopens it supplies and withholds. In a capability system "make this file private" is not an operation upon the file; it is a property of the directory you were granted |
 | a location you do not trust | encrypt the contents — where the location is untrusted no access control holds anyway |
 
-⚠️ **The consequence for porting.** Code that hardens itself with `chmod(0600)`
-after creating a file should not treat the refusal as a failure to create; the
-directory it was given is either private already or was never going to be made
-so from inside. The same reasoning covers `access(X_OK)`: an execute bit is a
-permission judged against an ambient identity, Windows does not judge by a bit
-at all, and WASI has no exec — so there is no atomic capability to map, and being
-able to run something follows from having been granted the directory holding it.
+**The consequence for porting.** Code that hardens itself with `chmod(0600)`
+after creating a file — asking to change who may READ or WRITE it — should not
+treat the refusal as a failure to create; the directory it was given is either
+private already or was never going to be made so from inside.
+
+**`access(X_OK)` is a different question, and openkal 0.13 answers it
+separately from the paragraph above.** Whether a node may be started
+presupposes no principal, the way `chmod(0600)` does: a volume that records it
+records it once for the node, not once per class of caller, so it is a
+property rather than a permission — SPEC.md clause 11 entry 6 states the
+argument and why it holds for this position and fails for a mode word. That is
+what `KAL_INFO_EXECUTABLE` and `kal_fs_set_executable_at` answer, and this
+port's rows above state what a program built on it observes.
 
 Two further boundaries are properties of the arrangement rather than omissions.
 
@@ -241,7 +249,7 @@ as "the entry has already gone" and leaves the tree standing.
 descriptions; beyond that it is told so. Allocating the tables instead would
 place them on the allocator, and the allocator obtains its memory through them.
 
-⚠️ **And a program may have started 256 programs it has not waited for.** An
+**And a program may have started 256 programs it has not waited for.** An
 entry is taken when a program is started and released when it is waited for,
 which is what a process table is; a program that never waits holds entries for
 ever, and the next start reports `EAGAIN` — which is what POSIX says `fork`
@@ -340,7 +348,7 @@ every one of those is about an object format or a naming convention rather than
 about a kernel — which is the shape of the result rather than a qualification of
 it.
 
-**⚠️ It grew by 2294 more when the socket, datagram, readiness and image-copying
+**It grew by 2294 more when the socket, datagram, readiness and image-copying
 routes were added, and that number deserves a reading rather than a footnote.**
 Roughly half of it is comment; of the code, the largest single piece is the
 state machine in `okm_net.c`, and what that machine bridges is one difference in
@@ -355,7 +363,7 @@ was measuring in the first place, and the growth does not change its direction.
 
 ## Verification
 
-### ⚠️⚠️ A program that needs an INTERPRETER could not be started, and it was first blamed on the emulator
+### A program that needs an INTERPRETER could not be started, and it was first blamed on the emulator
 
 **Corrected in openkal-linux 0.12.0.** An earlier version of this section said
 that an `aarch64` build measured through `qemu-user` could not start a program of
@@ -379,14 +387,14 @@ the interpreter and hands it that name *to open*, after the replacement, by whic
 time a close-on-exec descriptor is gone. The interpreter is told the file does
 not exist.
 
-⭐ Isolated in twenty lines of ordinary C, with nothing of openkal in it:
+Isolated in twenty lines of ordinary C, with nothing of openkal in it:
 
 ```
 dirfd WITH O_CLOEXEC       execveat -> ENOENT
 dirfd WITHOUT O_CLOEXEC    STARTED ok
 ```
 
-⚠️ **It was never about architecture.** Two kinds of program need an interpreter,
+**It was never about architecture.** Two kinds of program need an interpreter,
 and both were refused on every system:
 
 | program | needs an interpreter |
@@ -417,7 +425,7 @@ the machine it runs on.
 `examples/subprocess` starts another program three ways — `fork`, `system`,
 `popen`.
 
-**⭐ Those two say what they expect on the command line rather than inferring
+**Those two say what they expect on the command line rather than inferring
 it.** `--fork` requires that duplicating the calling image work; `--no-fork`
 requires that it be *refused*. An environment whose backend declines
 `openkal.space` is not a failure, and an environment expected to provide it that
@@ -451,7 +459,7 @@ interface at all. `fork` returns twice, so the second half is this port's:
 `space.h` describes that composition and says in terms that it belongs above the
 line, which is where it now is (`port/src/okm_fork.c`).
 
-⚠️ **An earlier version of this file said `fork` was absent and would stay
+**An earlier version of this file said `fork` was absent and would stay
 absent**, on the reading that clause 7.1 declines to duplicate an address space
 *and its execution state*. Half of that is right: the clause declines the
 **pair**. `openkal.space` supplies the first half by itself, and what was
@@ -461,7 +469,7 @@ missing was never an atom.
 It is what every environment without the operation does, and two of the three
 beneath openkal are such environments.
 
-⚠️ **This paragraph used to add that a caller cannot distinguish it. A caller
+**This paragraph used to add that a caller cannot distinguish it. A caller
 can, and saying otherwise is what kept anyone from looking.** Three differences
 were known and `musl/PATCHES.md` states each. Two are now answered: a program
 that cannot be started (**0.10.0** — the name is asked about first, so `execvp`

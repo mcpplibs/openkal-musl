@@ -22,7 +22,7 @@
  *
  * --- what the started program's three streams are -------------------------
  *
- * ⚠️⚠️ THIS FILE USED TO PASS `{0, 0, 0}' AND LET THE FILE ACTIONS OVERWRITE IT,
+ * THIS FILE USED TO PASS `{0, 0, 0}' AND LET THE FILE ACTIONS OVERWRITE IT,
  * WHICH LOST EVERY REDIRECTION A CALLER HAD ALREADY PERFORMED.
  *
  * openkal spells "the stream its parent has" as a handle of zero (process.h),
@@ -38,12 +38,12 @@
  * openkal-linux#13; measured by a consumer, not here, because the probe in
  * examples/subprocess started programs and never redirected first.
  *
- * ⭐ THE ATOM WAS ALREADY PRESENT. `kal_fs_stream' is a required operation of
+ * THE ATOM WAS ALREADY PRESENT. `kal_fs_stream' is a required operation of
  * `openkal.fs' and this port has stored its result in every file description
  * since okm_syscall.c opened one. What was missing was the route from the table
  * to the spawn, which is the same shape as the defect that report began with.
  *
- * ⭐ AND ZERO IS STILL PASSED WHERE NOTHING WAS REDIRECTED, WHICH IS LOAD-BEARING.
+ * AND ZERO IS STILL PASSED WHERE NOTHING WAS REDIRECTED, WHICH IS LOAD-BEARING.
  * `KAL_PROCESS_PROP_STREAM_PASSING' exists because an environment may be able to
  * start a program that inherits and unable to place a stream of the caller's
  * choosing. Seeding with zero for an untouched descriptor asks for that capability
@@ -86,7 +86,7 @@ static int count(char* const* v) { int n = 0; while (v && v[n]) n++; return n; }
 
 /* --- can this name be started at all? --------------------------------------
  *
- * ⚠️⚠️ ASKED HERE BECAUSE THE ANSWER DOES NOT COME BACK FROM BENEATH, AND A
+ * ASKED HERE BECAUSE THE ANSWER DOES NOT COME BACK FROM BENEATH, AND A
  * CALLER OF `execvp' CANNOT PROCEED WITHOUT IT.
  *
  * An implementation starts a program by duplicating itself and replacing the
@@ -104,12 +104,12 @@ static int count(char* const* v) { int n = 0; while (v && v[n]) n++; return n; }
  * openkal-linux#13 and measured by a consumer, who also measured that
  * `bwrap' --- present at /usr/bin/bwrap --- was reported as not installed.
  *
- * ⭐ THE ENQUIRY IS ALREADY REQUIRED OF EVERY IMPLEMENTATION. `kal_fs_info' is
+ * THE ENQUIRY IS ALREADY REQUIRED OF EVERY IMPLEMENTATION. `kal_fs_info' is
  * an operation of `openkal.fs' and this file already resolves the name through
  * `okm_resolve'; asking what the name refers to is one more call on a path that
  * is about to start a program anyway.
  *
- * ⚠️ AND IT ANSWERS TWO OF THE THREE QUESTIONS, WHICH IS WHY A3 IS STILL OPEN.
+ * AND IT ANSWERS TWO OF THE THREE QUESTIONS, WHICH IS WHY A3 IS STILL OPEN.
  * `ENOENT' and `ENOTDIR' are what a PATH search needs and are what this
  * settles. Whether an existing file may be EXECUTED is not something openkal
  * reports --- `kal_node_info' carries `writable' and no other permission --- so
@@ -122,7 +122,7 @@ static int startable(struct kal_dir base, const char* rel)
 	struct kal_node_info info = { .self_size = sizeof info };
 	/* Resolves, because starting resolves. */
 	const int e = okm_fs_info(base, rel, slen(rel), 0, KAL_INFO_KIND, &info);
-	/* ⚠️ AN ENQUIRY THAT CANNOT BE MADE IS NOT AN ANSWER OF `NO'. A build
+	/* AN ENQUIRY THAT CANNOT BE MADE IS NOT AN ANSWER OF `NO'. A build
 	 * configured without `openkal.fs' --- OKM_HAS_FS=0, which a machine with no
 	 * storage is built with --- answers `not supported' here, and turning that
 	 * into a refusal would stop a spawn this port would otherwise have
@@ -179,7 +179,7 @@ static int startable_name(struct okm_at* at)
  * normalised back to zero: asking a backend for a capability it does not need
  * would refuse a spawn that can be performed.
  *
- * ⚠️⚠️ AND ZERO IS BOTH A SENTINEL AND A VALID HANDLE, WHICH IS NOT THIS FILE'S
+ * AND ZERO IS BOTH A SENTINEL AND A VALID HANDLE, WHICH IS NOT THIS FILE'S
  * DOING AND IS THIS FILE'S PROBLEM.
  *
  * `kal_spawn_streams' spells inheritance as a handle of zero. `kal_stream' has
@@ -210,7 +210,7 @@ static int place(struct kal_spawn_streams* s, int pos, kal_uintptr stream,
 
 /* The stream a descriptor carries, or a reason it carries none.
  *
- * ⚠️ THE ANSWER IS DECIDED BY THE KIND AND NOT BY THE VALUE, and that distinction
+ * THE ANSWER IS DECIDED BY THE KIND AND NOT BY THE VALUE, and that distinction
  * is the whole of it: a stream handle of zero is a perfectly ordinary handle on
  * an implementation whose streams are its own descriptors, so "the handle is
  * zero" cannot be read as "there is no stream". A directory has no stream
@@ -242,7 +242,7 @@ static int stream_for_spawn(int fd, kal_uintptr* out)
 
 /* The three positions before any file action is applied.
  *
- * ⭐ THIS IS THE WHOLE OF THE FIX FOR openkal-linux#13, AND IT IS THREE LINES OF
+ * THIS IS THE WHOLE OF THE FIX FOR openkal-linux#13, AND IT IS THREE LINES OF
  * DECISION rather than a mechanism: a descriptor that still names what it named
  * when the program began is inheritance and is spelled zero; one that names
  * something else is a redirection the caller performed and is carried across;
@@ -258,7 +258,7 @@ static int seed(struct kal_spawn_streams* s, int* placed)
 	return 0;
 }
 
-/* ⭐⭐ WHETHER THE STARTED PROGRAM MAY OUTLIVE THIS ONE, WHICH IS THE THING
+/* WHETHER THE STARTED PROGRAM MAY OUTLIVE THIS ONE, WHICH IS THE THING
  * `execve' MEANS AND NOTHING ELSE HERE DOES.
  *
  * `execve' is composed as starting a program and ending with its status, so
@@ -272,7 +272,7 @@ static int seed(struct kal_spawn_streams* s, int* placed)
  * not be said. It is asked for ONLY where `execve' is meant, because an ordinary
  * `posix_spawn' means the opposite: POSIX children outlive their parents.
  *
- * ⚠️ AND A BACKEND MAY DECLINE IT, in which case this falls back to the
+ * AND A BACKEND MAY DECLINE IT, in which case this falls back to the
  * unbound spawn rather than refusing to start the program at all. A caller of
  * `execve' that gets an unbound program is where this port has always been; a
  * caller that gets no program is worse. The difference is recorded in
@@ -288,7 +288,7 @@ static int start_program(int bound, struct kal_job* unit, struct kal_dir work,
 
 	struct kal_spawn how;
 	how.base        = at->base;
-	/* ⭐ THE DIRECTORY THE PROGRAM RUNS IN, WHICH IS THIS LIBRARY'S OWN AND NOT
+	/* THE DIRECTORY THE PROGRAM RUNS IN, WHICH IS THIS LIBRARY'S OWN AND NOT
 	 * `base'. `base' is whichever preopen the program's NAME resolved under ---
 	 * for `/usr/bin/sh' that is the root --- and before openkal 0.11 it was the
 	 * only directory a spawn carried, so a started program ran wherever the
@@ -296,7 +296,7 @@ static int start_program(int bound, struct kal_job* unit, struct kal_dir work,
 	 * names against and nothing else, so a caller that chdir'd and then started a
 	 * program was the one who found out. */
 	how.work        = work;
-	/* ⭐ THE UNIT, WHICH IS WHAT `POSIX_SPAWN_SETPGROUP' MEANS HERE. A caller
+	/* THE UNIT, WHICH IS WHAT `POSIX_SPAWN_SETPGROUP' MEANS HERE. A caller
 	 * that asked for it gets a `kal_job' whose identity the start establishes;
 	 * a backend that does not claim the position is given no unit at all rather
 	 * than a refusal, for the same reason the binding below is optional. */
@@ -305,7 +305,7 @@ static int start_program(int bound, struct kal_job* unit, struct kal_dir work,
 	how.grant_count = 0;
 	how.flags       = 0;
 
-	/* ⚠️ ASKED FOR ONLY WHERE IT IS MEANT, AND ONLY WHERE IT IS ANSWERED.
+	/* ASKED FOR ONLY WHERE IT IS MEANT, AND ONLY WHERE IT IS ANSWERED.
 	 *
 	 * `execve' is composed as starting a program and ending with its status, so
 	 * the binding is what makes the composition behave like the operation. An
@@ -346,7 +346,7 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
                        int bound)
 {
 	if (!res || !path) return EINVAL;
-	/* ⭐ `POSIX_SPAWN_SETPGROUP' IS HONOURED SINCE 0.12, AND ONLY IN THE ONE FORM
+	/* `POSIX_SPAWN_SETPGROUP' IS HONOURED SINCE 0.12, AND ONLY IN THE ONE FORM
 	 * THIS PORT CAN MEAN.
 	 *
 	 * The attribute carries a group to join, and a caller that asks to join
@@ -356,14 +356,14 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 	 * "a group of your own", is answered; a named group is still refused rather
 	 * than silently turned into a different one.
 	 *
-	 * ⚠️ That is exactly the case the consumer writes: `setpgid(0, 0)' in the
+	 * That is exactly the case the consumer writes: `setpgid(0, 0)' in the
 	 * child so that a timeout can kill the whole tree. */
 	if (attr && (attr->__flags & ~(POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK
 	                             | POSIX_SPAWN_SETPGROUP)))
 		return ENOSYS;
 	if (attr && (attr->__flags & POSIX_SPAWN_SETPGROUP) && attr->__pgrp != 0)
 		return ENOSYS;
-	/* ⚠️ musl carries the PATH SEARCH in this field: `posix_spawnp' stores
+	/* musl carries the PATH SEARCH in this field: `posix_spawnp' stores
 	 * `__execvpe' there and its `posix_spawn' calls it in the duplicate instead
 	 * of `execve'. This file replaces that duplicate, so the field was read by
 	 * nobody --- and `posix_spawnp("sh", …)' therefore started `./sh', failed,
@@ -410,7 +410,7 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 	 * caller --- the caller asked for a program started upon them, not for a
 	 * file --- so each is released once the spawn has been performed.
 	 *
-	 * ⚠️ THE BOUND IS NOT THREE. Three positions can be placed, and a caller may
+	 * THE BOUND IS NOT THREE. Three positions can be placed, and a caller may
 	 * name one of them more than once; POSIX says the last such action decides,
 	 * and the earlier file is still open and still has to be released. The bound
 	 * is stated rather than derived, and a sequence that exceeds it is refused
@@ -430,7 +430,7 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 	static struct okm_at fa_at;
 
 	if (!refused && fa) {
-		/* ⚠️⚠️ IN THE ORDER THEY WERE ADDED, WHICH IS NOT THE ORDER THE LIST IS
+		/* IN THE ORDER THEY WERE ADDED, WHICH IS NOT THE ORDER THE LIST IS
 		 * IN. musl's `posix_spawn_file_actions_add*' PREPEND, so `__actions'
 		 * names the most recent one; musl's own `posix_spawn' walks to the tail
 		 * and then follows `prev'. This file followed `next' and therefore
@@ -453,7 +453,7 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 				break;
 			}
 			case FDOP_OPEN: {
-				/* ⭐ EXPRESSIBLE, AND IT WAS REFUSED. `kal_fs_open' produces the
+				/* EXPRESSIBLE, AND IT WAS REFUSED. `kal_fs_open' produces the
 				 * file and `kal_fs_stream' produces the stream to place, both of
 				 * them required operations this port already calls elsewhere.
 				 * Refusing it forced every caller wanting a program's output in
@@ -464,7 +464,7 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 				const long r = okm_resolve(AT_FDCWD, op->path, &fa_at, 0);
 				if (r) { refused = (int)-r; break; }
 				struct kal_file f;
-				/* ⚠️ `op->mode' is not among the inputs, exactly as it is not for
+				/* `op->mode' is not among the inputs, exactly as it is not for
 				 * `open'. README.md's divergence table records what a program
 				 * observes; a mode accepted here and dropped beneath would be
 				 * this file reporting success having done something else. */
@@ -476,13 +476,13 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 				break;
 			}
 			case FDOP_CLOSE:
-				/* ⭐ TWO ANSWERS, DECIDED BY WHICH DESCRIPTOR IS NAMED. The
+				/* TWO ANSWERS, DECIDED BY WHICH DESCRIPTOR IS NAMED. The
 				 * comment this replaces gave one of them for both, on the ground
 				 * that "nothing is inherited that was not asked for" --- which is
 				 * true above position two and false at or below it, because the
 				 * three positions are inherited by construction.
 				 *
-				 * ⚠️ So closing one of the three is an action that cannot be
+				 * So closing one of the three is an action that cannot be
 				 * performed: openkal has no value meaning "no stream", and the
 				 * value that looks like one means the opposite. Accepting it and
 				 * doing nothing would hand a program the standard input its
@@ -491,7 +491,7 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 				if (op->fd > 2) break;
 				refused = ENOSYS;
 				break;
-			/* ⭐⭐ ANSWERED SINCE 0.12, BECAUSE openkal 0.11 GAVE A SPAWN A SECOND
+			/* ANSWERED SINCE 0.12, BECAUSE openkal 0.11 GAVE A SPAWN A SECOND
 			 * DIRECTORY. Both of these say the same thing --- run the program
 			 * HERE --- and until there was a place to put it they were refused
 			 * along with everything else this file could not express. */
@@ -529,7 +529,7 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 		}
 	}
 
-	/* ⭐ THE CAPABILITY IS REQUIRED ONLY WHERE IT IS USED.
+	/* THE CAPABILITY IS REQUIRED ONLY WHERE IT IS USED.
 	 *
 	 * `KAL_PROCESS_PROP_STREAM_PASSING' exists because an environment may be
 	 * able to start a program that inherits and unable to give it a stream of
@@ -552,12 +552,12 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 	 * started program reads its own name through kal_env_arg(0), so a caller
 	 * that did not supply it could not predict what the program would read. */
 	struct kal_process child;
-	/* ⚠️ THE UNIT IS THIS CALL'S, AND IT IS NOT KEPT ANYWHERE AFTERWARDS --- see
+	/* THE UNIT IS THIS CALL'S, AND IT IS NOT KEPT ANYWHERE AFTERWARDS --- see
 	 * the note at the end of this function. */
 	struct kal_job unit = { 0 };
 	struct kal_job* want_unit =
 		(attr && (attr->__flags & POSIX_SPAWN_SETPGROUP)) ? &unit : 0;
-	/* ⭐ THE WORKING DIRECTORY IS THIS LIBRARY'S, AND THAT IS THE WHOLE FIX.
+	/* THE WORKING DIRECTORY IS THIS LIBRARY'S, AND THAT IS THE WHOLE FIX.
 	 *
 	 * `chdir' here moves `okm_cwd_dir' and nothing else, because openkal has no
 	 * operation that moves a running program's. Before 0.11 a spawn carried one
@@ -570,7 +570,7 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 	                      &at, a_ptr, a_len, argc,
 	                      e_ptr, e_len, envc, &streams, &child);
 
-	/* ⭐ THE ONE ENVIRONMENT THAT SPELLS A PROGRAM WITH A SUFFIX IS ANSWERED
+	/* THE ONE ENVIRONMENT THAT SPELLS A PROGRAM WITH A SUFFIX IS ANSWERED
 	 * BEFORE THIS POINT AND NOT AFTER IT.
 	 *
 	 * A program there is a file whose name ends in a particular suffix, and a
@@ -578,14 +578,14 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 	 * resolved here rather than beneath, because openkal is deliberately
 	 * literal about names and does not know that a program is a kind of file.
 	 *
-	 * ⚠️ It used to be resolved by RETRYING the spawn on `kal_err_not_found'.
+	 * It used to be resolved by RETRYING the spawn on `kal_err_not_found'.
 	 * That cannot stay: the enquiry added above refuses an absent name before
 	 * the spawn is reached, so the retry would never run and every suffixless
 	 * name on that environment would be refused. `startable_name' therefore
 	 * owns the choice, keeps the same order --- the bare name first --- and
 	 * rewrites `at.rel' so that what was asked about is what is started. */
 
-	/* ⭐ THE FILES A FILE ACTION OPENED ARE RELEASED HERE, AND THE STARTED
+	/* THE FILES A FILE ACTION OPENED ARE RELEASED HERE, AND THE STARTED
 	 * PROGRAM KEEPS ITS STREAM.
 	 *
 	 * That the second survives the first is what `kal_process_channel' already
@@ -633,7 +633,7 @@ weak_alias(__posix_spawn, posix_spawn);
  * reported only if nothing is found; and any other error ends the search at
  * once, because it is not evidence about the next entry.
  *
- * ⚠️ INCLUDING THE ENTRY SEPARATOR, WHICH IS A COLON ON EVERY TARGET AND IS THE
+ * INCLUDING THE ENTRY SEPARATOR, WHICH IS A COLON ON EVERY TARGET AND IS THE
  * WRONG ONE FOR EXACTLY ONE OF THEM.
  *
  * One environment separates its own PATH with a semicolon and begins each entry
@@ -664,7 +664,7 @@ int __posix_spawnp(pid_t* restrict res, const char* restrict file,
 	const size_t k = slen(file);
 	if (k > NAME_MAX) return ENAMETOOLONG;
 
-	/* ⚠️ ON THE STACK, WHICH IS WHAT musl DOES TOO (a variable-length array of
+	/* ON THE STACK, WHICH IS WHAT musl DOES TOO (a variable-length array of
 	 * the same bound). The static buffers above are under this file's lock and
 	 * this function runs before it is taken --- a static here would be a race
 	 * between two contexts searching at once, which is worse than a frame. */

@@ -44,14 +44,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ⭐ `net`, `fork` and `shell` STATE WHAT THE BACKEND BENEATH THIS ROW
+          # `net`, `fork` and `shell` STATE WHAT THE BACKEND BENEATH THIS ROW
           # PROVIDES, and they are part of the criterion rather than a
           # convenience. openkal permits an implementation to decline an
           # interface in whole (clause 3), so "the probe was not run" and "the
           # probe was run and the refusal was the expected answer" are
           # different outcomes, and only the second is evidence.
           #
-          # ⭐⭐ `abort` NAMES WHAT EACH BACKEND'S `kal_abort` PRODUCES, AND IT IS
+          # `abort` NAMES WHAT EACH BACKEND'S `kal_abort` PRODUCES, AND IT IS
           # THREE DIFFERENT THINGS ON PURPOSE.
           #
           # Until 0.6.0 `abort` did not end the program at all: musl's `raise` is
@@ -71,7 +71,7 @@ jobs:
           - { name: 'linux, gcc',    os: ubuntu-24.04, toolchain: 'gcc@16.1.0',  target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-signal', dirtime: '--dir-time'    }
           - { name: 'linux, llvm',   os: ubuntu-24.04, toolchain: 'llvm@22.1.8', target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-signal', dirtime: '--dir-time'    }
           - { name: 'macos, llvm',   os: macos-14,     toolchain: 'llvm@20.1.7', target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-status', dirtime: '--dir-time'    }
-          # ⚠️ openkal-windows declines `openkal.space`: this system has no
+          # openkal-windows declines `openkal.space`: this system has no
           # primitive that copies an address space and starts a context in the
           # copy, and inventing one would be the simulation clause 3.1
           # forbids. `--no-fork` asserts the refusal.
@@ -91,7 +91,7 @@ jobs:
       # the index is handed a manifest pointing at a directory that exists
       # nowhere.
       #
-      # ⚠️ THAT HAS HAPPENED. This step runs BEFORE the rewrite, so what it
+      # THAT HAS HAPPENED. This step runs BEFORE the rewrite, so what it
       # examines is what the commit contains rather than what the job has done
       # to it.
       - name: The committed manifest names no local directory
@@ -140,7 +140,7 @@ jobs:
       - name: Install mcpp
         run: |
           xlings update
-          # ⚠️ THE PIN MAY NAME THE RELEASE THIS RUN IS VALIDATING, which does
+          # THE PIN MAY NAME THE RELEASE THIS RUN IS VALIDATING, which does
           # not exist yet — that is the whole point of MCPP_SOURCE_REF. Bootstrap
           # from whatever the index has; the step below replaces it with the
           # build under review, and the pin is what an ordinary run tests.
@@ -151,13 +151,13 @@ jobs:
           fi
           mcpp --version
           mcpp self config --mirror GLOBAL
-          # ⭐⭐ CROSS-VALIDATION: BUILD THE mcpp UNDER REVIEW AND USE THAT ONE.
+          # CROSS-VALIDATION: BUILD THE mcpp UNDER REVIEW AND USE THAT ONE.
           #
           # Empty in the ordinary run, so this job keeps testing the RELEASED
           # mcpp the pin above names. Set it — `workflow_dispatch` input, or the
           # repository variable — and the same job runs against that source.
           #
-          # ⚠️ THIS EXISTS BECAUSE THE ORDER USED TO BE WRONG. Several mcpp
+          # THIS EXISTS BECAUSE THE ORDER USED TO BE WRONG. Several mcpp
           # releases went out green and only then turned this ecosystem red: the
           # engine's own CI cannot see a defect that appears only in a real
           # dependency graph, and this repository could not see the engine until
@@ -170,7 +170,7 @@ jobs:
             [ -d "$src" ] || git clone --quiet --depth 1 \
               --branch "$MCPP_SOURCE_REF" \
               https://github.com/mcpp-community/mcpp.git "$src"
-            # ⚠️ THE CLONE'S OWN WORKSPACE PIN MUST NOT DECIDE WHICH mcpp
+            # THE CLONE'S OWN WORKSPACE PIN MUST NOT DECIDE WHICH mcpp
             # BUILDS IT. `.xlings.json` at mcpp's root pins the mcpp that
             # compiles mcpp, and that pin does not move when mcpp is released —
             # so a build inside the checkout obeys it and tries to install a
@@ -183,7 +183,7 @@ jobs:
             # above, which is exactly what removing the file leaves.
             rm -f "$src/.xlings.json"
             ( cd "$src" && mcpp build --release )
-            # ⚠️ BOTH SPELLINGS, AND NO `-perm`. The matrix reaches Windows and
+            # BOTH SPELLINGS, AND NO `-perm`. The matrix reaches Windows and
             # macOS runners too: on Windows the artefact is `mcpp.exe`, and
             # `-perm -u+x` is not a question that filesystem answers the way this
             # expects. Measured: `Finished release [optimized] in 173.44s`
@@ -197,7 +197,7 @@ jobs:
                     \( -name mcpp -o -name mcpp.exe \) | head -1)
             [ -n "$built" ] || { echo "::error::mcpp did not build from $MCPP_SOURCE_REF"; exit 1; }
             echo "$(cd "$(dirname "$built")" && pwd)" >> "$GITHUB_PATH"
-            # ⚠️ Reported, because a PATH entry that does not win looks exactly
+            # Reported, because a PATH entry that does not win looks exactly
             # like one that does until something built with the wrong engine.
             echo "under review: $("$built" --version)  (from $MCPP_SOURCE_REF)"
           fi
@@ -215,7 +215,7 @@ jobs:
           [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
           mcpp build $extra
 
-      # ⭐ AN OPTIONAL INTERFACE IS REFERENCED WEAKLY, WHICH IS A PROPERTY OF
+      # AN OPTIONAL INTERFACE IS REFERENCED WEAKLY, WHICH IS A PROPERTY OF
       # THE OBJECT AND NOT OF ANY ONE LINK.
       #
       # `openkal.random` is optional, and clause 6.1 expresses an
@@ -225,7 +225,7 @@ jobs:
       # every program over a backend without it fails to link, whether or not
       # it wanted a random byte.
       #
-      # ⚠️ THAT DEFECT SHIPPED, AND NOTHING HERE SAW IT. It was found one
+      # THAT DEFECT SHIPPED, AND NOTHING HERE SAW IT. It was found one
       # repository downstream, by a bare-metal program in openkal-llvm-runtime
       # linking over openkal-opensbi:
       #
@@ -239,7 +239,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
-          # ⚠️ ONE FINGERPRINT DIRECTORY, ASSERTED BEFORE ANYTHING IS READ.
+          # ONE FINGERPRINT DIRECTORY, ASSERTED BEFORE ANYTHING IS READ.
           # `target/` accumulates one per configuration, and a search across all
           # of them answers for a build that is not this one. The step that
           # checks the withheld set already learned this; the assertion is made
@@ -249,7 +249,7 @@ jobs:
                               ls -d target/*/*/ 2>/dev/null | sed 's/^/        /'
                               exit 1; }
 
-          # ⚠️⚠️ AND THIS PACKAGE'S OWN OBJECTS, WHICH IS NOT WHAT A SEARCH UNDER
+          # AND THIS PACKAGE'S OWN OBJECTS, WHICH IS NOT WHAT A SEARCH UNDER
           # `target/` FINDS. Measured while this step was extended: a search of
           # everything under `target/` reported `kal_net_accept` and
           # `kal_datagram_recv_from` as undefined STRONG references and the other
@@ -275,7 +275,7 @@ jobs:
             || { echo "::error::kal_random_fill is not a weak reference; an optional interface has been made mandatory"
                  grep kal_random syms.txt; exit 1; }
 
-          # ⭐⭐ AND THE SAME FOR EVERY INTERFACE THE 0.8 ROUTES REACH, WHICH IS
+          # AND THE SAME FOR EVERY INTERFACE THE 0.8 ROUTES REACH, WHICH IS
           # WHY THIS STEP IS NOT A SINGLE ASSERTION ANY MORE.
           #
           # `openkal.net`, `openkal.datagram`, `openkal.timeout` and
@@ -285,7 +285,7 @@ jobs:
           # never opens a socket fail to link — which is the defect this step
           # already exists because of, arriving through a different name.
           #
-          # ⚠️ THE SYMBOL IS SOUGHT ACROSS THE PORT'S OBJECTS RATHER THAN IN ONE,
+          # THE SYMBOL IS SOUGHT ACROSS THE PORT'S OBJECTS RATHER THAN IN ONE,
           # because the routes are spread over three sources: okm_net.c,
           # okm_poll.c and okm_fork.c. Naming one file would assert a property of
           # that file and report nothing about the others.
@@ -309,7 +309,7 @@ jobs:
           [ "$weakfail" = 0 ] || exit 1
           echo "  ok  every optional interface is referenced weakly, and kal_time_sleep is strong"
 
-          # ⚠️⚠️ AND ONE OF THEM IS AN OBJECT, WHICH IS NOT TESTED THE WAY THE
+          # AND ONE OF THEM IS AN OBJECT, WHICH IS NOT TESTED THE WAY THE
           # ELEVEN ABOVE ARE.
           #
           # Every name above is a function, so `if (kal_net_connect)` tests the
@@ -319,7 +319,7 @@ jobs:
           # null dereference would be one. okm_opt.h takes the address, once, and
           # every caller reaches the word through that.
           #
-          # ⚠️ WHAT THIS STEP CAN AND CANNOT SEE. That the reference is weak, it
+          # WHAT THIS STEP CAN AND CANNOT SEE. That the reference is weak, it
           # can. That the source takes the address rather than reading the value,
           # it cannot --- both forms leave a relocation. The rule is stated where
           # it is used and asserted here only against the failure a link can
@@ -332,7 +332,7 @@ jobs:
             *) echo "  weak object: kal_process_props" ;;
           esac
 
-      # ⭐⭐ ASKING WHETHER A STREAM IS A TERMINAL GETS THE RIGHT ANSWER.
+      # ASKING WHETHER A STREAM IS A TERMINAL GETS THE RIGHT ANSWER.
       #
       # musl's `isatty' asks with TIOCGWINSZ; this port answered only TCGETS,
       # so every `isatty' returned 0 — for a real terminal as readily as for a
@@ -340,7 +340,7 @@ jobs:
       # and a program deciding on colour or on line buffering decided wrongly
       # and in silence.
       #
-      # ⭐ THE CRITERION IS A RELATION, NOT A VALUE. `isatty` under a pipe and
+      # THE CRITERION IS A RELATION, NOT A VALUE. `isatty` under a pipe and
       # under a pseudo-terminal must DIFFER, and must differ the same way the
       # system's own C library does. A test asserting "0 in a pipe" alone would
       # have passed throughout the defect.
@@ -387,7 +387,7 @@ jobs:
             || { echo "::error::isatty over this port disagrees with the system's own C library"; exit 1; }
           echo "  ok  isatty answers the same as the system's own C library"
 
-      # ⭐⭐ THE INTERNAL OVERLAY STOPS AT THIS PACKAGE'S BOUNDARY.
+      # THE INTERNAL OVERLAY STOPS AT THIS PACKAGE'S BOUNDARY.
       #
       # musl reaches its own declarations through `src/include`, whose headers
       # define `hidden`, `weak` and `weak_alias` — names that mean something
@@ -403,7 +403,7 @@ jobs:
       # WHAT IS WITHHELD IS NOT DEFINED BY THIS PACKAGE, AND WHAT IS NOT
       # WITHHELD IS.
       #
-      # ⚠️⚠️ THE CRITERION IS THE PACKAGE'S OWN OBJECTS, NOT A PROGRAM'S LINK.
+      # THE CRITERION IS THE PACKAGE'S OWN OBJECTS, NOT A PROGRAM'S LINK.
       #
       # It was a program's link, and that measured the wrong thing. Under one
       # toolchain the probe built successfully for symbols this package does not
@@ -416,7 +416,7 @@ jobs:
       # A definition either is in these objects or is not. That holds under every
       # toolchain and cannot be satisfied by a host C library.
       #
-      # ⚠️ AND THE OBJECTS ARE SCOPED TO ONE FINGERPRINT DIRECTORY. `target/`
+      # AND THE OBJECTS ARE SCOPED TO ONE FINGERPRINT DIRECTORY. `target/`
       # accumulates one per configuration, so a search across all of them reads
       # definitions from a build made before the change --- which is how this
       # check first reported every withheld symbol as still present.
@@ -467,13 +467,13 @@ jobs:
           test -s compile_commands.json \
             || { echo "::error::no compile_commands.json — nothing to check"; exit 1; }
 
-          # ⚠️⚠️ PER ROW, NOT OVER THE FILE. This example depends on the
+          # PER ROW, NOT OVER THE FILE. This example depends on the
           # package by path, so THE PROVIDER'S OWN ROWS ARE IN THIS SAME FILE
           # and they carry the overlay legitimately — that is what "private,
           # not unused" means. A `grep` over the whole file cannot tell the two
           # apart and would call the package's own build a leak.
           #
-          # ⚠️ Separators are normalised because the Windows runner writes
+          # Separators are normalised because the Windows runner writes
           # `…\musl\src\include`, and a check that silently stops matching on
           # one platform is a check that platform does not have.
           norm='(.arguments // (.command | split(" "))) | join(" ") | gsub("\\\\"; "/")'
@@ -482,7 +482,7 @@ jobs:
           jq -r ".[] | select((.file | gsub(\"\\\\\\\\\"; \"/\")) | test(\"examples/cross-hello\") | not) | $norm" \
              compile_commands.json > provider.txt
 
-          # ⚠️ DENOMINATORS ON BOTH SIDES. With no consumer row every absence
+          # DENOMINATORS ON BOTH SIDES. With no consumer row every absence
           # below is vacuously true; with no provider row the control is.
           cons="$(wc -l < consumer.txt)"; prov="$(wc -l < provider.txt)"
           echo "  rows: consumer=$cons provider=$prov"
@@ -513,7 +513,7 @@ jobs:
       # openkal, it does not name an implementation, and it says nothing about
       # the platform.
       #
-      # ⚠️ FOUR PROBES, ONE RUNNER. tools/run-probe.sh holds the watchdog, the
+      # FOUR PROBES, ONE RUNNER. tools/run-probe.sh holds the watchdog, the
       # report of where a program that stopped was, and the two readings of the
       # output. Four copies of that would be four places for one of them to fall
       # behind.
@@ -585,7 +585,7 @@ jobs:
             echo "::error::uname reports '$got' and the manifest says '$want'"; exit 1; }
           echo "  ok  uname reports $want"
 
-      # ⭐ THE NAMES THIS LIBRARY MUST NOT TAKE FROM A PROGRAM ABOVE IT.
+      # THE NAMES THIS LIBRARY MUST NOT TAKE FROM A PROGRAM ABOVE IT.
       #
       # Reported as openkal-musl#13. This one is a COMPILE-TIME criterion: the
       # source declares `hidden`, `weak` and `weak_alias` as ordinary
@@ -593,7 +593,7 @@ jobs:
       # compile. It is run as well as built so that something links afterwards,
       # which is what distinguishes a source that compiles from a package that
       # works.
-      # ⭐ A THREAD CREATED FROM C++ IS THE THREAD THAT IS JOINED.
+      # A THREAD CREATED FROM C++ IS THE THREAD THAT IS JOINED.
       #
       # musl's C++ `pthread_t` was `unsigned long`, which is thirty-two bits on
       # Windows, so every std::thread there faulted when joined. The probe's
@@ -606,7 +606,7 @@ jobs:
           bash tools/run-probe.sh examples/threads-cxx threads-cxx
           grep -q 'value 42, result is the argument' examples/threads-cxx/run.log
 
-      # ⭐ A DETACHED THREAD ENDS, AND THE PROGRAM THAT STARTED IT GOES ON.
+      # A DETACHED THREAD ENDS, AND THE PROGRAM THAT STARTED IT GOES ON.
       #
       # musl's `__unmapself` left for a 256-byte shared stack before the calls
       # that end a detached thread; this port's path for those calls needs far
@@ -619,7 +619,7 @@ jobs:
           bash tools/run-probe.sh examples/threads-detached threads-detached
           grep -q 'detached: 8 started, 8 ended' examples/threads-detached/run.log
 
-      # ⭐ A LARGE ALLOCATION IS A MAPPING, AND A MAPPING IS WHOLE PAGES.
+      # A LARGE ALLOCATION IS A MAPPING, AND A MAPPING IS WHOLE PAGES.
       #
       # musl's allocator uses a mapping up to the end of its last page; the port
       # obtained only the length asked for, and on Windows the rest of that page
@@ -639,7 +639,7 @@ jobs:
           bash tools/run-probe.sh examples/identifiers identifiers
           grep -q 'hidden+weak+weak_alias = 41' examples/identifiers/run.log
 
-      # ⭐⭐ THE ROUTES openkal 0.8 MADE POSSIBLE, EXERCISED THROUGH POSIX.
+      # THE ROUTES openkal 0.8 MADE POSSIBLE, EXERCISED THROUGH POSIX.
       #
       # `socket`, `bind`, `listen`, `accept`, `connect`, `sendto`, `recvfrom`,
       # `poll` and `select` reached this port's default arm and returned ENOSYS
@@ -648,7 +648,7 @@ jobs:
       # a probe that called `kal_net_connect` to check that `connect` works
       # would be checking the wrong thing.
       #
-      # ⚠️ `matrix.net` DECIDES WHETHER THE ROW RUNS IT, and the value is a
+      # `matrix.net` DECIDES WHETHER THE ROW RUNS IT, and the value is a
       # property of the BACKEND rather than of the system. A backend that
       # declines `openkal.net` is behaving correctly; a row that expected it and
       # silently did not get it is what this must not read as a pass.
@@ -658,7 +658,7 @@ jobs:
           MCPP_TARGET: ${{ matrix.target }}
         run: bash tools/run-probe.sh examples/net net
 
-      # Another program, started three ways. ⭐ WHAT IS EXPECTED IS PASSED IN
+      # Another program, started three ways. WHAT IS EXPECTED IS PASSED IN
       # RATHER THAN INFERRED: `--no-fork` requires that duplicating the calling
       # image be REFUSED, so a system whose backend declines `openkal.space` is
       # asserted to decline it rather than merely not asked.
@@ -667,7 +667,7 @@ jobs:
           MCPP_TARGET: ${{ matrix.target }}
         run: bash tools/run-probe.sh examples/subprocess subprocess ${{ matrix.fork }} ${{ matrix.shell }} ${{ matrix.abort }}
 
-      # ⭐⭐ WHETHER AN ANSWER IS TRUE, WHICH IS A DIFFERENT QUESTION FROM
+      # WHETHER AN ANSWER IS TRUE, WHICH IS A DIFFERENT QUESTION FROM
       # WHETHER AN OPERATION WORKS --- AND THE ONE NO PROBE HERE WAS ASKING.
       #
       # Every probe above starts something, opens something or transfers
@@ -679,7 +679,7 @@ jobs:
       # installation it had not performed; `sysconf(_SC_OPEN_MAX)' answered 0
       # for a bound this library sets itself.
       #
-      # ⚠️ NOT ONE OF THEM IS A MISSING OPERATION, so not one appears in
+      # NOT ONE OF THEM IS A MISSING OPERATION, so not one appears in
       # `OPENKAL_MUSL_TRACE=enosys'. They were found by comparing every answer
       # against the host's, and this probe is that comparison kept.
       - name: The surface probe
@@ -687,7 +687,7 @@ jobs:
           MCPP_TARGET: ${{ matrix.target }}
         run: bash tools/run-probe.sh examples/surface surface ${{ matrix.dirtime }}
 
-      # ⭐⭐ WHERE A STARTED PROGRAM'S OUTPUT WENT, WHICH THE PROBE CANNOT ASK
+      # WHERE A STARTED PROGRAM'S OUTPUT WENT, WHICH THE PROBE CANNOT ASK
       # ABOUT ITSELF.
       #
       # A caller that redirects descriptor 1 and then starts a program used to
@@ -696,7 +696,7 @@ jobs:
       # asserts the file; it cannot assert the other half, because a program
       # cannot read its own output. This log is that output.
       #
-      # ⚠️ BOTH DIRECTIONS, AND THE SECOND IS NOT DECORATION. Requiring only that
+      # BOTH DIRECTIONS, AND THE SECOND IS NOT DECORATION. Requiring only that
       # the redirected markers are absent would pass for a library that had
       # stopped letting a started program write anywhere at all; requiring only
       # that the inherited one is present would pass for the defect. The probe's
@@ -716,14 +716,14 @@ jobs:
                  exit 1; }
           echo "  ok  redirected output reached the file; inherited output reached the caller"
 
-      # ⭐ AN OPERATION THIS LIBRARY DOES NOT HAVE CAN SAY SO WHEN ASKED.
+      # AN OPERATION THIS LIBRARY DOES NOT HAVE CAN SAY SO WHEN ASKED.
       #
       # The default arm of the dispatcher answers ENOSYS in silence, and the only
       # way a consumer could learn WHICH operation was missing was to read
       # port/src/okm_syscall.c. Two rounds of openkal-linux#13 went on that
       # question.
       #
-      # ⚠️ THREE OBSERVATIONS, BECAUSE THE INTERESTING FAILURES ARE THE QUIET
+      # THREE OBSERVATIONS, BECAUSE THE INTERESTING FAILURES ARE THE QUIET
       # ONES: a channel that reports nothing when asked, a channel that reports
       # when it was not asked, and a channel that reports the same thing once per
       # attempt so that a reader counting lines concludes it happened once.
@@ -748,7 +748,7 @@ jobs:
           cxx_runtime = "host-coupled"
           TOML
           sed -i 's/^          //' "$d/mcpp.toml"
-          # ⚠️⚠️ THE OPERATION THIS PROBE NAMES MUST STILL BE ABSENT, AND THE
+          # THE OPERATION THIS PROBE NAMES MUST STILL BE ABSENT, AND THE
           # ONE IT NAMED STOPPED BEING SO.
           #
           # It was `symlinkat`, chosen because openkal had no atom that creates a
@@ -758,7 +758,7 @@ jobs:
           # diagnostics for a hundred attempts, which is the same reading a
           # broken diagnostic channel gives.
           #
-          # ⭐ SO THE ABSENCE IS NOW ASSERTED RATHER THAN ASSUMED. `mknodat`
+          # SO THE ABSENCE IS NOW ASSERTED RATHER THAN ASSUMED. `mknodat`
           # creates a device node, which openkal does not express and is not
           # going to; if a case for it ever appears, the grep below fails and
           # says to pick another operation --- instead of this step passing
@@ -810,7 +810,7 @@ jobs:
 
       - name: The same program, built the ordinary way, as a control
         run: |
-          # ⚠️ THIS STEP EXISTS BECAUSE IT ALREADY EARNED ITS PLACE.
+          # THIS STEP EXISTS BECAUSE IT ALREADY EARNED ITS PLACE.
           #
           # The cross-built copy failed on a machine of the other system, and the
           # obvious reading was a defect in this port or in the way it was
@@ -821,7 +821,7 @@ jobs:
           #
           # Two failures that look alike are told apart by building the same
           # source two ways, and that is cheap enough to do every time.
-          # ⚠️ The target has to be named here as it is everywhere else in this
+          # The target has to be named here as it is everywhere else in this
           # job: one system needs it, and a step that omitted it built for that
           # system's other toolchain and failed at the link with names kernel32
           # supplies. Measured, on the first run of this step.
@@ -899,7 +899,7 @@ jobs:
           bash tools/probe-cross-macos.sh aarch64
           bash tools/probe-cross-macos.sh x86_64
 
-      # ⚠️ LINKING IS NOT RUNNING, AND THIS IS WHERE THAT IS ADMITTED.
+      # LINKING IS NOT RUNNING, AND THIS IS WHERE THAT IS ADMITTED.
       #
       # Everything above happens on a machine that is not the system in
       # question, and everything above is about the objects and the link. Whether

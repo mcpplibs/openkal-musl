@@ -147,7 +147,7 @@ int main(int argc, char **argv, char **envp) {
 	 * the two failed. It was reported as the first in openkal-linux#13 and it
 	 * was the second: `stat' resolves a directory perfectly well.
 	 *
-	 * ⭐ SETTING IT USED TO BE ASSERTED HERE AS A REFUSAL, and this comment said
+	 * SETTING IT USED TO BE ASSERTED HERE AS A REFUSAL, and this comment said
 	 * that if openkal gained the operation this observation would be the one to
 	 * say the row was out of date. It did its job: 0.10.0 opens a directory for
 	 * READING to stamp it --- which Linux and macOS perform and Windows does not
@@ -187,7 +187,7 @@ int main(int argc, char **argv, char **envp) {
 	check(counter == 80000, "80000 increments, none lost");
 	printf("   counter=%d\n", counter);
 
-	/* ⚠️⚠️ TWO WAITERS UPON ONE CONDITION VARIABLE, AND THE COUNT IS THE POINT.
+	/* TWO WAITERS UPON ONE CONDITION VARIABLE, AND THE COUNT IS THE POINT.
 	 *
 	 * The section above starts four contexts and contends a mutex hard, and it
 	 * passed throughout a defect that stopped this port dead: a broadcast reaches
@@ -197,7 +197,7 @@ int main(int argc, char **argv, char **envp) {
 	 * nothing at all until a program had two, and then it cost everything: the
 	 * second waiter was never woken and the program did not end.
 	 *
-	 * ⭐ SO THE OBSERVATION IS NOT "A CONDITION VARIABLE WORKS". It is that a
+	 * SO THE OBSERVATION IS NOT "A CONDITION VARIABLE WORKS". It is that a
 	 * SECOND waiter is released, because the first one always was. Found in a
 	 * consumer's own test suite rather than here, and this is the line that would
 	 * have found it: every probe in this file was written from a list of known
@@ -208,7 +208,7 @@ int main(int argc, char **argv, char **envp) {
 		int made = 0;
 		for (int i = 0; i < 2; i++) if (pthread_create(&w[i], NULL, cv_waiter, NULL) == 0) made++;
 
-		/* ⚠️ BOTH MUST BE WAITING BEFORE THE BROADCAST, or one is never queued
+		/* BOTH MUST BE WAITING BEFORE THE BROADCAST, or one is never queued
 		 * behind the other, the requeue is never requested, and the observation
 		 * below holds for a reason that has nothing to do with what it checks. */
 		for (int spin = 0; spin < 400; spin++) {
@@ -259,7 +259,7 @@ int main(int argc, char **argv, char **envp) {
 		failures += 2;
 	}
 
-	/* ⭐⭐ THE DISPOSITION OF A SIGNAL IS TOUCHED, WHICH NOTHING HERE DID.
+	/* THE DISPOSITION OF A SIGNAL IS TOUCHED, WHICH NOTHING HERE DID.
 	 *
 	 * This file had thirty-six observations and three of them were about
 	 * `abort'. It contained no call to `signal' or `sigaction' anywhere --- so
@@ -267,7 +267,7 @@ int main(int argc, char **argv, char **envp) {
 	 * may ASK what a signal is set to. A defect that killed any program doing
 	 * the second passed every one of the thirty-six.
 	 *
-	 * ⚠️ ALL THREE FORMS, AND SIGABRT AMONG THEM. The C library takes a lock for
+	 * ALL THREE FORMS, AND SIGABRT AMONG THEM. The C library takes a lock for
 	 * any change to that one disposition and blocks signals to take it, so
 	 * SIGABRT reaches code the others do not --- and the enquiry, which changes
 	 * nothing, reached it too. Two of the three forms below would have passed
@@ -308,7 +308,7 @@ int main(int argc, char **argv, char **envp) {
 			          && strcmp(target, "okm-link-target.tmp") == 0,
 			      "a node's content reads back as it was written");
 
-			/* ⭐ THE OBSERVATION THE PORT MOST NEEDED. Asking resolves and
+			/* THE OBSERVATION THE PORT MOST NEEDED. Asking resolves and
 			 * opening resolves, so the two agree; asking with the flag reports
 			 * the node itself. They disagreed, and a C++ library above reported
 			 * a link where a caller would have reached a file. */
@@ -318,7 +318,7 @@ int main(int argc, char **argv, char **envp) {
 			check(lstat("okm-probe-link", &itself) == 0 && S_ISLNK(itself.st_mode),
 			      "lstat reports the node itself");
 
-			/* ⭐⭐ AND THE THIRD QUESTION, WHICH IS NEITHER OF THOSE TWO.
+			/* AND THE THIRD QUESTION, WHICH IS NEITHER OF THOSE TWO.
 			 *
 			 * O_NOFOLLOW does not ask to open the link and does not ask to
 			 * open its target: it asks `is this name a link?' and expects
@@ -326,7 +326,7 @@ int main(int argc, char **argv, char **envp) {
 			 * resolve --- by design --- so this port resolved, and for a link
 			 * to a name that is absent it answered ENOENT.
 			 *
-			 * ⚠️ THAT IS A DIFFERENT ANSWER TO A DIFFERENT QUESTION, AND
+			 * THAT IS A DIFFERENT ANSWER TO A DIFFERENT QUESTION, AND
 			 * NOTHING NEARBY LOOKED WRONG. Every operation above still held.
 			 * What failed was three layers up: libc++'s `remove_all' descends
 			 * by opening each entry O_DIRECTORY|O_NOFOLLOW and reads ENOENT as
@@ -364,11 +364,11 @@ int main(int argc, char **argv, char **envp) {
 		unlink("okm-link-target.tmp");
 	}
 
-	/* ⚠️ Two different files are two different files. `st_dev' and `st_ino'
+	/* Two different files are two different files. `st_dev' and `st_ino'
 	 * were constants, so every file compared equal to every other and a C++
 	 * library's `equivalent' answered true with no error.
 	 *
-	 * ⚠️⚠️ WHEN THIS FAILS, THE DEFECT IS USUALLY NOT IN THIS PACKAGE. This
+	 * WHEN THIS FAILS, THE DEFECT IS USUALLY NOT IN THIS PACKAGE. This
 	 * port copies the identity out of `kal_node_info' and puts zero there when
 	 * the implementation does not report one --- which is permitted, and which
 	 * makes every node compare equal to every other. So a failure here says
@@ -399,7 +399,7 @@ int main(int argc, char **argv, char **envp) {
 
 	/* The page is the machine's and not the build's.
 	 *
-	 * ⚠️⚠️ AND "POSITIVE POWER OF TWO" WAS TRUE OF THE VALUE THAT BROKE IT.
+	 * AND "POSITIVE POWER OF TWO" WAS TRUE OF THE VALUE THAT BROKE IT.
 	 * This library took `kal_memory_granularity()' as its page size, and an
 	 * implementation for a machine with no memory management unit answers ONE
 	 * --- correctly, since nothing there needs rounding. One is positive and
@@ -407,7 +407,7 @@ int main(int argc, char **argv, char **envp) {
 	 * the environment for one-byte extents and the program stopped inside the
 	 * first allocation that needed a new one.
 	 *
-	 * ⭐ SO THE CRITERION IS WHAT THE ALLOCATOR REQUIRES, NOT WHAT THE NUMBER
+	 * SO THE CRITERION IS WHAT THE ALLOCATOR REQUIRES, NOT WHAT THE NUMBER
 	 * LOOKS LIKE. A page smaller than this library's own quantum is not a page
 	 * this library can use, whatever openkal reports. */
 	{

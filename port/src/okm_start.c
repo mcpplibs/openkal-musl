@@ -119,7 +119,7 @@ static char* dup_counted(const char* s, size_t n)
  * other way. */
 void __okm_init_env(void)
 {
-	/* ⭐ EACH VALUE IS COPIED, AND THE LENGTH REPORTED IS THE VALUE'S OWN. It
+	/* EACH VALUE IS COPIED, AND THE LENGTH REPORTED IS THE VALUE'S OWN. It
 	 * was answered with a pointer into the implementation's storage, which is
 	 * meaningful only while the implementation shares this address space --- and
 	 * this library is precisely the consumer that must not depend on which way
@@ -237,14 +237,14 @@ static void fill_random(void)
 	}
 }
 
-/* ⭐⭐ BRINGING THE LIBRARY UP, SEPARATED FROM BEING ENTERED — BECAUSE ON ONE
+/* BRINGING THE LIBRARY UP, SEPARATED FROM BEING ENTERED — BECAUSE ON ONE
  * OBJECT FORMAT THOSE ARE NOT THE SAME MOMENT.
  *
  * On ELF this function runs from the entry point, before anything else, and
  * `__libc_start_init` then walks the constructors. The order is: library, then
  * constructors, then `main`.
  *
- * ⚠️ Mach-O INVERTS IT. The dynamic loader runs an image's constructors BEFORE
+ * Mach-O INVERTS IT. The dynamic loader runs an image's constructors BEFORE
  * transferring control to its entry point, so a C++ runtime's static
  * initialisers execute while this library has not been initialised at all.
  * Measured 2026-08-23, an arm64 image built on Linux and run on a real Mac:
@@ -262,7 +262,7 @@ static void fill_random(void)
  * platform that needs it earlier calls it earlier (`port/src/mach/`). Calling
  * it twice is not a hazard; calling it late is.
  *
- * ⚠️ NOT A LOCK. This runs before the thread layer exists — `__init_tls` is one
+ * NOT A LOCK. This runs before the thread layer exists — `__init_tls` is one
  * of the things it does — so a mutex here would be using what it is installing.
  * A plain flag is correct because there is exactly one execution context at
  * this point on every format: the loader has not started any, and neither have
@@ -274,7 +274,7 @@ void __okm_libc_init(void)
 	if (g_libc_up) return;
 	g_libc_up = 1;
 
-	/* ⚠️⚠️ THE PAGE WAS FIXED WHEN THIS LIBRARY WAS BUILT AND IS NOW ASKED FOR.
+	/* THE PAGE WAS FIXED WHEN THIS LIBRARY WAS BUILT AND IS NOW ASKED FOR.
 	 *
 	 * It was the constant 4096 here and again in the auxiliary vector below,
 	 * and it is what this library reports as `sysconf(_SC_PAGESIZE)', what it
@@ -285,7 +285,7 @@ void __okm_libc_init(void)
 	 *
 	 * openkal 0.9 carries the value because it is a property of the machine the
 	 * program RUNS on and not of the machine it was built for. */
-	/* ⚠️⚠️ AND IT IS NOT THE SAME QUANTITY AS THIS LIBRARY'S PAGE SIZE, WHICH
+	/* AND IT IS NOT THE SAME QUANTITY AS THIS LIBRARY'S PAGE SIZE, WHICH
 	 * IS WHAT ASSIGNING IT DIRECTLY ASSUMED.
 	 *
 	 * openkal's granularity is the coarsest quantum a caller must respect. An
@@ -299,7 +299,7 @@ void __okm_libc_init(void)
 	 * one-byte extents and the program stopped inside the first allocation
 	 * large enough to need a new one.
 	 *
-	 * ⭐ MEASURED, AND ONLY ON THE MACHINE THAT ANSWERS THAT WAY. Over
+	 * MEASURED, AND ONLY ON THE MACHINE THAT ANSWERS THAT WAY. Over
 	 * openkal-opensbi the same-source example printed three of its four lines
 	 * and stopped --- containers, exceptions and unwinding all held, and the
 	 * fourth line was the first to format a string. Over openkal-linux, whose

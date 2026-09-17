@@ -1,6 +1,6 @@
 /* musl's <sys/random.h>, plus the declaration a consumer expects to find here.
  *
- * ⭐ THE SAME QUESTION EVERY OTHER OVERLAY IN THIS ECOSYSTEM ANSWERS: consumers
+ * THE SAME QUESTION EVERY OTHER OVERLAY IN THIS ECOSYSTEM ANSWERS: consumers
  * ask "which OPERATING SYSTEM is this" and assume that system's C library. Here
  * the C library is musl, whatever the system underneath.
  *
@@ -13,7 +13,7 @@
  *
  *     random.cpp:52:14: error: use of undeclared identifier 'getentropy'
  *
- * ⚠️ THIS ADDS A DECLARATION AND NOTHING ELSE. The definition is musl's, in
+ * THIS ADDS A DECLARATION AND NOTHING ELSE. The definition is musl's, in
  * `src/misc/getentropy.c`, unchanged; what this file corrects is where a
  * consumer looks for its name. Declaring it in both places is what glibc does
  * and what the consumer was written against.

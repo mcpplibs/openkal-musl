@@ -5,7 +5,7 @@
 #
 #   one-artifact.sh <program-name>      # from the directory holding target/
 #
-# ⚠️⚠️ WHY THIS IS A SCRIPT AND NOT `find | head -1`.
+# WHY THIS IS A SCRIPT AND NOT `find | head -1`.
 #
 # `target/` accumulates ONE DIRECTORY PER CONFIGURATION --- per toolchain, per
 # target, and per version of a dependency, because the version is part of the
@@ -14,13 +14,13 @@
 # built, and the difference is invisible: an old program runs, prints, and
 # reports success.
 #
-# ⭐ MEASURED WHILE THIS PACKAGE WAS BEING CHANGED, twice in one session. The
+# MEASURED WHILE THIS PACKAGE WAS BEING CHANGED, twice in one session. The
 # version moved from 0.5.0 to 0.6.0, `examples/subprocess/target` grew a second
 # fingerprint directory, and two newly added observations did not appear in the
 # output --- of a run that reported `-- failures: 0 --`. The criteria had not
 # failed; they had not run, and nothing said so.
 #
-# ⚠️ IT DOES NOT BITE IN CONTINUOUS INTEGRATION, which is the reason it survives:
+# IT DOES NOT BITE IN CONTINUOUS INTEGRATION, which is the reason it survives:
 # a fresh checkout builds one configuration and there is nothing to choose
 # between. It bites on the machine where the change is being written, which is
 # where a criterion is trusted most.
@@ -43,7 +43,7 @@ if [ "$fps" != 1 ]; then
     exit 1
 fi
 
-# ⚠️ BOTH SPELLINGS. One of the three systems appends a suffix, and a search for
+# BOTH SPELLINGS. One of the three systems appends a suffix, and a search for
 # the bare name there finds nothing and reports it as a build that did not
 # happen.
 binary="$(find target -type f \( -name "$name" -o -name "$name.exe" \) | head -1)"

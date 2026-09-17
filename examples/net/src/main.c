@@ -1,6 +1,6 @@
 /* A POSIX program that names no openkal symbol.
  *
- * ⭐ THAT IS THE WHOLE OF THE CRITERION. This package's claim is that a program
+ * THAT IS THE WHOLE OF THE CRITERION. This package's claim is that a program
  * written for POSIX runs above openkal without being rewritten, and a probe that
  * called `kal_net_connect' to check that `connect' works would be checking the
  * wrong thing. Nothing below is conditional on which implementation is beneath;
@@ -61,7 +61,7 @@ int main(void)
 	check(bind(lis, (struct sockaddr*)&want, sizeof want) == 0, "it is bound to port zero");
 	check(listen(lis, 4) == 0, "it listens");
 
-	/* ⭐ PORT ZERO ASKS THE ENVIRONMENT TO CHOOSE, and a program that must
+	/* PORT ZERO ASKS THE ENVIRONMENT TO CHOOSE, and a program that must
 	 * publish where it is listening has no other way to learn it. This is the
 	 * enquiry openkal.net added `kal_net_listener_local' for. */
 	struct sockaddr_in got;
@@ -111,7 +111,7 @@ int main(void)
 
 	char in[16];
 	memset(in, 0, sizeof in);
-	/* ⚠️ READ IN A LOOP. A read of a connection may report fewer bytes than
+	/* READ IN A LOOP. A read of a connection may report fewer bytes than
 	 * were sent, on every system --- and this port answers a readiness enquiry
 	 * by holding one byte, so a poll before a read makes the short read the
 	 * ordinary case rather than a rare one. A program that assumed otherwise
@@ -169,7 +169,7 @@ int main(void)
 	socklen_t slen = sizeof sender;
 	memset(msg, 0, sizeof msg);
 	const ssize_t got_n = recvfrom(a, msg, sizeof msg, 0, (struct sockaddr*)&sender, &slen);
-	/* ⚠️ THE MESSAGE ARRIVES WHOLE, WHICH IS THE PROPERTY THAT DISTINGUISHES A
+	/* THE MESSAGE ARRIVES WHOLE, WHICH IS THE PROPERTY THAT DISTINGUISHES A
 	 * DATAGRAM FROM A STREAM. A loop here would hide a port that had split it. */
 	check(got_n == 5 && memcmp(msg, "dgram", 5) == 0, "the whole message arrives at once");
 	check(sender.sin_family == AF_INET && ntohl(sender.sin_addr.s_addr) == 0x7f000001u,

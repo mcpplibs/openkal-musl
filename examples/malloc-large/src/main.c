@@ -8,7 +8,7 @@
  * a page of the block lay past the end of what was obtained --- over the next
  * heap block's header. The program went on until the heap next walked there.
  *
- * ⭐ WHAT IS OBSERVED.
+ * WHAT IS OBSERVED.
  *   (1) An anonymous mapping of a length that ends inside a page: the rest of
  *       that page reads as zero and can be written, and memory allocated beside
  *       it keeps its contents.

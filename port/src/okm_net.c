@@ -6,7 +6,7 @@
  * dispatcher had no case for. Reported as mcpplibs/openkal-linux#13. The gap
  * was in this port and not in musl's sources and not in the specification.
  *
- * ⚠️⚠️ THE ONE STRUCTURAL DIFFERENCE, AND EVERYTHING ELSE FOLLOWS FROM IT.
+ * THE ONE STRUCTURAL DIFFERENCE, AND EVERYTHING ELSE FOLLOWS FROM IT.
  *
  * BSD makes a socket first and decides what it is afterwards: `socket' yields
  * an object, and `connect' or `bind'+`listen' then gives it a role. openkal
@@ -26,7 +26,7 @@
  * every error a real kernel would report at `bind' this port reports at
  * `listen', which is one call later and carries the same value.
  *
- * ⚠️⚠️ EVERY REFERENCE TO EITHER INTERFACE IS WEAK, AND THE RULE IS NOT
+ * EVERY REFERENCE TO EITHER INTERFACE IS WEAK, AND THE RULE IS NOT
  * OPTIONAL. Clause 6.1 expresses an interface an implementation does not
  * provide as the ABSENCE of its definitions, and openkal-macos, openkal-windows,
  * openkal-opensbi and openkal-uefi all decline these two today. A strong
@@ -35,7 +35,7 @@
  * added for `kal_process_channel' and `kal_random_fill' to avoid --- twice
  * already, in this same port.
  *
- * ⭐ ONE TEST PER INTERFACE AND NOT ONE PER OPERATION. Clause 3 requires an
+ * ONE TEST PER INTERFACE AND NOT ONE PER OPERATION. Clause 3 requires an
  * implementation to provide an interface in whole or not at all, so whether
  * `kal_net_connect' is present answers for all eleven names. Every name is
  * still DECLARED weak --- that is what keeps the link from requiring it --- and
@@ -164,7 +164,7 @@ void okm_sock_release(int slot)
 	if (s->pend_conn && kal_net_close) kal_net_close(s->pend);
 	s->state = OKM_SOCK_FREE;
 	s->pend_conn = 0; s->pend_msg = 0;
-	/* ⚠️ THE BUFFER IS KEPT AND THE SLOT IS NOT. Freeing it here would return
+	/* THE BUFFER IS KEPT AND THE SLOT IS NOT. Freeing it here would return
 	 * memory to an allocator this library also implements, from a path a
 	 * program may reach while holding the table's lock. It is at most
 	 * OKM_DGRAM_MAX per slot, the slot count is fixed, and the next socket to
@@ -178,7 +178,7 @@ void okm_sock_release(int slot)
  * written here rather than taken from `inet_pton' because it is a conversion
  * between two structures and not a parse of text.
  *
- * ⚠️ A LENGTH OR A FAMILY THIS PORT DOES NOT KNOW IS REFUSED RATHER THAN READ
+ * A LENGTH OR A FAMILY THIS PORT DOES NOT KNOW IS REFUSED RATHER THAN READ
  * AS ONE IT DOES, which is the rule the specification states for the same
  * conversion in the other direction: an implementation that ignored the field
  * would misread every address a later revision defines, silently. */
@@ -278,7 +278,7 @@ int okm_sock_open(int domain, int type, int protocol)
 	if (base == SOCK_STREAM && !OKM_HAVE_NET)   return -EAFNOSUPPORT;
 	if (base == SOCK_DGRAM  && !OKM_HAVE_DGRAM) return -EAFNOSUPPORT;
 
-	/* ⚠️ REFUSED HERE RATHER THAN IGNORED. A descriptor that was asked to be
+	/* REFUSED HERE RATHER THAN IGNORED. A descriptor that was asked to be
 	 * non-blocking and is not would make every subsequent operation block where
 	 * the caller arranged not to, and it would do so silently. */
 	if ((type & SOCK_NONBLOCK) && !okm_can_bound()) return -ENOSYS;
@@ -316,7 +316,7 @@ int okm_sock_bind(int fd, const void* addr, unsigned len)
 	const int r = to_endpoint(addr, len, &ep);
 	if (r) return r;
 
-	/* ⭐ RECORDED AND NOT PERFORMED, which is the deferral this file exists for.
+	/* RECORDED AND NOT PERFORMED, which is the deferral this file exists for.
 	 * A datagram socket spends it at the first send or receive; a stream socket
 	 * spends it at `listen'. Neither loses an error: openkal reports at the
 	 * operation what a kernel reports at the bind, and the value is the same
@@ -451,7 +451,7 @@ int okm_sock_connect(int fd, const void* addr, unsigned len)
 	if (s->state != OKM_SOCK_NEW)  return -EINVAL;
 	if (!OKM_HAVE_NET) return -ENOSYS;
 
-	/* ⚠️ THE CONNECTION IS ESTABLISHED BEFORE THIS RETURNS, EVEN ON A
+	/* THE CONNECTION IS ESTABLISHED BEFORE THIS RETURNS, EVEN ON A
 	 * NON-BLOCKING DESCRIPTOR, and a caller cannot be told otherwise honestly.
 	 *
 	 * `kal_net_connect' completes or fails; openkal has no form that begins a
@@ -646,7 +646,7 @@ long okm_sock_recv(int fd, void* buf, unsigned long len, int flags,
 
 /* --- options ----------------------------------------------------------------
  *
- * ⚠️ AN OPTION THIS PORT CANNOT HONOUR IS REFUSED. Accepting one and ignoring it
+ * AN OPTION THIS PORT CANNOT HONOUR IS REFUSED. Accepting one and ignoring it
  * is the single failure this whole port is written to avoid: a caller that set
  * SO_BROADCAST and was told it succeeded would send to a broadcast address and
  * be told the send succeeded too, and nothing would ever arrive. ENOPROTOOPT is
@@ -675,7 +675,7 @@ int okm_sock_setopt(int fd, int level, int opt, const void* val, unsigned len)
 
 	switch (opt) {
 	case SO_REUSEADDR:
-		/* ⭐ ACCEPTED BECAUSE IT IS ALREADY IN EFFECT, not because it is
+		/* ACCEPTED BECAUSE IT IS ALREADY IN EFFECT, not because it is
 		 * harmless. openkal's `kal_net_listen' sets this on the listener it
 		 * makes --- openkal-linux/src/net.cpp says so and gives the reason: a
 		 * program restarted within the kernel's lingering interval is the
@@ -709,7 +709,7 @@ int okm_sock_getopt(int fd, int level, int opt, void* val, unsigned* len)
 		*len = sizeof(int);
 		return 0;
 	case SO_ERROR:
-		/* ⭐ ALWAYS ZERO, AND IT IS AN ACCURATE ANSWER RATHER THAN A STAND-IN.
+		/* ALWAYS ZERO, AND IT IS AN ACCURATE ANSWER RATHER THAN A STAND-IN.
 		 * This option reports an error that arrived after the call that would
 		 * have reported it returned. Every operation here completes before it
 		 * returns --- see the note at `connect' --- so there is never one
@@ -765,7 +765,7 @@ int okm_sock_wait_in(struct okm_desc* d, kal_u64 ns)
 	if (s->state == OKM_SOCK_DGRAM) {
 		if (s->pend_msg) return 1;
 		if (!kal_timeout_recv_from) return -ENOSYS;
-		/* ⚠️ THE BUFFER IS WHY A READINESS ENQUIRY IS NOT DESTRUCTIVE HERE.
+		/* THE BUFFER IS WHY A READINESS ENQUIRY IS NOT DESTRUCTIVE HERE.
 		 * openkal reports a message by delivering it, so the only way to learn
 		 * that one has arrived is to take it, and the only way to keep the
 		 * enquiry honest is to hold it until the receive that follows. */

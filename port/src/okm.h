@@ -21,14 +21,14 @@
 #include <openkal.h>
 #include <stddef.h>
 
-/* ⭐ WHICH OPENKAL INTERFACES THE IMPLEMENTATION BENEATH PROVIDES.
+/* WHICH OPENKAL INTERFACES THE IMPLEMENTATION BENEATH PROVIDES.
  *
  * openkal is composable. An implementation provides an interface in whole or
  * not at all (clause 6.1), and one that cannot provide `fs' does not provide
  * it, because clause 6.2 forbids the alternative in terms: an operation that is
  * present and always fails is a defect.
  *
- * ⚠️ THE CONSEQUENCE FOR A C LIBRARY, WHICH IS WHY THIS BLOCK EXISTS.
+ * THE CONSEQUENCE FOR A C LIBRARY, WHICH IS WHY THIS BLOCK EXISTS.
  *
  * A C library calls those interfaces. If it is BUILT calling one the
  * implementation beneath does not provide, the link fails --- and it fails for
@@ -40,7 +40,7 @@
  * openkal's core set: a program whose entire text was `import std;' and one
  * line of output failed to link on fifteen names it can never reach.
  *
- * ⭐ SO THE C LIBRARY IS CONFIGURED AND AN OPENKAL IMPLEMENTATION IS NOT. THAT
+ * SO THE C LIBRARY IS CONFIGURED AND AN OPENKAL IMPLEMENTATION IS NOT. THAT
  * LOOKS LIKE A CONTRADICTION AND IS NOT ONE.
  *
  *   An openkal implementation may not answer "unsupported", because openkal's
@@ -54,14 +54,14 @@
  * place where it would go wrong is a library that returned SUCCESS having done
  * nothing.
  *
- * ⭐ THREE MACROS HERE AND ALL THE CONSEQUENCES IN ONE OTHER FILE. This block
+ * THREE MACROS HERE AND ALL THE CONSEQUENCES IN ONE OTHER FILE. This block
  * says what the environment HAS; okm_opt.h says what follows, and it is the
  * only file in the port that reads these. A source that calls an interface
  * which need not be there names `okm_fs_*' rather than `kal_fs_*', and never
  * asks the question itself --- because the same question asked in forty places
  * is answered wrongly in the forty-first.
  *
- * ⚠️ THE TARGET IS A PROXY FOR THE IMPLEMENTATION, AND AN IMPERFECT ONE.
+ * THE TARGET IS A PROXY FOR THE IMPLEMENTATION, AND AN IMPERFECT ONE.
  *
  * The manifest clears these for cfg(os="none"), because a target with no
  * operating system is the case where an implementation providing storage is
@@ -127,7 +127,7 @@ struct okm_desc {
 	int          pending_kind;
 	char         pending_name[256];
 	int          sock;           /* OKM_SOCKET: the slot in okm_net.c, else -1 */
-	/* ⭐ ONE BYTE READ AHEAD, WHICH IS HOW A READINESS ENQUIRY IS ANSWERED.
+	/* ONE BYTE READ AHEAD, WHICH IS HOW A READINESS ENQUIRY IS ANSWERED.
 	 *
 	 * openkal has no operation that reports whether a transfer would proceed.
 	 * `openkal.timeout' bounds the transfer itself, and clause 6.3 records
@@ -142,7 +142,7 @@ struct okm_desc {
 	 * moment it was made. okm_desc already holds a directory entry for the same
 	 * reason and by the same means.
 	 *
-	 * ⚠️ ONE BYTE AND NOT A BUFFER. A short read is a result every caller of
+	 * ONE BYTE AND NOT A BUFFER. A short read is a result every caller of
 	 * `read' already handles, and a larger read-ahead would turn this into a
 	 * second layer of buffering underneath stdio's. */
 	int           ahead;          /* a byte is held                            */
@@ -232,7 +232,7 @@ kal_uintptr okm_open_flags(int open_flags);
 
 /* --- sockets, in okm_net.c -------------------------------------------------
  *
- * ⚠️ BSD SEPARATES `socket' FROM `connect' AND `bind'; openkal DOES NOT.
+ * BSD SEPARATES `socket' FROM `connect' AND `bind'; openkal DOES NOT.
  * `kal_net_connect' produces a connection and there is no unbound socket to
  * produce first. So a descriptor made by `socket' holds nothing but the three
  * numbers it was given, and the openkal operation happens later --- at

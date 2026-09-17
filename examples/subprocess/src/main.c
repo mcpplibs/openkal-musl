@@ -7,14 +7,14 @@
  *   system        a command line handed to a shell
  *   popen         the same, with a channel back
  *
- * ⭐ TWO OF THE FIRST THREE ALREADY WORKED AND NOTHING SAID SO. This package
+ * TWO OF THE FIRST THREE ALREADY WORKED AND NOTHING SAID SO. This package
  * replaces musl's `posix_spawn' with port/src/okm_spawn.c, and `system' and
  * `popen' are both written on `posix_spawn' --- so they have been available for
  * as long as that file has, and no test in this repository ever ran one. A
  * capability that works and is not asserted is a capability that will stop
  * working quietly.
  *
- * ⚠️⚠️ AND THAT IS EXACTLY HOW THE REDIRECTION DEFECT SURVIVED. Every
+ * AND THAT IS EXACTLY HOW THE REDIRECTION DEFECT SURVIVED. Every
  * observation here reported that a program STARTED. None of them asked WHERE ITS
  * OUTPUT WENT, and the answer was: to the stream this program was started with,
  * whatever the caller had redirected onto. `popen' passed throughout, because
@@ -23,11 +23,11 @@
  * consumer as openkal-linux#13, not here, and the whole reason it was not here
  * is the shape of the question this file used to ask.
  *
- * ⭐ THE PROGRAM THAT IS STARTED IS THIS ONE, WITH A MODE ON ITS COMMAND LINE.
+ * THE PROGRAM THAT IS STARTED IS THIS ONE, WITH A MODE ON ITS COMMAND LINE.
  * A probe that started `/bin/sh' would be a probe that only two of the four
  * systems can run, and the redirection criteria hold on all four.
  *
- * ⚠️ WHAT IS EXPECTED IS STATED ON THE COMMAND LINE RATHER THAN INFERRED, which
+ * WHAT IS EXPECTED IS STATED ON THE COMMAND LINE RATHER THAN INFERRED, which
  * is the same arrangement examples/net uses and for the same reason. An
  * environment whose backend declines `openkal.space' is not a failure; an
  * environment that was expected to provide it and quietly does not IS one, and
@@ -40,7 +40,7 @@
  *                          how the implementation beneath expresses a program
  *                          that ended abnormally.
  *
- * ⚠️⚠️ THREE VALUES AND NOT TWO, BECAUSE A CRITERION WHOSE ANSWER IS "SOMETHING
+ * THREE VALUES AND NOT TWO, BECAUSE A CRITERION WHOSE ANSWER IS "SOMETHING
  * UNUSUAL HAPPENED" HOLDS FOR THE DEFECT AS WELL AS FOR THE FIX.
  *
  * Before `abort' reached `kal_abort' it fell through to musl's `a_crash()' and
@@ -76,7 +76,7 @@
 
 extern char** environ;
 
-/* ⚠️ THE FOUR REDIRECTED MARKERS SHARE A SUFFIX AND THE INHERITED ONE DOES NOT.
+/* THE FOUR REDIRECTED MARKERS SHARE A SUFFIX AND THE INHERITED ONE DOES NOT.
  *
  * The criterion this probe cannot state by itself is that the started program's
  * bytes did NOT arrive on the stream this program was started with --- a program
@@ -106,7 +106,7 @@ static int child_mode(int argc, char** argv)
 {
 	for (int i = 1; i < argc; i++) {
 		if (strcmp(argv[i], "--child-echo") == 0 && i + 1 < argc) {
-			/* ⚠️ `write' AND NOT `printf'. What is being measured is which
+			/* `write' AND NOT `printf'. What is being measured is which
 			 * stream descriptor 1 names in this program, and stdio would add a
 			 * buffer between the question and the answer. */
 			const char* t = argv[i + 1];
@@ -123,7 +123,7 @@ static int child_mode(int argc, char** argv)
 			usleep((unsigned)atoi(argv[i + 1]) * 1000u);
 			_exit(7);
 		}
-		/* ⚠️⚠️ FORMS A UNIT AND THEN NAMES ONE THAT DOES NOT EXIST.
+		/* FORMS A UNIT AND THEN NAMES ONE THAT DOES NOT EXIST.
 		 *
 		 * This runs in a started program rather than in the probe because the
 		 * defect it observes is fatal: a `kill' that reaches the caller's OWN
@@ -185,7 +185,7 @@ static int holds(const char* path, const char* marker, long* got)
 
 /* --- a redirection this program performed, and the program it starts -------- */
 
-/* ⚠️ NOTHING MAY BE PRINTED WHILE DESCRIPTOR 1 IS THE SINK, because this
+/* NOTHING MAY BE PRINTED WHILE DESCRIPTOR 1 IS THE SINK, because this
  * program's own report would land in the file it is about to read back. Each
  * experiment therefore returns its findings and reports them afterwards. */
 static int redirect_stdout(const char* path, int* saved)
@@ -246,7 +246,7 @@ int main(int argc, char** argv)
 	errno = 0;
 	const pid_t kid = fork();
 	if (kid == 0) {
-		/* ⚠️ `_exit' AND NOT `exit'. The copy holds a copy of the parent's stdio
+		/* `_exit' AND NOT `exit'. The copy holds a copy of the parent's stdio
 		 * buffers, and running the exit handlers would write them a second
 		 * time --- which is a defect of the probe and looks like one of the
 		 * port. */
@@ -258,7 +258,7 @@ int main(int argc, char** argv)
 			int status = 0;
 			check(waitpid(kid, &status, 0) == kid, "the copy is awaited");
 			const int ok = WIFEXITED(status) && WEXITSTATUS(status) == 23;
-			/* ⚠️ THE RAW STATUS IS PRINTED WHEN IT IS WRONG, and only then. A
+			/* THE RAW STATUS IS PRINTED WHEN IT IS WRONG, and only then. A
 			 * line reading "it did not report the status it was written to
 			 * report" names a fault and not a place: a copy that ended on a
 			 * signal and one that returned the wrong number are different
@@ -272,7 +272,7 @@ int main(int argc, char** argv)
 			failures += 2;
 		}
 	} else {
-		/* ⭐ A REFUSAL IS THE EXPECTED ANSWER HERE AND IS CHECKED AS ONE. Clause
+		/* A REFUSAL IS THE EXPECTED ANSWER HERE AND IS CHECKED AS ONE. Clause
 		 * 3 permits an implementation to decline an interface in whole, clause
 		 * 6.1 makes the absence a link-time one, and okm_opt.h's rule turns it
 		 * into the defined error a POSIX caller already handles. */
@@ -282,7 +282,7 @@ int main(int argc, char** argv)
 
 	/* --- the control: a program started with nothing redirected --------------- */
 
-	/* ⭐ THIS ONE IS HERE SO THAT THE FOUR BELOW MEAN SOMETHING. Every criterion
+	/* THIS ONE IS HERE SO THAT THE FOUR BELOW MEAN SOMETHING. Every criterion
 	 * below asserts that a caller's redirection was carried across; without this
 	 * one they would all pass for a library that had stopped letting a started
 	 * program inherit anything at all. Its marker is the one continuous
@@ -299,7 +299,7 @@ int main(int argc, char** argv)
 
 	/* --- a redirection the caller performed, three ways it can be expressed ---- */
 
-	/* ⭐ ONE ROUTE WAS FIXED AND THREE CALL SITES REACH IT. The seeding lives
+	/* ONE ROUTE WAS FIXED AND THREE CALL SITES REACH IT. The seeding lives
 	 * inside `__posix_spawn', so `posix_spawn', `execve' and `system' are all
 	 * answered by one change --- and one change answering three entries is not
 	 * three entries having a criterion. Each is asked separately. */
@@ -347,7 +347,7 @@ int main(int argc, char** argv)
 
 	/* --- a file action that names the file itself ------------------------------ */
 
-	/* ⭐ `addopen' WAS REFUSED AND IS EXPRESSIBLE. It is the ordinary way to send
+	/* `addopen' WAS REFUSED AND IS EXPRESSIBLE. It is the ordinary way to send
 	 * a started program's output to a file, and refusing it forced every caller
 	 * through `dup2' --- which is the route that did not work. */
 	{
@@ -375,7 +375,7 @@ int main(int argc, char** argv)
 
 	/* --- and one that cannot be performed --------------------------------------- */
 
-	/* ⭐ A REFUSAL IS A CRITERION. openkal has no value meaning "no stream", and
+	/* A REFUSAL IS A CRITERION. openkal has no value meaning "no stream", and
 	 * the value that looks like one --- zero --- means the opposite: the stream
 	 * the caller has. So closing one of the three in the started program cannot
 	 * be done, and it used to be ACCEPTED and not done, which handed a program
@@ -397,7 +397,7 @@ int main(int argc, char** argv)
 
 	/* --- how a program that ended abnormally is reported ------------------------ */
 
-	/* ⚠️⚠️ `abort' DID NOT END THE PROGRAM AND AN ILLEGAL INSTRUCTION DID.
+	/* `abort' DID NOT END THE PROGRAM AND AN ILLEGAL INSTRUCTION DID.
 	 * musl's `raise' is `tkill', this port had no case for it, so `abort' fell
 	 * through to the line musl's own comment calls unreachable --- `a_crash()',
 	 * which on x86_64 is `hlt' and faults as a segmentation fault. Every uncaught
@@ -431,7 +431,7 @@ int main(int argc, char** argv)
 		check(distinguishable,
 		      "an abnormal end is distinguishable from every ordinary one");
 
-		/* ⭐ AND THE PARTICULAR END THIS SYSTEM'S IMPLEMENTATION PRODUCES, which
+		/* AND THE PARTICULAR END THIS SYSTEM'S IMPLEMENTATION PRODUCES, which
 		 * is what separates `abort reached kal_abort' from `abort fell through
 		 * to an illegal instruction'. The observation above cannot: a fault is
 		 * distinguishable from an ordinary end too. */
@@ -464,7 +464,7 @@ int main(int argc, char** argv)
 
 	/* --- asking after a started program without waiting for it ------------------ */
 
-	/* ⚠️ `waitpid' DISCARDED ITS OPTIONS, so the one call whose purpose is not to
+	/* `waitpid' DISCARDED ITS OPTIONS, so the one call whose purpose is not to
 	 * wait blocked until the program finished. `kal_timeout_wait_process' has
 	 * been in the specification since 0.8; the route was missing. */
 	{
@@ -477,7 +477,7 @@ int main(int argc, char** argv)
 			long spins = 0;
 			pid_t r;
 			while ((r = waitpid(pid, &st, WNOHANG)) == 0 && spins < 100000) spins++;
-			/* ⭐ THE CRITERION IS THAT THE CALLER GOT CONTROL BACK, which is
+			/* THE CRITERION IS THAT THE CALLER GOT CONTROL BACK, which is
 			 * what a count greater than zero states and what a count of exactly
 			 * one would not distinguish from having blocked once. */
 			if (spins == 0)
@@ -492,7 +492,7 @@ int main(int argc, char** argv)
 		}
 	}
 
-	/* ⭐ AND ANY OF THEM, NOT THE FIRST ONE RECORDED.
+	/* AND ANY OF THEM, NOT THE FIRST ONE RECORDED.
 	 *
 	 * `waitpid(-1, …, WNOHANG)` asks after any child. Asking after the first
 	 * recorded one would report "none has finished" while a later one had, which
@@ -571,13 +571,13 @@ int main(int argc, char** argv)
 	/* --- what a copy of this image calls itself -------------------------------- */
 
 	if (expect_fork) {
-		/* ⚠️⚠️ EVERY CONTEXT USED TO ANSWER 1, SO A COPY REPORTED THE IDENTIFIER
+		/* EVERY CONTEXT USED TO ANSWER 1, SO A COPY REPORTED THE IDENTIFIER
 		 * OF THE IMAGE IT WAS COPIED FROM. Two contexts, one answer, and no way
 		 * for the copy to name itself --- a program writing its own identifier
 		 * where something else would read it (a lock file, the name of a
 		 * temporary, a line of a log) wrote a value naming something else.
 		 *
-		 * ⭐ THE NUMBER BOTH SIDES ALREADY AGREE ON is the one `fork' returns to
+		 * THE NUMBER BOTH SIDES ALREADY AGREE ON is the one `fork' returns to
 		 * the parent, so that is what the copy is told. It has to exist BEFORE
 		 * the copy is taken, which is why okm_fork.c reserves the table entry
 		 * above `kal_space_start' rather than recording it below. */
@@ -604,7 +604,7 @@ int main(int argc, char** argv)
 		check(named > 0 && said == (long)named,
 		      "and it names the identifier its parent was given, not its parent's");
 
-		/* ⚠️ THE GUARD THIS CHANGE NEEDS, AND IT IS NOT A CRITERION --- it holds
+		/* THE GUARD THIS CHANGE NEEDS, AND IT IS NOT A CRITERION --- it holds
 		 * before the change as well. `kill' decides "this program itself" by
 		 * comparing against the identifier, and that comparison was against the
 		 * constant 1. Carrying an identifier into a copy without moving the
@@ -631,7 +631,7 @@ int main(int argc, char** argv)
 
 	/* --- a program that CANNOT be started ------------------------------------- */
 
-	/* ⭐⭐ THE QUESTION THIS FILE NEVER ASKED, AND THE ONE A CONSUMER LOST NINE
+	/* THE QUESTION THIS FILE NEVER ASKED, AND THE ONE A CONSUMER LOST NINE
 	 * TESTS TO.
 	 *
 	 * Every observation above starts a program that is there. None asked what
@@ -641,7 +641,7 @@ int main(int argc, char** argv)
 	 * reported success. `execve' waited for the duplicate, read 127, and ENDED
 	 * THE CALLING PROGRAM with it.
 	 *
-	 * ⚠️ WHICH BREAKS EVERY SEARCH FOR A PROGRAM BY NAME. musl's `execvp'
+	 * WHICH BREAKS EVERY SEARCH FOR A PROGRAM BY NAME. musl's `execvp'
 	 * issues one `execve' per PATH entry and needs it to RETURN so it can try
 	 * the next; here it did not return at all, so the first entry that missed
 	 * was the end. A consumer measured `bwrap' --- installed at /usr/bin/bwrap
@@ -670,7 +670,7 @@ int main(int argc, char** argv)
 		if (e == 0) { int s; waitpid(dir_pid, &s, 0); failures++; }
 	}
 
-	/* ⚠️ CALLED IN THIS PROGRAM AND NOT IN A COPY, DELIBERATELY. What is being
+	/* CALLED IN THIS PROGRAM AND NOT IN A COPY, DELIBERATELY. What is being
 	 * observed is that `execve' RETURNS; a version that does not return ends
 	 * this program at 127, and the probe runner reports a program that stopped
 	 * without a count of failures --- which is the loudest reading available and
@@ -689,7 +689,7 @@ int main(int argc, char** argv)
 	if (expect_shell) {
 		/* The first entry misses. That is the whole point: the search has to
 		 * survive it, and until now it could not. */
-		/* ⚠️ COPIED WITH A LENGTH THAT IS THE VALUE'S RATHER THAN A BUFFER'S.
+		/* COPIED WITH A LENGTH THAT IS THE VALUE'S RATHER THAN A BUFFER'S.
 		 * `getenv' answers a pointer INTO the environment and `setenv' below may
 		 * move it, so the old value has to be kept somewhere --- and a fixed
 		 * buffer would silently truncate on a machine whose PATH is long, which
@@ -736,7 +736,7 @@ int main(int argc, char** argv)
 		else      unsetenv("PATH");
 	}
 
-	/* ⚠️⚠️ WHAT ONE `read' RETURNS AFTER A `poll', AND THE SIZE IS THE WHOLE
+	/* WHAT ONE `read' RETURNS AFTER A `poll', AND THE SIZE IS THE WHOLE
 	 * OBSERVATION.
 	 *
 	 * openkal has no readiness enquiry, so `poll' here performs a bounded
@@ -746,7 +746,7 @@ int main(int argc, char** argv)
 	 * back to `poll', which keeps another, so a stream arrived one byte per
 	 * iteration for ever.
 	 *
-	 * ⭐ EVERY BYTE WAS DELIVERED AND IN ORDER, WHICH IS WHY IT SURVIVED. A caller
+	 * EVERY BYTE WAS DELIVERED AND IN ORDER, WHICH IS WHY IT SURVIVED. A caller
 	 * that concatenates sees exactly the right bytes; only a caller that looks at
 	 * the BOUNDARIES sees anything wrong, and then it sees a lot --- a reader
 	 * scanning each arrival for a word finds none, because `two.' arrives as `t'
@@ -800,7 +800,7 @@ int main(int argc, char** argv)
 
 	/* --- a program that needs an INTERPRETER ---------------------------------
 	 *
-	 * ⚠️⚠️ A WHOLE CLASS OF PROGRAMS COULD NOT BE STARTED, AND NOTHING HERE
+	 * A WHOLE CLASS OF PROGRAMS COULD NOT BE STARTED, AND NOTHING HERE
 	 * LOOKED. `execveat' with a directory descriptor and a relative name gives
 	 * the kernel the program's name as `/dev/fd/<dirfd>/<name>'. For an ordinary
 	 * executable that spelling never surfaces --- the kernel holds the file open
@@ -809,16 +809,16 @@ int main(int argc, char** argv)
 	 * which time a close-on-exec descriptor is gone. The interpreter is told the
 	 * script does not exist.
 	 *
-	 * ⭐ Two kinds of program need one, and they are the same defect:
+	 * Two kinds of program need one, and they are the same defect:
 	 *     a `#!' script                     --- on every architecture
 	 *     a binary of another architecture  --- through `binfmt_misc'
 	 *
-	 * ⚠️ IT WAS FOUND ON aarch64 AND FIRST BLAMED ON THE EMULATOR, because there
+	 * IT WAS FOUND ON aarch64 AND FIRST BLAMED ON THE EMULATOR, because there
 	 * every foreign binary needs the binfmt interpreter and so every start
 	 * failed at once. It reproduces natively with a script, which is what a
 	 * consumer meets on an ordinary machine.
 	 *
-	 * ⚠️ The script is made executable by the SHELL and not by this program:
+	 * The script is made executable by the SHELL and not by this program:
 	 * `chmod' is refused here, so a script this program wrote would be refused
 	 * for its mode and the observation would hold for the wrong reason. */
 	if (expect_shell) {
@@ -856,9 +856,187 @@ int main(int argc, char** argv)
 		unlink(script);
 	}
 
+	/* --- a name that exists, may be started, and is not a program -------------
+	 *
+	 * ENOEXEC WAS EIO. Before openkal 0.13's `kal_err_not_program',
+	 * `okm_errno' had no case for the condition every environment reports
+	 * natively, so the one answer this port could not honestly give --- "a
+	 * device failed" --- was the one it gave. Measured by a consumer:
+	 * `posix_spawn' of such a file returned EIO above this port and ENOEXEC on
+	 * the host directly (issue #28).
+	 *
+	 * WHAT MAKES SUCH A FILE, on every row this runs on, is chmod: this port
+	 * refused every `chmod' until 0.13's `kal_fs_set_executable_at' gave it one
+	 * bit it can honestly grant. A plain-text file this program just wrote is
+	 * readable and has no recognisable format, so making it executable is what
+	 * turns "cannot be found" into "cannot be started" --- the distinction this
+	 * probe exists to observe. On a row with no execute-bit concept at all
+	 * (Windows) `chmod' is expected to answer `ENOSYS' and the `.txt' name
+	 * alone is what a start there fails to recognise. */
+	{
+		const char* path = "not-a-program.txt";
+		FILE* f = fopen(path, "w");
+		check(f != NULL, "a plain text file can be written for the ENOEXEC probe");
+		if (f) {
+			fputs("this is not a program, and has no #! either\n", f);
+			fclose(f);
+
+			/* THE ROUND TRIP THE CHMOD ROW BELOW ASSERTS ON ITS OWN, DONE
+			 * HERE FOR THE ONE REASON A START NEEDS IT: the file has to be
+			 * executable for the kernel to get as far as reading its format.
+			 * A refusal here (`ENOSYS') is expected wherever `chmod' cannot
+			 * grant the bit, and the spawn below is still asked — a system
+			 * with no execute bit at all still has to refuse this name. */
+			errno = 0;
+			const int ce = chmod(path, 0777);
+			if (ce != 0 && errno != ENOSYS)
+				printf("   chmod(0777) on a fresh file: errno=%d (expected 0 or ENOSYS)\n",
+				       errno);
+			check(ce == 0 || errno == ENOSYS,
+			      "the file this probe wrote is made executable, or the system says it cannot be");
+
+			pid_t pid = -1;
+			char* av[] = { (char*)path, NULL };
+			errno = 0;
+			const int e = posix_spawn(&pid, path, NULL, NULL, av, environ);
+			if (e != ENOEXEC)
+				printf("   posix_spawn of a non-program file: e=%d (expected ENOEXEC=%d)\n",
+				       e, ENOEXEC);
+			check(e == ENOEXEC,
+			      "starting a name that exists, may be started, and is not a program"
+			      " reports ENOEXEC --- not success, and not EIO");
+			if (e == 0) { int s; waitpid(pid, &s, 0); failures++; }
+		}
+		unlink(path);
+	}
+
+	/* --- setting whether a file may be started, and reading it back ------------
+	 *
+	 * THE JUDGEMENT, AND WHY IT IS NARROW. `kal_node_info' carries one
+	 * `writable' boolean and, since 0.13, one `executable' boolean --- neither
+	 * is per class of caller, so the mode this port can ever REPORT is one of
+	 * four: 0444, 0555, 0666 or 0777. `chmod' is granted only a request that
+	 * asks for one of those four *and* changes nothing this port cannot
+	 * change: every bit outside the three execute positions must already
+	 * match what `stat' reports, and the three execute bits must come out
+	 * either all clear or all set to match the read bits (which are always
+	 * all three, above). A real per-class mode --- the ordinary 0644 a
+	 * program creates a file with --- fails the first test against every one
+	 * of the four and is refused precisely as it always was: this row is
+	 * about the one bit 0.13 added a route for, not a general chmod. */
+	{
+		const char* path = "chmod-roundtrip.tmp";
+		FILE* f = fopen(path, "w");
+		check(f != NULL, "a file exists for the chmod probe");
+		if (f) {
+			fputs("x", f);
+			fclose(f);
+
+			struct stat before;
+			check(stat(path, &before) == 0, "its mode can be read before any chmod");
+			/* The control: what this port reports for a freshly written,
+			 * writable file is 0666 --- both read and write, uniformly,
+			 * and no execute bit --- which is the starting point every
+			 * assertion below depends on. */
+			const int base_ok = (before.st_mode & 07777) == 0666;
+			if (!base_ok)
+				printf("   fresh file mode: 0%o (expected 0666)\n",
+				       (unsigned)(before.st_mode & 07777));
+			check(base_ok,
+			      "a freshly written file is reported readable and writable"
+			      " and not executable, which is the control the rest needs");
+
+			/* --- accepted, where the volume claims the property ---------- *
+			 *
+			 * THIS HALF IS ASKED AND NOT ASSUMED. `KAL_FS_PROP_EXECUTABLE`
+			 * is a property of the volume (fs.h), and one CI row's backend
+			 * does not claim it for any volume today: openkal-windows maps
+			 * `ERROR_BAD_EXE_FORMAT` to `kal_err_not_program` (so the ENOEXEC
+			 * probe above holds there) without declaring the property NTFS
+			 * has no bit for. A row without it refuses every change and the
+			 * assertions below follow the refusal instead of the grant ---
+			 * still exercising the same call, and the same read-back. */
+			errno = 0;
+			const int e1 = chmod(path, 0777);
+			const int volume_has_it = (e1 == 0);
+			if (!volume_has_it && errno != ENOSYS)
+				printf("   chmod(0777) from 0666: rc=%d errno=%d"
+				       " (expected 0, or -1/ENOSYS where the volume declines)\n",
+				       e1, errno);
+			check(e1 == 0 || errno == ENOSYS,
+			      "chmod grants exec where every class already reads,"
+			      " or says the volume does not store the bit");
+
+			struct stat mid;
+			check(stat(path, &mid) == 0, "the mode can be read back after that call");
+			if (volume_has_it) {
+				check((mid.st_mode & 07777) == 0777,
+				      "and a granted request round-trips through stat");
+				check(access(path, X_OK) == 0,
+				      "and access(X_OK) agrees once the bit is set");
+			} else {
+				check((mid.st_mode & 07777) == 0666,
+				      "and a request the volume declined left the mode unchanged");
+				check(access(path, X_OK) == 0,
+				      "and access(X_OK) still answers yes for anything that exists,"
+				      " which is this port's documented answer where the position"
+				      " is never filled");
+			}
+
+			/* --- turning it back off, or the same no-op, is the same call - */
+			errno = 0;
+			const int e2 = chmod(path, 0666);
+			check(e2 == 0, volume_has_it
+			      ? "chmod clearing exec back to none succeeds"
+			      : "chmod equal to the mode already reported succeeds"
+			        " even where the volume declines the property");
+			struct stat off;
+			check(stat(path, &off) == 0 && (off.st_mode & 07777) == 0666,
+			      "and it round-trips through stat");
+			if (volume_has_it)
+				check(access(path, X_OK) != 0 && errno == EACCES,
+				      "and access(X_OK) agrees once the bit is clear");
+
+			/* --- refused: a request outside the two shapes above ---------- */
+			errno = 0;
+			const int e3 = chmod(path, 0644);
+			if (e3 != -1 || errno != ENOSYS)
+				printf("   chmod(0644) from 0666: rc=%d errno=%d (expected -1, ENOSYS)\n",
+				       e3, errno);
+			check(e3 == -1 && errno == ENOSYS,
+			      "a request this port cannot honestly grant is refused with ENOSYS"
+			      " --- not rounded to the nearest mode it can report");
+			struct stat after;
+			check(stat(path, &after) == 0 && (after.st_mode & 07777) == 0666,
+			      "and the mode is exactly as the refused call left it");
+
+			/* --- a no-op equal to the current mode always succeeds -------- */
+			errno = 0;
+			check(chmod(path, 0666) == 0,
+			      "a request equal to the mode already reported succeeds,"
+			      " asking nothing of the volume");
+		}
+		unlink(path);
+
+		/* fchmod has no name to work with: this port keeps none for an open
+		 * file (only a directory's is remembered, for resolving a name that
+		 * ascends out of it), so it is ENOSYS unconditionally. */
+		FILE* g = fopen("fchmod-probe.tmp", "w");
+		if (g) {
+			errno = 0;
+			const int fe = fchmod(fileno(g), 0777);
+			check(fe == -1 && errno == ENOSYS,
+			      "fchmod has no name to hand kal_fs_set_executable_at, and says so");
+			fclose(g);
+			unlink("fchmod-probe.tmp");
+		} else {
+			check(0, "a file exists for the fchmod probe");
+		}
+	}
+
 	/* --- units, which 0.12.0 added and no probe here ever looked at ------------
 	 *
-	 * ⚠️⚠️ THE WHOLE OF `setpgid'/`kill(-n)' SHIPPED WITH ITS ONLY WITNESS IN
+	 * THE WHOLE OF `setpgid'/`kill(-n)' SHIPPED WITH ITS ONLY WITNESS IN
 	 * SOMEBODY ELSE'S TEST SUITE. It was written against a consumer, measured
 	 * against that consumer, and released --- and the checks below are the ones
 	 * that would have been run here had this file been extended at the time.
@@ -873,13 +1051,13 @@ int main(int argc, char** argv)
 		check(formed == 0 || errno == ENOSYS,
 		      "a program forms a unit of its own, or says the environment has none");
 
-		/* ⭐⭐ AND NAMING A UNIT THAT DOES NOT EXIST IS REFUSED.
+		/* AND NAMING A UNIT THAT DOES NOT EXIST IS REFUSED.
 		 *
 		 * Signal zero is the enquiry form --- it changes nothing and answers
 		 * whether the target is there --- so this asks about a unit this program
 		 * has no way to name and must be told there is none.
 		 *
-		 * ⚠️ ON 0.12.0 IT ANSWERED SUCCESS, and the reason is worth stating
+		 * ON 0.12.0 IT ANSWERED SUCCESS, and the reason is worth stating
 		 * because it is not a slip in one line. `kill(-n)' fell back to the unit
 		 * THIS program holds whenever `n' matched no child, so every negative
 		 * identifier named the caller's own unit --- an enquiry about anything
@@ -909,16 +1087,16 @@ int main(int argc, char** argv)
 		}
 	}
 
-	/* ⭐ WHAT A UNIT IS FOR: REACHING A PROGRAM THE CALLER NEVER HELD.
+	/* WHAT A UNIT IS FOR: REACHING A PROGRAM THE CALLER NEVER HELD.
 	 *
 	 * The shell exits at once and the work it backgrounded outlives it, so a
 	 * caller holding only the shell's handle has nothing to terminate. This is
 	 * the case `kal_spawn.job' was added for in 0.11, and it is the one a
 	 * timeout in a consumer has to be able to reach.
 	 *
-	 * ⚠️ Needs a shell, so the row without one does not run it. */
+	 * Needs a shell, so the row without one does not run it. */
 	if (expect_shell) {
-		/* ⚠️ ABSOLUTE, BECAUSE THE WRITER IS A SHELL AND NOT THIS PROGRAM. A
+		/* ABSOLUTE, BECAUSE THE WRITER IS A SHELL AND NOT THIS PROGRAM. A
 		 * relative name would be resolved against whatever directory the shell
 		 * runs in, and "the file was not written" is what this check reads as
 		 * success --- so a name that missed would pass it for the wrong reason. */
@@ -932,7 +1110,7 @@ int main(int argc, char** argv)
 		snprintf(script, sizeof script,
 		         "( sleep 3; echo x > %s ) & echo started; exit 0", marker);
 
-		/* ⚠️⚠️ THE CONTROL COMES FIRST, AND WITHOUT IT THE OBSERVATION BELOW IS
+		/* THE CONTROL COMES FIRST, AND WITHOUT IT THE OBSERVATION BELOW IS
 		 * WORTHLESS. What that one reads as success is a file that is ABSENT ---
 		 * which is also what a missing shell, a mistyped script, a marker written
 		 * somewhere else and a background job that never ran all produce. So this

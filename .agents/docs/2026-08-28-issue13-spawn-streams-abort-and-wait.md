@@ -34,7 +34,7 @@ $ bash tools/run-probe.sh examples/subprocess subprocess --fork --shell --abort-
 **七条与三个缺陷的对应**:重定向四条(posix_spawn / execve / addopen / system)、
 `addclose` 拒绝一条、abort 一条、WNOHANG 一条。
 
-### 0.1 ⚠️⚠️ 「无流」不能用句柄的值判定 —— 零是一个合法的流
+### 0.1 「无流」不能用句柄的值判定 —— 零是一个合法的流
 
 方案 §1.3 D1 写的是「`d->stream` 为零 ⇒ 拒绝」。**第一次运行时每一个 spawn 都
 返回 EBADF**,包括不做任何重定向的控制项。
@@ -51,7 +51,7 @@ $ bash tools/run-probe.sh examples/subprocess subprocess --fork --shell --abort-
 `dup2(0, 1)` 之后 spawn,位置 1 要放的句柄是 0,与「继承」无法区分。按端口自己的
 规矩**拒绝**(ENOSYS),记入 `musl/PATCHES.md`,并上报规范。
 
-### 0.2 ⚠️ B 的目标标识**不能**比较,而方案说要比较
+### 0.2 B 的目标标识**不能**比较,而方案说要比较
 
 方案 §2.2 写「目标必须是调用方自身(`tid == OKM_CONTEXT_ID()`)」。读
 `port/src/okm_thread.c:130` 发现:线程的 `tid` 是端口自己的计数器 `++g_tid`,
@@ -61,7 +61,7 @@ $ bash tools/run-probe.sh examples/subprocess subprocess --fork --shell --abort-
 正确的规则更简单也更对:**终止性信号的默认动作结束的是进程而不是被点名的上下文**
 (Linux 上也是如此),所以目标根本不必检查。
 
-### 0.3 ⚠️ abort 判据要三层,两层会在缺陷上变绿
+### 0.3 abort 判据要三层,两层会在缺陷上变绿
 
 方案 §2.3 的「层 1 Linux 专有 / 层 2 三系统通用(能与 exit(0) 区分)」不够:
 **缺陷产生的是一个 fault,而 fault 与 exit(0) 也是能区分的**,所以层 2 在修复前
@@ -96,12 +96,12 @@ $ bash tools/run-probe.sh examples/subprocess subprocess --fork --shell --abort-
    行动的读数。阻塞形态没有这个选择要做。判据:**先启动那个慢的**,让它占住靠前的
    槽位;只问前一个的实现会一直回答零,直到慢的结束然后报出错的那个。
 
-5. ⚠️⚠️ **`tools/run-probe.sh` 用 `find target … | head -1` 挑二进制,而版本号进
+5. **`tools/run-probe.sh` 用 `find target … | head -1` 挑二进制,而版本号进
    指纹。** 0.5.0→0.6.0 之后 `examples/*/target/` 长出第二个指纹目录,`head -1`
    挑到了**改动之前**那个程序。我新加的两条观察**没有出现在输出里**,而那次运行
    报的是 `-- failures: 0 --`。判据没有失败,它们没有跑,而且没有任何东西说这件事。
 
-   ⚠️ **CI 永远看不见它**:干净 checkout 只构建一种配置。它只咬在写改动的那台
+   **CI 永远看不见它**:干净 checkout 只构建一种配置。它只咬在写改动的那台
    机器上 —— 判据最被信任的地方。抽成 `tools/one-artifact.sh`,读任何产物之前先
    断言「恰好一个指纹目录」,三个调用点共用。
 
@@ -177,7 +177,7 @@ static kal_uintptr g_std_stream[3];   /* 程序启动时的 in/out/err */
 kal_uintptr okm_std_stream(int fd);   /* fd ∈ [0,3) 时返回,否则 0 */
 ```
 
-> ⭐ **为什么记初值而不是当场再调 `kal_stdout()`**:两者当前等价,但"描述符是否仍
+> **为什么记初值而不是当场再调 `kal_stdout()`**:两者当前等价,但"描述符是否仍
 > 指着程序启动时那个流"是一条关于**历史**的判断,把它表达成一次记录而不是一次
 > 重新提问,是这条规则唯一说得清的形式。
 
@@ -190,7 +190,7 @@ kal_uintptr okm_std_stream(int fd);   /* fd ∈ [0,3) 时返回,否则 0 */
 若确需放置流而该位缺席 ⇒ `posix_spawn` 返回 `ENOSYS`。理由与 `okm_spawn.c:104-108`
 现有的注释同一条:把程序启动到调用方没有要求的状态,比不启动它更坏。
 
-> ⚠️⚠️ **`kal_process_props` 是数据不是函数,弱引用为空时读它就是解引用零。**
+> **`kal_process_props` 是数据不是函数,弱引用为空时读它就是解引用零。**
 > 端口现有 25 处弱引用全是函数(`okm_fork.c:60`、`okm_net.c:68-86` 等),测的是
 > `!= 0` 后再调用;数据符号不能照抄这个写法。判据必须是 `&kal_process_props != 0`,
 > 而不是 `kal_process_props != 0`。这正是 #13 里报告的那类空跳,只是发生在数据上。
@@ -208,7 +208,7 @@ kal_uintptr okm_std_stream(int fd);   /* fd ∈ [0,3) 时返回,否则 0 */
 | `FDOP_CLOSE`,`fd ∈ {0,1,2}` | 空操作 | **`ENOSYS`** | 播种之后子进程确实继承 0/1/2,"忽略"就变成了被接受而未执行的动作 |
 | `FDOP_OPEN` | `ENOSYS` | **实现** | 可表达:在此打开,取 `kal_fs_stream` 放进对应位置 |
 
-> ⭐ `FDOP_CLOSE` 这一行是本方案里唯一一处**语义翻转**:现在注释写着"没有要求的
+> `FDOP_CLOSE` 这一行是本方案里唯一一处**语义翻转**:现在注释写着"没有要求的
 > 东西不会被继承",而 `{0,0,0}` 恰恰让 0/1/2 被继承了 —— 注释描述的是一个当时不
 > 成立的前提。修完之后前提在 `fd > 2` 上成立,在 `fd ≤ 2` 上仍不成立,所以按 fd
 > 分成两行,而不是把注释改一改留着。
@@ -216,7 +216,7 @@ kal_uintptr okm_std_stream(int fd);   /* fd ∈ [0,3) 时返回,否则 0 */
 `FDOP_OPEN` 的落地形状:`okm_resolve` → `okm_fs_open`(标志翻译与
 `do_openat:169-179` 同一张表)→ `kal_fs_stream` → 放位 → **spawn 返回后释放该文件**。
 
-> ⚠️ **待决 Q1(需规范澄清,不需新操作)**:调用方在 spawn 之后释放它放进去的流,
+> **待决 Q1(需规范澄清,不需新操作)**:调用方在 spawn 之后释放它放进去的流,
 > 被启动的程序是否仍持有?`process.h:83-87` 对 channel **已经这样要求**了
 > ("父方不释放 `theirs` 就永远看不到输入结束"),但没有对一般的流说同一句话。
 > 建议在 `kal_process_spawn` 的注释里补一句陈述,而不是加操作 —— 不触 clause 8。
@@ -243,7 +243,7 @@ kal_uintptr okm_std_stream(int fd);   /* fd ∈ [0,3) 时返回,否则 0 */
 
 ### 1.4 判据
 
-> ⚠️ 现有 `examples/subprocess/src/main.c` 七项观察全绿,而**它从不在 spawn 之前
+> 现有 `examples/subprocess/src/main.c` 七项观察全绿,而**它从不在 spawn 之前
 > 重定向父方描述符**。这次的判据必须落到"子进程写进了哪里",不是"spawn 成功了"。
 
 新增观察(建议放进 `examples/subprocess`,与既有七项同一个二进制,三系统同跑):
@@ -257,7 +257,7 @@ kal_uintptr okm_std_stream(int fd);   /* fd ∈ [0,3) 时返回,否则 0 */
 | 5 | `addclose(&fa, 1)` 返回 `ENOSYS` | **拒绝也是判据** |
 | 6 | 不做任何重定向的 spawn 仍然继承 | 反向对照:确认零路径没被改坏 |
 
-> ⭐ 第 1 条的"两侧"是刻意的:只断言文件里有内容,`printf` 恰好两处都写也会绿。
+> 第 1 条的"两侧"是刻意的:只断言文件里有内容,`printf` 恰好两处都写也会绿。
 > 两个反向对照抓的是不同的东西。
 
 ---
@@ -304,12 +304,12 @@ exit=139
 | 默认动作为忽略(`SIGCHLD`/`SIGURG`/`SIGWINCH`) | 返回 0 | 完成于无事可做 |
 | 默认动作为停止(`SIGSTOP`/`SIGTSTP`/`SIGCONT`) | `ENOSYS` | 无法表达,拒绝 |
 
-> ⭐ 第二行是这条设计的全部价值所在,而它是**读 openkal-linux 的实现读出来的**,
+> 第二行是这条设计的全部价值所在,而它是**读 openkal-linux 的实现读出来的**,
 > 不是设计出来的:`kal_abort` 已经在发真信号。若改成自造 `kal_exit(134)`,父方看到
 > 的是 `WIFEXITED && 134` 而不是 `WIFSIGNALED && SIGABRT` —— 与 Linux 的读数不同,
 > 而现在不必不同。
 
-> ⚠️ **待决 Q4**:第三行在 macOS / Windows 后端上退化成退出码而非信号死亡。
+> **待决 Q4**:第三行在 macOS / Windows 后端上退化成退出码而非信号死亡。
 > 判据因此要分两层写(见 §2.3),否则 Linux 之外两格会以 SKIP 或假绿收场。
 
 与 `SYS_rt_sigaction` 拒绝真 handler(`okm_syscall.c:1474-1483`)一致:这里做的
@@ -325,7 +325,7 @@ exit=139
 | 4 | 子程序 `exit(3)` ⇒ `WIFEXITED && 3` | **反向对照**:确认正常退出没被改坏 |
 | 5 | `pthread_kill(其他线程, SIGTERM)` ⇒ `ENOSYS` | 三系统通用,拒绝也是判据 |
 
-> ⚠️ 判据 1/2 不能写成"退出码不是 139"。139 在修好之后仍然是一个合法读数
+> 判据 1/2 不能写成"退出码不是 139"。139 在修好之后仍然是一个合法读数
 > (真的段错误)。**判据是 `WTERMSIG == SIGABRT`,不是"不等于某个值"。**
 
 ---
@@ -340,7 +340,7 @@ exit=139
 `OKM_NOW_NS == 1`(`okm.h:271`)是端口已有的约定,`do_read`/`do_write` 的
 `O_NONBLOCK` 路径用的就是它。
 
-> ⚠️ `timeout.h:12-14` 明说**零表示不设界**,所以 `WNOHANG` 不能传 0;传 1 会被
+> `timeout.h:12-14` 明说**零表示不设界**,所以 `WNOHANG` 不能传 0;传 1 会被
 > 实现向上舍到 `kal_timeout_granularity_ns`。分歧("WNOHANG 至多阻塞一个时钟粒度")
 > 记进 `musl/PATCHES.md`。
 > `openkal.timeout` 是可选接口 ⇒ 弱引用 + 空判,缺席时 `WNOHANG` 报 `ENOSYS`。
@@ -402,11 +402,11 @@ exit=139
 
 两条元规则,是这批缺陷本身教出来的:
 
-> ⭐ **一处改动答复三个入口,不等于三个入口都有判据。** A 的改点只有一个
+> **一处改动答复三个入口,不等于三个入口都有判据。** A 的改点只有一个
 > (`__posix_spawn` 内部),但 `posix_spawn` / `execve` / `system` 是三条独立的
 > 调用链,必须各测一条。
 >
-> ⚠️ **探针的绿必须能回答消费者问的那个问题。** `examples/subprocess` 七项全绿,
+> **探针的绿必须能回答消费者问的那个问题。** `examples/subprocess` 七项全绿,
 > 而 #13 报的那件事它一次都没问过。新增观察之前先检查:这条观察若被删掉,哪一条
 > 缺陷会重新变成绿的?答不上来的观察不要加。
 
@@ -435,11 +435,11 @@ exit=139
    ⇒ 若坐实,是第四条缺陷,且与 §3 的 `WNOHANG` 同一片区域。
 2. **启动段错误 rip = 0。** 报告者的两条排除已复核成立
    (`rt_sigaction` `okm_syscall.c:1474-1483`;25 处弱引用逐条有空判)。
-   ⚠️ §2 的结论**否掉了**报告者"139 与空跳是同一件事"的相关性猜测:`hlt` 会把
+   §2 的结论**否掉了**报告者"139 与空跳是同一件事"的相关性猜测:`hlt` 会把
    指令指针留在那条指令上,不是 0,所以是两件事。
    已请求的决定性观察:故障时的 `x/4gx $rsp` —— 栈顶那个字就是通过零调用的那个
    调用方的返回地址。
 
-> ⚠️ **两条都不该在 §1–§4 落地之后被当成"顺带就好了"。** 修好硬失败会暴露下一条,
+> **两条都不该在 §1–§4 落地之后被当成"顺带就好了"。** 修好硬失败会暴露下一条,
 > 而 §2 一修,"SIGSEGV"这个读数的含义就变了 —— 这两条要在修完之后**重测一遍**
 > 才谈得上归因。

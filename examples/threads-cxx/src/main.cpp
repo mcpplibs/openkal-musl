@@ -7,7 +7,7 @@
  * through the truncated value. libc++'s std::thread stores exactly this type,
  * so every std::thread on that system ended in an access violation when joined.
  *
- * ⭐ THE static_assert IS THE CRITERION, and it is a compile-time one: before the
+ * THE static_assert IS THE CRITERION, and it is a compile-time one: before the
  * change this file does not compile for x86_64-windows-gnu. The run afterwards
  * shows that the value survives the round trip through a started context.
  */

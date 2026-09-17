@@ -56,7 +56,7 @@ fetch() {
 fetch openkal
 fetch "$implementation"
 
-# ⭐ AND WHAT WAS FETCHED HAS TO BE WHAT THE MANIFEST ASKED FOR.
+# AND WHAT WAS FETCHED HAS TO BE WHAT THE MANIFEST ASKED FOR.
 #
 # Substituting a working tree for a version removes the one check that would
 # otherwise happen: the resolver never sees a version requirement, so a tree of
@@ -65,7 +65,7 @@ fetch "$implementation"
 # have no counterpart — but it means a change that spans two repositories is
 # built against whichever half happens to be on `main`.
 #
-# ⚠️ THAT FALLBACK ONCE PRODUCED A FAILURE THAT NAMED THE WRONG THING. This
+# THAT FALLBACK ONCE PRODUCED A FAILURE THAT NAMED THE WRONG THING. This
 # package's branch was `feat/getrandom-through-openkal` while the
 # specification's was `feat/openkal-random`, so the fallback supplied openkal
 # 0.6.0 to a manifest asking for 0.7.0, and five jobs reported:
@@ -129,7 +129,7 @@ native() {
 }
 specification="$(native "$beside/openkal")"
 
-# ⚠️ THE REWRITE IS PERMANENT AND IS MEANT TO BE. This runs in a checkout that
+# THE REWRITE IS PERMANENT AND IS MEANT TO BE. This runs in a checkout that
 # is thrown away, and the manifests must keep naming the working trees for the
 # rest of the job, so there is no trap restoring them.
 #

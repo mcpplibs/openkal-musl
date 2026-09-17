@@ -7,7 +7,7 @@
  * have no such thing at all. The replacement therefore left the enquiry with
  * nothing to report.
  *
- * ⚠️ IT REPORTED THE ABSENCE AS AN ANSWER, WHICH IS THE FAILURE THIS FILE IS
+ * IT REPORTED THE ABSENCE AS AN ANSWER, WHICH IS THE FAILURE THIS FILE IS
  * ABOUT. `dl_iterate_phdr' returned ONE object with `dlpi_phnum == 0': a caller
  * cannot distinguish that from a program that genuinely has no segments, so it
  * concludes there is nothing to find rather than that it was not told.

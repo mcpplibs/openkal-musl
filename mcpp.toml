@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.13.5"
+version     = "0.14.0"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 
@@ -15,7 +15,7 @@ authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-musl"
 
 [dependencies]
-openkal = "0.12.0"
+openkal = "0.13.0"
 
 # An ordinary consumer of openkal declares the specification and leaves the
 # choice of implementation to whoever builds the program, which is what the
@@ -30,12 +30,12 @@ openkal = "0.12.0"
 #
 # The consequence for a program is that it names this package and nothing else.
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = { version = "0.12.0", features = ["standalone"] }
+openkal-linux = { version = "0.13.0", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
-openkal-macos = { version = "0.9.1", features = ["standalone"] }
+openkal-macos = { version = "0.10.0", features = ["standalone"] }
 
-# ⚠️ FIRST STEP TOWARD A BARE MACHINE, AND NOT THE WHOLE OF IT.
+# FIRST STEP TOWARD A BARE MACHINE, AND NOT THE WHOLE OF IT.
 #
 # An environment with no operating system reaches openkal through firmware. The
 # architecture directory and the generated headers for it are now here --- they
@@ -46,7 +46,7 @@ openkal-macos = { version = "0.9.1", features = ["standalone"] }
 [target.'cfg(os = "none")'.dependencies]
 openkal-opensbi = { version = "0.6.0", features = ["standalone"] }
 
-# ⭐ WHICH OPENKAL INTERFACES THE IMPLEMENTATION BENEATH IS EXPECTED TO PROVIDE.
+# WHICH OPENKAL INTERFACES THE IMPLEMENTATION BENEATH IS EXPECTED TO PROVIDE.
 #
 # A machine with no operating system has no storage to open a file on, no second
 # image to start, and no scheduler to give a context to. openkal's answer to
@@ -54,7 +54,7 @@ openkal-opensbi = { version = "0.6.0", features = ["standalone"] }
 # from providing one whose operations always fail — and the answer for this C
 # library is that it must not be built calling them.
 #
-# ⚠️ IT IS BUILT CALLING THEM UNLESS TOLD OTHERWISE, AND THE WAY THAT SHOWS IS A
+# IT IS BUILT CALLING THEM UNLESS TOLD OTHERWISE, AND THE WAY THAT SHOWS IS A
 # LINK FAILURE IN A PROGRAM THAT NEVER OPENS A FILE. Measured 2026-08-23 on
 # riscv64-none-elf: a program whose whole text was `import std;` and one line of
 # output failed on fifteen names it can never reach, because `fclose` is on the
@@ -62,14 +62,14 @@ openkal-opensbi = { version = "0.6.0", features = ["standalone"] }
 # holds. port/src/okm.h records what these three change and why answering with
 # an error is right for a C library and wrong for an openkal implementation.
 #
-# ⚠️ THE TARGET IS A PROXY FOR THE IMPLEMENTATION, AND AN IMPERFECT ONE. A board
+# THE TARGET IS A PROXY FOR THE IMPLEMENTATION, AND AN IMPERFECT ONE. A board
 # CAN carry a real filesystem. Each macro is `#ifndef`-guarded, so a project
 # with one turns it back on from its own build without editing this file.
 [target.'cfg(os = "none")'.build]
 defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
 
 [target.'cfg(windows)'.dependencies]
-openkal-windows = { version = "0.7.4", features = ["standalone"] }
+openkal-windows = { version = "0.8.0", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #
@@ -120,7 +120,7 @@ sources = [
   # calls needs far more --- it overwrote the context table on macOS.
   "!musl/src/thread/__unmapself.c",
   "!musl/src/process/posix_spawn.c",
-  # ⭐ AND ITS SIBLING, WHICH IS EXCLUDED BECAUSE THE ONE ABOVE IS.
+  # AND ITS SIBLING, WHICH IS EXCLUDED BECAUSE THE ONE ABOVE IS.
   # musl's posix_spawnp does not search a PATH: it stores `__execvpe' in the
   # attributes and lets posix_spawn call it IN THE DUPLICATE. This port has no
   # duplicate to run it in, so the field was read by nobody and a name without
@@ -130,7 +130,7 @@ sources = [
   "!musl/src/mman/mmap.c",
   "!musl/src/internal/syscall_ret.c",
   "!musl/src/unistd/getcwd.c",
-  # ⚠️⚠️ THE THIRD SOURCE OF ONE KIND, AND IT WAS UNREACHABLE UNTIL 0.11.0.
+  # THE THIRD SOURCE OF ONE KIND, AND IT WAS UNREACHABLE UNTIL 0.11.0.
   # musl's `fcntl' reads its variable argument as an `unsigned long', which holds
   # a pointer on every system musl was written for and thirty-two bits on one
   # this port builds for --- so a `struct flock *' arrived with its top half
@@ -141,7 +141,7 @@ sources = [
   # Replaced by port/src/okm_phdr.c: musl answers this from the auxiliary
   # vector, which the replaced __libc_start_main does not read.
   "!musl/src/ldso/dl_iterate_phdr.c",
-  # ⭐ THE ONE SOURCE WHOSE vDSO DEPENDENCY SURVIVES AN ARCHITECTURE HEADER THAT
+  # THE ONE SOURCE WHOSE vDSO DEPENDENCY SURVIVES AN ARCHITECTURE HEADER THAT
   # DOES NOT OPT IN.
   #
   # There is no vDSO above openkal — that is a facility one system supplies to
@@ -152,13 +152,13 @@ sources = [
   # VDSO_* guard that is likewise never defined. So `vdso.c` compiles to an
   # empty object and nothing misses it.
   #
-  # ⚠️ Except this one. `cache.c` guards its vDSO use on SYS_riscv_flush_icache
+  # Except this one. `cache.c` guards its vDSO use on SYS_riscv_flush_icache
   # — a SYSCALL NUMBER, which the generated bits/syscall.h does define — rather
   # than on a VDSO_* macro. So on riscv64 it alone compiles a call to a
   # definition that was compiled away, and the link reports
   # `undefined hidden symbol: __vdsosym`.
   #
-  # ⚠️ It was invisible until 2026-08-23, and not because it is new: on the
+  # It was invisible until 2026-08-23, and not because it is new: on the
   # other architectures the guard is false and the file is empty, and riscv64's
   # first COMPLETE link is this one. A latent defect of the port, found by the
   # target that has nothing to fall back on — which is the reason §8.2 makes
@@ -180,7 +180,7 @@ sources = [
   # own index --- built successfully against this port and failed at its
   # twenty-seventh test, which is what a run-time refusal costs.
   #
-  # ⚠️⚠️ THE LIST IS MUCH SHORTER THAN THE PRINCIPLE, AND THE REASON IS MEASURED
+  # THE LIST IS MUCH SHORTER THAN THE PRINCIPLE, AND THE REASON IS MEASURED
   # RATHER THAN CONSERVATIVE.
   #
   # Withholding a family only works when nothing else in musl reaches it. Each
@@ -196,7 +196,7 @@ sources = [
   # closure at the password functions. Withholding either takes an essential or
   # an ordinary facility with it, so neither is withheld.
   #
-  # ⭐ THREE OF THOSE FOUR ROWS ARE NOW MOOT, AND FOR THE RIGHT REASON: the
+  # THREE OF THOSE FOUR ROWS ARE NOW MOOT, AND FOR THE RIGHT REASON: the
   # facilities arrived rather than the exclusions being relaxed. openkal 0.8
   # added `net', `datagram', `timeout' and `space'; port/src/okm_net.c,
   # okm_poll.c and okm_fork.c route them, so `select', the network family and
@@ -205,7 +205,7 @@ sources = [
   # withheld, because a readiness SET held by the environment is a facility of
   # one kernel rather than a capability, and openkal has none to express.
   #
-  # ⚠️ AND THE MECHANISM HAS A PRECONDITION THIS PACKAGE MEETS ON ONE TARGET OF
+  # AND THE MECHANISM HAS A PRECONDITION THIS PACKAGE MEETS ON ONE TARGET OF
   # FOUR. `-ffunction-sections` with `-Wl,--gc-sections` is what makes an
   # unreferenced definition cost nothing, and only `cfg(os = "linux")` sets those
   # ldflags. On the mingw target the objects are kept, so `daemon` and `wordexp`
@@ -213,14 +213,14 @@ sources = [
   #
   #     musl/src/legacy/daemon.c:18: undefined reference to `fork'
   #
-  # ⭐ SO WITHHOLDING THE NETWORK FAMILY IS NOT REFUSED, IT IS NOT YET POSSIBLE.
+  # SO WITHHOLDING THE NETWORK FAMILY IS NOT REFUSED, IT IS NOT YET POSSIBLE.
   # It becomes possible once every target collects unreferenced sections ---
   # `--gc-sections` for the ELF and PE linkers, `-dead_strip` for this system's
   # --- and that is a change to the link line of three targets, testable on its
   # own, rather than something to attach here.
   #
   # What remains withheld are the five whose closure is empty on every target.
-  # ⚠️ THEY GO TOGETHER WITH THEIR REASON: a descriptor that is created and never
+  # THEY GO TOGETHER WITH THEIR REASON: a descriptor that is created and never
   # becomes ready is worse than one that cannot be created, because a program
   # waiting on it waits for ever with nothing to report.
   "!musl/src/linux/timerfd.c",
@@ -243,7 +243,7 @@ sources = [
 # headers: this package is built from the same include path it publishes, and
 # the alternative --- two paths --- is a second place where the set of headers
 # is configured.
-# ⭐ THE ONE THING THIS PACKAGE KNOWS THAT A CONSUMER DOES NOT: THAT IT IS THIS
+# THE ONE THING THIS PACKAGE KNOWS THAT A CONSUMER DOES NOT: THAT IT IS THIS
 # PACKAGE DOING THE COMPILING.
 #
 # musl's internal header overlay defines `weak`, `hidden` and `weak_alias` as
@@ -252,14 +252,14 @@ sources = [
 # consumers break by it was found one at a time: a C++ one on `restrict`, then
 # on linkage; a C one (compiler-rt) on `weak`, which it writes itself.
 #
-# ⚠️ The discriminator used to be the LANGUAGE of the translation unit, and that
+# The discriminator used to be the LANGUAGE of the translation unit, and that
 # was wrong in one direction: a C++ unit is certainly not musl's, but a C unit
 # is not certainly musl's. Authorship is the property, and it is expressible —
 # `defines` is applied to this package's own sources and is not carried to a
 # consumer, which publicUsage's include directories and flags are.
 # port/include/features.h records the measurement and what it cost.
 #
-# ⚠️ A CONSUMER THAT WAS BUILT BEFORE THIS LINE EXISTED DOES NOT SEE IT UNTIL ITS
+# A CONSUMER THAT WAS BUILT BEFORE THIS LINE EXISTED DOES NOT SEE IT UNTIL ITS
 # BUILD DIRECTORY IS CLEARED. Measured 2026-08-23: adding a flag here changed
 # nothing in an example that depends on this package by path — not after a
 # rebuild, and not after touching the sources either. The generated build file
@@ -277,7 +277,7 @@ include_dirs = [
   "musl/include",
 ]
 
-# ⭐⭐ THE FIRST-BEST REMEDY, WHICH port/include/features.h SAID WAS NOT
+# THE FIRST-BEST REMEDY, WHICH port/include/features.h SAID WAS NOT
 # AVAILABLE AND NOW IS.
 #
 # That file records the measurement of 2026-08-22: "The first would be for a
@@ -289,14 +289,14 @@ include_dirs = [
 # stop at this package's boundary, so musl's internal overlay reaches musl's
 # own sources and reaches no consumer.
 #
-# ⚠️ A SUBSET OF THE LIST ABOVE RATHER THAN A LIST OF ITS OWN, and that is the
+# A SUBSET OF THE LIST ABOVE RATHER THAN A LIST OF ITS OWN, and that is the
 # point: the ORDER is load-bearing. `port/include` must precede the
 # architecture's directory, and the internal overlay must precede
 # `musl/include` — moving these three to the end makes musl's own build find
 # the public <features.h> first and fail with `unknown type name hidden`.
 # The one ordered list stays the one ordered list.
 #
-# ⚠️ THIS DOES NOT REPLACE `OKM_MUSL_INTERNAL`. That answers a different
+# THIS DOES NOT REPLACE `OKM_MUSL_INTERNAL`. That answers a different
 # question — "is this package the one compiling this unit" — and it is what
 # keeps the macros inert for a C consumer that IS built with these directories
 # on its line (compiler-rt, when a board builds it here). The two are the
@@ -351,7 +351,7 @@ cxx_runtime = "host-coupled"
 [target.'cfg(os = "linux")'.build]
 ldflags = ["-nostdlib", "-static", "-Wl,--no-dynamic-linker",
            "-Wl,--gc-sections"]
-# ⚠️ `-lgcc` was here; it is now named by build.mcpp, and only when the compiler
+# `-lgcc` was here; it is now named by build.mcpp, and only when the compiler
 # is the one whose runtime has that name. See that file.
 
 # The link line on this system.
@@ -377,7 +377,7 @@ ldflags = ["-nostdlib", "-static", "-Wl,--no-dynamic-linker",
 # this format has no program headers.
 sources = [
   "!port/src/okm_phdr.c",
-  # ⭐ One file this format needs that no other does — the loader here runs
+  # One file this format needs that no other does — the loader here runs
   # constructors before the entry point, so the library has to be able to come
   # up from a constructor too. `port/src/*.c` is a package-wide glob, so the
   # file lives in a subdirectory it does not match.
@@ -395,7 +395,7 @@ sources = [
 # 1". This system's own linker is the one the format was designed alongside and
 # resolves them.
 #
-# ⚠️ The flag's scope is narrower than it reads, and the difference matters for
+# The flag's scope is narrower than it reads, and the difference matters for
 # cross builds. Remeasured 2026-08-22 with the open-source toolchain: the same
 # 1356 objects produce ZERO indirect symbols, for both architectures and for two
 # compiler versions, and ld64.lld links them on Linux. The linker's limitation
@@ -408,14 +408,14 @@ sources = [
 # reach the construct, does not need this system's linker, and therefore does
 # not need any file this system supplies. musl/PATCHES.md records both
 # measurements and the two names a program does still need.
-# ⚠️ `--ld-path` IS GONE, AND THE COMMENT ABOVE ALREADY SAID WHY IT WOULD BE.
+# `--ld-path` IS GONE, AND THE COMMENT ABOVE ALREADY SAID WHY IT WOULD BE.
 #
 # It named this system's own linker, to work around a construct that the
 # compiler this package was FIRST built with produced. The remeasurement above
 # is the whole of the reason it can go: with the open-source toolchain, the same
 # objects produce ZERO indirect symbols, and `ld64.lld` links them.
 #
-# ⚠️ AND IT HAD TO GO, because mcpp's conditions are on the TARGET and not on the
+# AND IT HAD TO GO, because mcpp's conditions are on the TARGET and not on the
 # host. `cfg(os = "macos")` is true when this library is BUILT ON macOS and also
 # when it is BUILT FOR macOS from somewhere else — and the second case is a Linux
 # machine, where `/usr/bin/ld` is GNU ld and cannot link a Mach-O:
@@ -442,7 +442,7 @@ include_dirs = ["musl-generated/x86_64", "musl/arch/x86_64", "musl/arch/generic"
 [target.'cfg(all(arch = "x86_64", windows))'.build]
 include_dirs = ["musl-generated/x86_64-windows", "musl/arch/x86_64", "musl/arch/generic"]
 
-# ⚠️ TWO ROWS FOR ONE ARCHITECTURE, AND MUTUALLY EXCLUSIVE — the same shape
+# TWO ROWS FOR ONE ARCHITECTURE, AND MUTUALLY EXCLUSIVE — the same shape
 # x86_64 already has for Windows, and for a narrower version of the same reason.
 #
 # musl states its data model in three lines of bits/alltypes.h. Windows needed a
@@ -450,7 +450,7 @@ include_dirs = ["musl-generated/x86_64-windows", "musl/arch/x86_64", "musl/arch/
 # LP64 — a `long` holds a pointer — and still differs in one of the three:
 # `int64_t` is spelled `long long` there and `long` on Linux.
 #
-# ⚠️ One spelling, and it is not cosmetic. Measured 2026-08-23 on a macOS cross:
+# One spelling, and it is not cosmetic. Measured 2026-08-23 on a macOS cross:
 #
 #   okm_syscall.c:439: incompatible pointer types passing 'uint64_t *'
 #     (aka 'unsigned long *') to parameter of type 'kal_u64 *'
@@ -477,9 +477,9 @@ include_dirs = ["musl-generated/riscv64", "musl/arch/riscv64", "musl/arch/generi
 # this format has no program headers.
 sources = [
   "!port/src/okm_phdr.c",
-  # ⭐ AND ONE THIS FORMAT NEEDS THAT NO OTHER DOES.
+  # AND ONE THIS FORMAT NEEDS THAT NO OTHER DOES.
   #
-  # ⚠️ IN A SUBDIRECTORY, AND THAT IS THE POINT. `port/src/*.c` in the
+  # IN A SUBDIRECTORY, AND THAT IS THE POINT. `port/src/*.c` in the
   # package-wide list is a glob, so a file placed beside its neighbours would be
   # compiled for EVERY target — and `__main` is a name only this format's
   # compiler emits a call to. `port/src/win/` is not matched by that glob, which
@@ -487,7 +487,7 @@ sources = [
   # that would have to win against an inclusion.
   "port/src/win/*.c",
 ]
-# ⚠️ `-lgcc` AND `-lgcc_eh` WERE HERE AND ARE NOT ANY MORE.
+# `-lgcc` AND `-lgcc_eh` WERE HERE AND ARE NOT ANY MORE.
 #
 # They named GCC's runtime: the routines a compiler emits calls to and no C
 # library defines, plus one more this format needs — the helper a thread-local
@@ -496,12 +496,12 @@ sources = [
 #
 # Both statements were true. What was false is that this port should name them:
 #
-# 1. ⭐ THE macOS BLOCK ABOVE NAMES NEITHER, and it is the same C library on the
+# 1. THE macOS BLOCK ABOVE NAMES NEITHER, and it is the same C library on the
 #    same compiler. Builtins come from the graph there — `openkal-llvm-runtime`
 #    builds compiler-rt for the target — and the thread-local helper is
 #    `__emutls_get_address` from that same build. This block was the outlier.
 #
-# 2. ⚠️ AND IT ONLY EVER WORKED BY ACCIDENT. `libgcc.a` and `libgcc_eh.a` are
+# 2. AND IT ONLY EVER WORKED BY ACCIDENT. `libgcc.a` and `libgcc_eh.a` are
 #    mingw's, so a cross build resolved them out of `/usr/x86_64-w64-mingw32/lib`
 #    — present on a machine with mingw installed and nowhere else. Measured
 #    2026-08-22 on a clean CI runner, alongside the four import libraries that

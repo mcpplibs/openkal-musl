@@ -12,7 +12,7 @@
 #      recorded is two, and they are listed. A third would mean this port has
 #      acquired a dependency on that system that nobody decided to acquire.
 #
-#      ⚠️ That is not the same as the set the LINK needs. `dyld_stub_binder' is
+#      That is not the same as the set the LINK needs. `dyld_stub_binder' is
 #      referenced by the linker for its own lazy binding and by no source here,
 #      and whether it is referenced at all depends on the linker's version:
 #      ld64.lld 22 does not, ld64.lld 18 does. So the enumeration below asks
@@ -50,7 +50,7 @@ inc=(-Iport/include -Imusl/src/include -Imusl/src/internal
      -Imusl-generated/internal -Imusl-generated/"$arch"
      -Imusl/arch/"$arch" -Imusl/arch/generic -Imusl/include
      -I"$here"/../openkal/include)
-# ⚠️ `-DOKM_MUSL_INTERNAL=1` IS LOAD-BEARING AND WAS ADDED AFTER THIS LIST WAS
+# `-DOKM_MUSL_INTERNAL=1` IS LOAD-BEARING AND WAS ADDED AFTER THIS LIST WAS
 # WRITTEN, WHICH IS THE POINT.
 #
 # It says the unit being compiled is one of musl's own, which is what
@@ -59,7 +59,7 @@ inc=(-Iport/include -Imusl/src/include -Imusl/src/internal
 #
 #     crypt_r.c:23: type specifier missing  |  weak_alias(__crypt_r, crypt_r);
 #
-# ⭐ This list is a SECOND COPY of the manifest's, and the comment below already
+# This list is a SECOND COPY of the manifest's, and the comment below already
 # says keeping it in step is what makes the answer the configured one. It went
 # out of step the first time the manifest gained a flag, and continuous
 # integration is what said so. Two places for one decision, and this is the
@@ -75,14 +75,14 @@ cd "$here"
 # minus the one this system's build excludes. Keeping this list in step with
 # mcpp.toml is what makes question 2's answer the configured one.
 #
-# ⚠️⚠️ AND `posix_spawnp' IS NAMED SEPARATELY, WHICH IS NOT REDUNDANT. The match
+# AND `posix_spawnp' IS NAMED SEPARATELY, WHICH IS NOT REDUNDANT. The match
 # is anchored on the whole basename, so `posix_spawn' does NOT cover
 # `posix_spawnp.c' --- and when that source became the tenth this port replaces,
 # this list said nothing and the link reported
 #
 #     ld64.lld: error: duplicate symbol: _posix_spawnp
 #
-# ⭐ Which is the whole reason this list carries the warning it does: it is a
+# Which is the whole reason this list carries the warning it does: it is a
 # SECOND statement of what mcpp.toml already states, and a second statement is
 # a thing that falls behind the first. It fell behind on the release that added
 # the tenth entry, and it is this job that said so.

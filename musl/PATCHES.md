@@ -108,7 +108,7 @@ the working directory, and `posix_spawnp("sh", …)` started `./sh`, failed, and
 `__posix_spawn` per entry, by musl's own rules — and `__posix_spawn` now refuses
 an attribute function it does not recognise rather than ignoring one.
 
-⚠️ **Including musl's entry separator, which is a colon on every target and is
+**Including musl's entry separator, which is a colon on every target and is
 the wrong one for exactly one of them.** One environment separates its own PATH
 with a semicolon and begins each entry with a volume letter and a colon, so
 reading that PATH on a colon produces entries that are not names. It is still a
@@ -117,7 +117,7 @@ one in musl's own source, and having the two ways of searching for one program
 disagree with each other is worse for a caller than having both wrong the same
 way. Nothing on that target searches a PATH today: its CI row declares no shell.
 
-⚠️⚠️ `src/thread/__unmapself.c` moves to a 256-byte stack shared by every exiting
+`src/thread/__unmapself.c` moves to a 256-byte stack shared by every exiting
 thread before it makes the two calls that end a detached one. On Linux the thread
 stands on the mapping it is about to release, and two raw system calls fit in
 256 bytes. Here the thread stands on the stack `kal_task_start` supplied, and
@@ -137,7 +137,7 @@ pointer: the value never becomes an integer at all.
 That is correct on every system musl was written for and is not correct on one
 that writes a volume first, and openkal does not say which a system does.
 
-⚠️⚠️ `src/fcntl/fcntl.c` is the THIRD of that kind, and it survived three releases
+`src/fcntl/fcntl.c` is the THIRD of that kind, and it survived three releases
 of a port that already names the kind twice.
 
 It reads its variable argument as an `unsigned long`:
@@ -150,14 +150,14 @@ which holds a pointer on every system musl was written for and thirty-two bits
 on one this port builds for. A caller passing a `struct flock *` had the top half
 of it discarded **before this port saw it**.
 
-⭐ **It was unreachable until 0.11.0**, which is why it survived. Every command
+**It was unreachable until 0.11.0**, which is why it survived. Every command
 this library answered took an integer, or took a pointer it never followed:
 `F_SETLK` returned 0 and did nothing, and then reported `ENOSYS`. A truncated
 pointer that nothing dereferences is a truncated pointer nothing reports. openkal
 0.10 gave this port a real lock, `F_SETLK` began following the pointer, and it
 faulted on the first attempt.
 
-⚠️ The register file names the type rather than the symptom:
+The register file names the type rather than the symptom:
 
     page fault on read access to 0x00000000fe2ffec2
     rax:00000000fe2ffec0   rsp:00007ffffe2fc7a0
@@ -166,7 +166,7 @@ faulted on the first attempt.
 `rax` is the caller's pointer with its top thirty-two bits gone, and the offset
 it faults at — two — is `l_whence`, the first field this port reads.
 
-⚠️ And the vararg TYPE is part of the calling convention rather than a detail:
+And the vararg TYPE is part of the calling convention rather than a detail:
 `va_arg(ap, unsigned long)` and `va_arg(ap, uintptr_t)` read different numbers of
 bytes where the two differ, so this is not a cast applied afterwards. Reading it
 as the narrower type has already lost the half by then.
@@ -206,7 +206,7 @@ library expresses it as starting the program, waiting for it, and ending with
 the status it ended with. It is the arrangement every environment without the
 operation uses, and two of the three beneath openkal are such environments.
 
-⚠️⚠️ **This paragraph used to say that a caller cannot distinguish that. It can,
+**This paragraph used to say that a caller cannot distinguish that. It can,
 and the claim is what kept anyone from looking.** Three differences are known,
 and the first two were found by a consumer rather than here:
 
@@ -227,14 +227,14 @@ and the first two were found by a consumer rather than here:
    ran to completion, unsupervised. Measured, with the host as control:
    identical status words, opposite outcomes.
 
-   ⚠️ **This entry used to end "Not answered here", and it is answered now.**
+   **This entry used to end "Not answered here", and it is answered now.**
    openkal had no way to say "this program's lifetime is bound to mine", and
    `kal_process_terminate` was right to terminate only what it was given — so
    what was missing was a word, not a mechanism. openkal 0.10 added
    `kal_process_spawn_bound`, and **since 0.11.0 `execve` asks for it**.
    `posix_spawn` does not and must not: a POSIX child outlives its parent.
 
-   ⚠️ A backend may decline the binding — openkal-macos has no primitive that
+   A backend may decline the binding — openkal-macos has no primitive that
    arms it from inside the started image, and openkal-windows has not measured
    its own. There this falls back to the unbound spawn rather than refusing to
    start the program at all, and the divergence is the one this entry used to
@@ -265,7 +265,7 @@ interface at all. `fork` returns twice, so the second half is this port's ---
 `space.h` describes that composition and says in terms that it belongs above the
 line; `port/src/okm_fork.c` is where it is.
 
-⚠️ **A caller can tell two things.** The copy's per-context identity is not
+**A caller can tell two things.** The copy's per-context identity is not
 necessarily the original's --- `kal_task_current()` promises uniqueness among
 contexts running at the same moment and says nothing about a copy, and the two
 implementations answer differently --- so this port rebinds the copy's slot
@@ -426,14 +426,14 @@ exits 139 with a core dumped. Every uncaught exception, `assert`,
 segmentation fault. They now reach `kal_abort`, which raises the signal on
 openkal-linux and ends with a distinguished status on the other two.
 
-⚠️ Three numbers are musl's own and must never terminate anything:
+Three numbers are musl's own and must never terminate anything:
 `pthread_impl.h` reserves 32, 33 and 34 for the timer thread, cancellation and
 `synccall`, each sent with this same call. `pthread_cancel` is
 `pthread_kill(t, SIGCANCEL)`, so a table making 33 terminating would end the
 program the first time anything cancelled a thread. They are refused, which is
 what they already got and what musl already handles.
 
-⚠️ And the target is deliberately not examined. A terminating signal's default
+And the target is deliberately not examined. A terminating signal's default
 action ends the process rather than the context that was named --- which is true
 on Linux too --- so which context a caller aimed at makes no difference.
 Comparing the identifier against `kal_task_current()` would have been worse than
@@ -452,7 +452,7 @@ up to one millisecond. Where the environment provides no `openkal.timeout`,
 
 ### And one defect of the criteria rather than of the library
 
-⭐ `tools/run-probe.sh` chose the program to run with `find target … | head -1`.
+`tools/run-probe.sh` chose the program to run with `find target … | head -1`.
 `target/` accumulates one directory per configuration --- per toolchain, per
 target, and per version of a dependency, because the version is part of the
 fingerprint --- so after the version moved from 0.5.0 to 0.6.0 the search
@@ -484,7 +484,7 @@ not a defect this library can fix, and a refusal is one a caller can act upon.
 
 ## Seven more, added with the exec search — and what they have in common
 
-⭐⭐ **Every one of these is an operation that was PRESENT AND ANSWERED WRONGLY,
+**Every one of these is an operation that was PRESENT AND ANSWERED WRONGLY,
 which is a different failure from an operation that is missing — and it is the
 reason none of them was found by the diagnostic added for the last set.**
 
@@ -499,7 +499,7 @@ programs took one exclusive lock and both were told they had it. `F_GETLK` was
 worse — POSIX writes `F_UNLCK` into `l_type` when nothing would block, and
 leaving the caller's word untouched returns the `F_WRLCK` the caller
 conventionally put there, so the answer read "somebody holds this" for ever and
-a loop waiting for a lock never left it. All three now report `ENOSYS`. ⭐ The
+a loop waiting for a lock never left it. All three now report `ENOSYS`. The
 refusal is temporary in a way the permission one is not: every environment
 beneath openkal can lock a byte range, and what is missing is a word in the
 specification. Composing one here from `KAL_OPEN_EXCLUSIVE` is not an option —
@@ -508,7 +508,7 @@ nothing would release it when its holder died.
 **`getppid` returned a negated error value as an identifier.** musl writes it
 without `__syscall_ret`, deliberately, because POSIX says it cannot fail; the
 default arm answered `-ENOSYS` and a caller was told its parent was -38, with
-`errno` untouched. ⚠️ **This is the defect `getpgrp` had and that was fixed one
+`errno` untouched. **This is the defect `getpgrp` had and that was fixed one
 release earlier, three lines away in the same dispatch, and it was not looked
 for.** It answers 0 now — "no parent this environment can name" — and
 `examples/surface` asks the whole family rather than the member.
@@ -516,7 +516,7 @@ for.** It answers 0 now — "no parent this environment can name" — and
 **A copy of the calling image reported its parent's identifier.** `getpid`
 answered the constant 1 in every context, so `fork` produced two images that
 gave one answer and the copy had no way to name itself. The identifier is now
-settled before the copy is taken and carried into it. ⚠️ The comparison `kill`
+settled before the copy is taken and carried into it. The comparison `kill`
 makes to decide "this program itself" moved with it; against the constant it
 would have made `raise`, and therefore `abort`, report `ESRCH` in every copy.
 
@@ -537,7 +537,7 @@ openkal reports no such limits and inventing one is the shape this port avoids.
 
 **`utimensat` could not set a directory's time.** It asked for
 `KAL_OPEN_READ | KAL_OPEN_WRITE` unconditionally and a directory refuses that.
-It now asks what the name refers to and opens a directory for reading only. ⚠️
+It now asks what the name refers to and opens a directory for reading only. 
 That is outside what `fs.h` states — the interface requires `KAL_OPEN_WRITE`
 and has no `kal_dir` form of `kal_fs_set_modified`, so there is no stated route
 to a directory's time at all. A file still asks for exactly what is required,
