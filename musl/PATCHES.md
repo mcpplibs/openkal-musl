@@ -1,9 +1,17 @@
 # What was changed in musl, and why
 
-musl 1.2.5 is vendored here unmodified except for the five lines below, and the
-list is exhaustive: `git log -p -- musl/` shows every one of them. Each is
+musl 1.2.5 is vendored here unmodified except for the three lines below, and
+the list is exhaustive: `git log -p -- musl/` shows every one of them. Each is
 recorded with the reason, because a port that silently edits the library it
 ports is a port nobody can check.
+
+**Four further lines were once here and are not any more.** They existed
+only because this package presented Windows as LLP64 with a sixteen-bit
+`wchar_t` — a data model no other target of this port states and the
+platform's own C runtime uses. Since 0.15.0 this package's `[c-abi]` block
+states the same environment on every target: POSIX presence, LP64, a
+32-bit `wchar_t`. `## Removed at 0.15.0` below records the four lines and
+why removing them is correct rather than merely convenient.
 
 Five further sources are *excluded* rather than changed, and those are listed in
 the package manifest with the reason beside each. Excluding a source and
@@ -31,7 +39,19 @@ offset beyond two gigabytes would be truncated, and both would happen silently.
 already widen it because their arguments are wider than a `long`. On every
 target musl supports, the changed line says what the original said.
 
-## `include/alltypes.h.in`, one declaration
+## Removed at 0.15.0: the four lines that existed only for Windows's old LLP64 presentation
+
+This package used to present Windows as LLP64 with a sixteen-bit `wchar_t`,
+which is the data model the platform's own C runtime uses and not the one
+musl or this port's other two targets use. `.agents/docs` in
+`mcpplibs/openkal` (`2026-09-18-openkal-c-environment-and-personalities-design.md`,
+§4) records why that presentation was replaced rather than kept: the C
+environment a program sees is a property this C library states, not a
+property the platform's object format forces on it, and stating LP64 with a
+32-bit `wchar_t` — musl's own answer, on every target — removes the need for
+every one of the four lines below.
+
+### `include/alltypes.h.in`, one declaration
 
 ```diff
 -TYPEDEF unsigned long pthread_t;
@@ -42,18 +62,25 @@ musl declares `pthread_t` twice: as a pointer for C, and as an integer for C++,
 because C++ needs a type it can compare and hash. The integer was written
 `unsigned long`, which holds a pointer on every architecture musl supports.
 
-Windows is LLP64, so a C++ program above this library kept the lower half of the
-thread's address. `pthread_join` then read through the truncated value: libc++'s
-`std::thread` stores exactly this type, and every `std::thread` on that system
-ended in an access violation when it was joined (`0xC0000005`, measured on
-windows-2022 and under Wine). `_Addr` is the type musl already uses for
-`size_t`, `uintptr_t` and `ptrdiff_t`; it is `long` on every other target here,
-so the changed line says what the original said there.
+Windows was LLP64, so a C++ program above this library kept the lower half of
+the thread's address. `pthread_join` then read through the truncated value:
+libc++'s `std::thread` stores exactly this type, and every `std::thread` on
+that system ended in an access violation when it was joined (`0xC0000005`,
+measured on windows-2022 and under Wine). `_Addr` is the type musl already
+uses for `size_t`, `uintptr_t` and `ptrdiff_t`; it was `long` on every other
+target here, so the changed line said what the original said there.
 
-The five generated `alltypes.h` headers carry the same one-line change.
-`examples/threads-cxx` does not compile for `x86_64-windows-gnu` without it.
+The five generated `alltypes.h` headers carried the same one-line change.
 
-## `src/stdio/vfwscanf.c`, `src/stdlib/wcstol.c`, `src/stdlib/wcstod.c`
+**Removed 0.15.0.** With LP64 stated for Windows, `_Addr` expands to `long`
+there as it already did everywhere else, so `unsigned _Addr` and `unsigned
+long` are the same type on every target this port builds for — the patch
+and its absence produce an identical generated header. `include/alltypes.h.in`
+and the five generated `alltypes.h` files are unpatched musl again.
+`examples/threads-cxx` still asserts the width at compile time and joins a
+thread on every CI row; it now does so against the unmodified declaration.
+
+### `src/stdio/vfwscanf.c`, `src/stdlib/wcstol.c`, `src/stdlib/wcstod.c`
 
 ```diff
 -set = L"";
@@ -61,15 +88,22 @@ The five generated `alltypes.h` headers carry the same one-line change.
 ```
 
 musl's `wchar_t` is thirty-two bits on every architecture it supports, and this
-environment's wide-character literal is sixteen. Three of musl's sources write a
-wide literal, and in each the literal is written as an array instead so that it
-has musl's type rather than the environment's.
+environment's wide-character literal was sixteen. Three of musl's sources write
+a wide literal, and in each the literal was written as an array instead so that
+it had musl's type rather than the environment's.
 
-This does not make the two agree, and it is not intended to. A program above
-this library that writes `L"..."` will fail to compile on Windows, and that is
-the outcome preferred: the alternative — narrowing musl's `wchar_t` to match the
-environment — would make every code point above U+FFFF convert to the wrong
-value with nothing reporting it.
+This did not make the two agree, and was not intended to. A program above this
+library that wrote `L"..."` failed to compile on Windows, and that was the
+outcome preferred at the time: the alternative — narrowing musl's `wchar_t` to
+match the environment — would have made every code point above U+FFFF convert
+to the wrong value with nothing reporting it.
+
+**Removed 0.15.0.** The environment's wide-character literal is now 32 bits
+too, so the two agree without narrowing anything: `set = L"";` and the
+equivalent line in the other two files compile on every target, unmodified
+from musl. A program above this package that writes `L"..."` now compiles on
+Windows as it does everywhere else, and a code point above U+FFFF round-trips
+through it — `examples/c-abi` asserts this (see the package README).
 
 ## Not changed: the five excluded sources
 

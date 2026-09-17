@@ -272,7 +272,7 @@ typedef unsigned useconds_t;
 
 #ifdef __cplusplus
 #if defined(__NEED_pthread_t) && !defined(__DEFINED_pthread_t)
-typedef unsigned _Addr pthread_t;
+typedef unsigned long pthread_t;
 #define __DEFINED_pthread_t
 #endif
 

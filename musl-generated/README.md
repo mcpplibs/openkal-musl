@@ -15,10 +15,9 @@ sed -n -e 's/__NR_/SYS_/p' < musl/arch/$ARCH/bits/syscall.h.in \
 printf '#define VERSION "1.2.5"\n' > musl-generated/internal/version.h
 ```
 
-## The Windows variant
+## The Windows variant, and why it is no longer a variant
 
-`x86_64-windows/` differs from `x86_64/` in three lines, and the three lines are
-the whole of what makes musl a library for one data model:
+`x86_64-windows/` used to differ from `x86_64/` in three lines:
 
 ```
 -#define _Addr long          +#define _Addr long long
@@ -27,13 +26,34 @@ the whole of what makes musl a library for one data model:
 ```
 
 musl is written for LP64 — a `long` holds a pointer — and every one of its
-architectures is LP64 or ILP32. Windows is LLP64: a `long` is thirty-two bits
-and a pointer is sixty-four. The three definitions above are where musl states
-the model, so stating a different one is where the difference begins.
+architectures is LP64 or ILP32. Windows machine code is unchanged by any of
+this: it is still PE and Win64. What used to differ was the *environment*
+this package presented to source text compiled for it — LLP64, the data
+model the platform's own C runtime uses — stated in the three lines above.
 
-It is not where it ends. The rest is recorded in the package README under
-"What Windows required", because a reader who finds these three lines is
-entitled to know that they were not sufficient.
+**Since `openkal-musl` 0.15.0 this package states LP64 for Windows as well**,
+through the `[c-abi]` block in the package manifest (`data-model =
+"arch-default"`, which is musl's own answer for the architecture — LP64 on
+x86_64 everywhere musl runs it, Windows now included). Regenerating this
+header for that statement, from the same `musl/arch/x86_64/bits/alltypes.h.in`
+the native x86_64 header is generated from, produces the byte-identical file:
+there is no longer a Windows-specific line to record. The file is kept as its
+own directory rather than replaced by a reference to `x86_64/` because it
+names its own target, and because it is the seam a future divergence — a
+second Windows architecture, or a reason to diverge again — would land in.
+
+Reproduced by the same three commands as every other architecture, with
+`ARCH=x86_64`, once the package presents LP64 for the target: the command
+does not read `windows` at all, only the architecture directory.
+
+The wide-character literal this change also settles — `wchar_t` at 32 bits
+rather than 16 — is not stated in this file. musl's own `alltypes.h.in`
+already typedefs `wchar_t` as `int` for every architecture it ships
+(visible above, under `__NEED_wchar_t`); what disagreed with it was the
+*compiler's* built-in `wchar_t` for `L"..."` literals, which is outside a
+generated header and is stated by the C library's `[c-abi]` block
+(`wchar = 32`) instead. See the package README and `musl/PATCHES.md` for what
+that used to cost.
 
 ## riscv64
 

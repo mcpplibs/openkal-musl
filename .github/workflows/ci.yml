@@ -639,6 +639,25 @@ jobs:
           bash tools/run-probe.sh examples/identifiers identifiers
           grep -q 'hidden+weak+weak_alias = 41' examples/identifiers/run.log
 
+      # WHAT `[c-abi]` CLAIMS, CHECKED ON EVERY ROW RATHER THAN ONLY ON THE
+      # ONE THAT USED TO DISAGREE.
+      #
+      # Before 0.15.0 this package presented Windows as LLP64 with a 16-bit
+      # `wchar_t`. `[c-abi]` in the manifest now states LP64 and a 32-bit
+      # `wchar_t` everywhere, and this probe is that statement asked of the
+      # compiler rather than assumed: `sizeof(long)`, `sizeof(wchar_t)`, a
+      # wide literal carrying a code point above U+FFFF, and whether `_WIN32`
+      # and `__unix__` are defined. It runs on every row, Linux and macOS
+      # included, because the claim is that the environment is now the SAME
+      # one everywhere --- a probe that only ran on Windows could not show
+      # that.
+      - name: The C environment this package presents
+        env:
+          MCPP_TARGET: ${{ matrix.target }}
+        run: |
+          bash tools/run-probe.sh examples/c-abi c-abi
+          grep -q -- '-- failures: 0 --' examples/c-abi/run.log
+
       # THE ROUTES openkal 0.8 MADE POSSIBLE, EXERCISED THROUGH POSIX.
       #
       # `socket`, `bind`, `listen`, `accept`, `connect`, `sendto`, `recvfrom`,

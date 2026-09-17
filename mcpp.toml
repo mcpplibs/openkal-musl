@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.14.0"
+version     = "0.15.0"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 
@@ -13,6 +13,30 @@ license     = "Apache-2.0"
 provides    = ["mcpp:c-abi=musl"]
 authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-musl"
+
+# The environment this C library presents, on every target — musl states one
+# data model per architecture and this package follows it rather than
+# stating a second one for Windows. `presents = "posix"` defines `__unix__`
+# and leaves `_WIN32` and `__MINGW32__` undefined, on every target including
+# Windows: the machine code is still PE and Win64, and what changes is only
+# what the source text sees. `data-model = "arch-default"` is musl's own
+# answer for the architecture — LP64 on every 64-bit target this package
+# builds for, Windows included, rather than the LLP64 this package used to
+# state for it alone. `wchar = 32` is musl's `wchar_t`, unconditionally; the
+# Windows environment used to present 16 instead, which is why four patches
+# in musl/PATCHES.md existed and do not any more. `builtins = "iso"` states
+# that the compiler must not assume a platform C library is present beneath
+# this one — musl is the whole of what a program built on this package calls.
+#
+# This block is read and checked, not merely trusted: the engine compiles a
+# probe translation unit with the final flags for the target and compares
+# `sizeof(long)`, `__SIZEOF_WCHAR_T__` and whether `_WIN32` is defined against
+# what is declared here, and refuses the build if they disagree.
+[c-abi]
+presents   = "posix"
+data-model = "arch-default"
+wchar      = 32
+builtins   = "iso"
 
 [dependencies]
 openkal = "0.13.0"
@@ -431,11 +455,15 @@ ldflags = ["-nostdlib", "-lSystem",
 # The generated headers, per architecture and per data model.
 #
 # musl states its data model in three lines of bits/alltypes.h, and every
-# architecture it supports states LP64 or ILP32. Windows states neither: a long
-# is thirty-two bits there and a pointer is sixty-four. The generated header for
-# that target therefore differs from the one for the same architecture
-# elsewhere, and musl-generated/README.md records the three lines and how they
-# are produced.
+# architecture it supports states LP64 or ILP32. This package's own [c-abi]
+# block above now states LP64 for Windows too — the same three lines this
+# architecture states everywhere else — so `musl-generated/x86_64-windows`
+# and `musl-generated/x86_64` carry the same three lines; they are kept as
+# two directories because the row below still names its own target and
+# because a target-specific generated header is the seam a future divergence
+# would land in, not because the content differs today.
+# musl-generated/README.md records the three lines and how they are
+# produced.
 [target.'cfg(all(arch = "x86_64", not(windows)))'.build]
 include_dirs = ["musl-generated/x86_64", "musl/arch/x86_64", "musl/arch/generic"]
 
