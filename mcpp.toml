@@ -464,11 +464,29 @@ ldflags = ["-nostdlib", "-lSystem",
 # would land in, not because the content differs today.
 # musl-generated/README.md records the three lines and how they are
 # produced.
-[target.'cfg(all(arch = "x86_64", not(windows)))'.build]
+[target.'cfg(all(arch = "x86_64", not(windows), not(os = "macos")))'.build]
 include_dirs = ["musl-generated/x86_64", "musl/arch/x86_64", "musl/arch/generic"]
 
 [target.'cfg(all(arch = "x86_64", windows))'.build]
 include_dirs = ["musl-generated/x86_64-windows", "musl/arch/x86_64", "musl/arch/generic"]
+
+# THREE ROWS FOR ONE ARCHITECTURE NOW, NOT TWO — found by
+# `port/src/okm_type_identity.c`, which checks every one of these generated
+# typedefs against the compiler's own statement of the same type, for the
+# actual target being built, rather than waiting for a probe that happens to
+# exercise the one that is wrong. Measured cross-compiling for
+# `x86_64-apple-macos`: `int64_t`/`uint64_t` disagree with `__INT64_TYPE__`/
+# `__UINT64_TYPE__` the same way `aarch64-macos` already knew about below;
+# `wint_t` disagrees with `__WINT_TYPE__` (signed `int` there, `unsigned` in
+# the generic answer); and `intmax_t`/`uintmax_t` disagree with
+# `__INTMAX_TYPE__`/`__UINTMAX_TYPE__` in a way that is NOT fixed by the same
+# `_Int64` override that fixes `int64_t` --- Apple's own `intmax_t` is `long`,
+# `int64_t` is `long long`, and the two are different types at the same width
+# on this target, so `musl-generated/x86_64-macos/bits/alltypes.h` states
+# `intmax_t`/`uintmax_t` directly rather than deriving them from `_Int64` the
+# way every other architecture here does. See `musl-generated/README.md`.
+[target.'cfg(all(arch = "x86_64", os = "macos"))'.build]
+include_dirs = ["musl-generated/x86_64-macos", "musl/arch/x86_64", "musl/arch/generic"]
 
 # TWO ROWS FOR ONE ARCHITECTURE, AND MUTUALLY EXCLUSIVE — the same shape
 # x86_64 already has for Windows, and for a narrower version of the same reason.

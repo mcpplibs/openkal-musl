@@ -63,21 +63,27 @@ musl 1.2.5 release the rest of this tree is, and its absence — not any propert
 of the C++ runtime above — was what stopped this package building for a machine
 with no operating system.
 
-## The macOS variant
+## The macOS variants
 
-`aarch64-macos/` differs from `aarch64/` in ONE line, and the one line is
-narrower than the Windows case above:
-
-```
--#define _Int64 long        +#define _Int64 long long
-```
+`aarch64-macos/` and `x86_64-macos/` each differ from the generic architecture
+directory beside them, and neither difference is the whole three lines this
+file's own generation commands produce — each is a small, direct override of
+what those three lines alone would compute, because Apple's platforms disagree
+with Linux's on more than the `_Addr`/`_Reg`/`_Int64` scheme alone expresses.
 
 Apple's platforms are LP64, exactly as musl's architectures are — a `long`
-holds a pointer — so `_Addr` and `_Reg` are unchanged. What differs is only
-which 64-bit type `int64_t` is spelled as: `long long` there, `long` on Linux.
+holds a pointer — so `_Addr` and `_Reg` are unchanged on both. What differs:
 
-Same width, different type, and the two do not convert. Measured
-2026-08-23, cross-compiling this port for `arm64-apple-macos` from Linux:
+| | `aarch64-macos` vs `aarch64` | `x86_64-macos` vs `x86_64` |
+| --- | --- | --- |
+| `_Int64` | `long` → `long long` | `long` → `long long` |
+| `wchar_t` | `unsigned` → `int` | unchanged (`int` already) |
+| `wint_t` | `unsigned` → `int` | `unsigned` → `int` |
+| `intmax_t` / `uintmax_t` | no longer derived from `_Int64`; stated directly as `long` / `unsigned long` | same |
+
+`_Int64` (`int64_t`, `uint64_t`, `off_t`, `time_t` and their neighbours) was
+the first found, 2026-08-23, cross-compiling this port for `arm64-apple-macos`
+from Linux:
 
 ```
 okm_syscall.c:439: incompatible pointer types passing 'uint64_t *'
@@ -89,3 +95,30 @@ okm_syscall.c:439: incompatible pointer types passing 'uint64_t *'
 about the target's ABI and is authoritative; `uint64_t` came from these three
 lines, which carried Linux's answer to a question that has a different answer
 here.
+
+The other three were not caught by a build failure — `port/src/okm_syscall.c`
+is the only place in this port that took a `uint64_t*` where a `kal_u64*` was
+wanted, and nothing else in this port passes a `wchar_t`, `wint_t`,
+`intmax_t` or `uintmax_t` across a boundary strict enough to refuse an
+incompatible type outright. They were found by
+`port/src/okm_type_identity.c`, which checks every one of these generated
+typedefs against the compiler's own builtin macro for the same type
+(`__WCHAR_TYPE__`, `__WINT_TYPE__`, `__INTMAX_TYPE__`, `__UINTMAX_TYPE__` and
+the rest), for the actual target being built, at compile time, on every
+target this package builds for — rather than waiting for a probe that happens
+to exercise the one that disagrees. `wchar_t` was the case a probe HAD
+exercised (`examples/c-abi`'s wide string literal, on `aarch64-macos`); the
+same check, run for `x86_64-apple-macos` — which nothing in this repository's
+CI builds for, but which the generic `not(windows)` row silently claimed to
+answer for before this — found the other three without any probe naming them
+at all. `intmax_t`/`uintmax_t` could not be fixed the way `int64_t` was,
+by changing what `_Int64` expands to, because Apple's own `intmax_t` is
+`long` while its `int64_t` is `long long` — two different 64-bit types on
+the same target — so the generated header states them directly instead of
+deriving them.
+
+`x86_64-macos/` did not exist before the check above found it was needed:
+until then, `x86_64` targeting macOS fell into the generic
+`cfg(all(arch = "x86_64", not(windows)))` row and silently got Linux's
+answer for all four of these, untested, because nothing in this repository
+builds or runs for it.

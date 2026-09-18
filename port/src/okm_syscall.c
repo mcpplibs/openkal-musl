@@ -1270,15 +1270,28 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 
 		/* When an offset is given the descriptor's own position is not to
 		 * move, so it is saved and put back. Seeking to learn it is the only
-		 * way to ask, which is why this is done once rather than per block. */
-		uint64_t keep_in = 0, keep_out = 0;
+		 * way to ask, which is why this is done once rather than per block.
+		 *
+		 * kal_u64, NOT uint64_t. `okm_fs_seek' (kal_fs_seek) writes through a
+		 * `kal_u64*', which is `__UINT64_TYPE__' --- the compiler's own
+		 * statement of this target's 64-bit type, and authoritative. Under the
+		 * old LLP64 presentation `uint64_t' happened to be spelled the same
+		 * way, which is what let this file write `uint64_t' here and pass
+		 * unnoticed; under LP64 `uint64_t' is `unsigned long', the same width
+		 * on a target where the declaration holds but a DIFFERENT TYPE from
+		 * `unsigned long long' all the same, and a pointer to one is not a
+		 * pointer to the other. Measured, gcc/mingw: `unsigned long' is not
+		 * even the same WIDTH there (that compiler's `long' is 4 bytes and
+		 * cannot be otherwise), which is a separate and unrelated reason that
+		 * toolchain cannot build this package's declaration at all. */
+		kal_u64 keep_in = 0, keep_out = 0;
 		if (off_in) {
 			if (okm_fs_seek(di->file, 0, SEEK_CUR, &keep_in) != kal_ok) return -EIO;
-			if (okm_fs_seek(di->file, *off_in, SEEK_SET, &(uint64_t){0}) != kal_ok) return -EIO;
+			if (okm_fs_seek(di->file, *off_in, SEEK_SET, &(kal_u64){0}) != kal_ok) return -EIO;
 		}
 		if (off_out) {
 			if (okm_fs_seek(dobj->file, 0, SEEK_CUR, &keep_out) != kal_ok) return -EIO;
-			if (okm_fs_seek(dobj->file, *off_out, SEEK_SET, &(uint64_t){0}) != kal_ok) return -EIO;
+			if (okm_fs_seek(dobj->file, *off_out, SEEK_SET, &(kal_u64){0}) != kal_ok) return -EIO;
 		}
 
 		char block[8192];
@@ -1300,13 +1313,13 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		}
 
 		if (off_in) {
-			uint64_t now = 0;
+			kal_u64 now = 0;
 			okm_fs_seek(di->file, 0, SEEK_CUR, &now);
 			*off_in += (int64_t)done;
 			okm_fs_seek(di->file, (int64_t)keep_in, SEEK_SET, &now);
 		}
 		if (off_out) {
-			uint64_t now = 0;
+			kal_u64 now = 0;
 			okm_fs_seek(dobj->file, 0, SEEK_CUR, &now);
 			*off_out += (int64_t)done;
 			okm_fs_seek(dobj->file, (int64_t)keep_out, SEEK_SET, &now);
@@ -1322,7 +1335,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		struct okm_desc* d = okm_desc_of((int)a1);
 		if (!d) return -EBADF;
 		if (d->kind != OKM_FILE) return -ESPIPE;
-		uint64_t at = 0;
+		kal_u64 at = 0;
 		const int e = okm_fs_seek(d->file, (int64_t)a2, (int)a3, &at);
 		if (e != kal_ok) return -okm_errno(e);
 		return (syscall_arg_t)at;
