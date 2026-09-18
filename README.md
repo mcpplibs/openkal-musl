@@ -8,8 +8,18 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.14.0"
+openkal-musl = "0.15.0"
 ```
+
+> **Engine floor (mcpp 2026.9.18.3):** this version of this package declares
+> `[c-abi]` (presents, data-model, wchar, builtins) and the engine
+> realises it per compile unit. The probe that verifies the declaration
+> matches what the compiler actually emitted needs the host-macro strip
+> (`-U_WIN32` etc. on Windows hosts) and the freestanding
+> `-fno-short-wchar` discipline — both shipped in `mcpp 2026.9.18.3`.
+> Older engines silently misbuild this package on Windows × any target:
+> the probe sees host contamination and reports mismatches the package
+> does not have. Upgrade: `xlings install mcpp --force`.
 
 It names no implementation and no platform: a C library is the one consumer that
 must know which implementation it needs, so it declares that itself.
@@ -31,7 +41,7 @@ error: dependency 'mcpplibs.openkal-musl' has irreconcilable versions:
 
 ```toml
 [dependencies]
-openkal-llvm-runtime = "0.10.0"  # carries openkal-musl 0.14.0
+openkal-llvm-runtime = "0.11.0"  # carries openkal-musl 0.15.0
 ```
 
 Recorded here because it was got wrong by the people who maintain this
@@ -41,6 +51,7 @@ consumer needs to answer it without asking.
 
 | this package | is carried by |
 | --- | --- |
+| 0.15.0 | `openkal-llvm-runtime = "0.11.0"` |
 | 0.14.0 | `openkal-llvm-runtime = "0.10.0"` |
 | 0.13.5 | `openkal-llvm-runtime = "0.9.6"`, `"0.9.7"` |
 | 0.13.4 | `openkal-llvm-runtime = "0.9.5"` |
@@ -75,6 +86,97 @@ initialisers run inside it, on the facilities it was built against.
 
 The decision belongs to the program because the build tool reads it from the
 program. A dependency that declared it would be declaring it for itself.
+
+## The C environment this package presents
+
+A C library is the one layer that knows what a program built above it will
+see: whether `_WIN32` is true, whether a `long` holds a pointer, how wide a
+`L"..."` literal is. Since 0.15.0 this package states that environment
+rather than leaving mcpp's target triple to imply it, in the manifest's
+`[c-abi]` block:
+
+```toml
+[c-abi]
+presents   = "posix"
+data-model = "arch-default"
+wchar      = 32
+builtins   = "iso"
+```
+
+`presents = "posix"` means `__unix__` is defined and `_WIN32` and
+`__MINGW32__` are not, **on every target this package builds for, Windows
+included**. `data-model = "arch-default"` means musl's own answer for the
+architecture — LP64 on every 64-bit target here. `wchar = 32` is musl's own
+`wchar_t`. `builtins = "iso"` states that the compiler must not assume a
+platform C library is present beneath this one; this package is the whole
+of what a program built on it calls.
+
+| target | machine code | data model | `wchar_t` | `_WIN32` |
+| --- | --- | --- | --- | --- |
+| Linux, macOS (x86_64, aarch64) | native | LP64 | 32-bit | not defined |
+| bare metal (riscv64) | native | LP64 | 32-bit | not defined |
+| Windows (x86_64) | PE, Win64, SEH — unchanged | LP64 | 32-bit | **not defined** |
+
+**Before 0.15.0, Windows was the one target where this table's last three
+columns disagreed with the rest** — LLP64 and a 16-bit `wchar_t`, the data
+model and wide-character width the platform's own C runtime uses, which is
+not the one musl or this port's other two targets use. musl/PATCHES.md
+carried four patches to make that combination survive, and one of the costs
+was stated in as many words: a program above this package that wrote
+`L"..."` failed to compile on Windows, deliberately, because narrowing
+musl's `wchar_t` to match would have converted a code point above U+FFFF to
+the wrong value with nothing reporting it.
+
+**That row is gone, not patched around.** This package now presents the
+same environment on every target, Windows included, and the four patches
+that existed only to make the old presentation survive are removed —
+`musl/PATCHES.md` records what each did and why removing it is correct
+rather than merely convenient. A wide-character literal compiles on Windows
+now, as it does everywhere else, and a code point above U+FFFF round-trips
+through it; `examples/c-abi` asserts this, together with the rest of the
+table above, and runs on every CI row, the Windows one included.
+
+**Two limits remain, and neither is about the C environment table above.**
+Name resolution on Windows is still refused rather than guessed — see "on
+Windows" among the absent facilities below — because it depends on a
+nameserver list this port's filesystem layer cannot reach there, which
+`presents = "posix"` does not change. And a C program that names this
+package directly, without also naming `openkal-llvm-runtime`, still fails
+to link on `x86_64-windows-gnu` for want of three compiler-rt builtins —
+see the same table — because this package carries no builtins archive of
+its own; that is a question `builtins = "iso"` states rather than answers,
+and the answer is still `openkal-llvm-runtime`.
+
+The engine does not trust this block: it compiles a probe translation unit
+with the final flags for the target and checks `sizeof(long)`,
+`__SIZEOF_WCHAR_T__` and whether `_WIN32` is defined against what is
+declared here, and refuses the build if they disagree.
+
+**On Windows, that declaration needs a Clang-based toolchain, and GCC/MinGW
+cannot realize it, on any version, with no flag that changes this.** Stating
+LP64 and no `_WIN32` for `x86_64-windows-*` is not merely a header choice:
+mcpp realizes it by compiling with a substituted target triple (`clang
+--target=x86_64-w64-windows-gnu … --target=x86_64-pc-cygwin -fno-short-wchar`,
+in that order — the object format and calling convention come from the
+first, the environment a translation unit sees from the second), which is a
+mechanism only Clang's driver has. Plain `x86_64-w64-mingw32-gcc` has no
+equivalent: its `long` is 32 bits on this target unconditionally —
+
+```sh
+$ x86_64-w64-mingw32-gcc -dM -E -x c /dev/null | grep __SIZEOF_LONG__
+#define __SIZEOF_LONG__ 4
+```
+
+— because that is the Windows ABI itself, not a default GCC happens to
+choose and a flag could override. A build that declares LP64 and hands GCC
+that compiler gets a `uint64_t` that is actually 32 bits wide, silently,
+everywhere this port's own sources or a program above it assume otherwise.
+This is why CI carries no "windows, gcc" row: it would not be testing a
+weaker configuration of this package, it would be testing a toolchain this
+package's own declared environment cannot be realized on at all. A program
+that builds this package for Windows needs `[toolchain] default =
+"llvm@<version>"` (or the target-scoped form), and gets a compile-time
+refusal from mcpp — not a silent 32-bit `long` — if it does not have one.
 
 ## What was changed, and what was not
 

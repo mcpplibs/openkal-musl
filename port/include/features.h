@@ -216,8 +216,16 @@
 #endif  /* !OKM_MUSL_INTERNAL */
 
 /* Only for musl's own sources: it redefines weak_alias, and the block above
- * removed that name deliberately for everyone else. */
-#if (defined(_WIN32) || defined(__APPLE__)) && defined(OKM_MUSL_INTERNAL)
+ * removed that name deliberately for everyone else.
+ *
+ * OKM_TARGET_WINDOWS rather than `_WIN32`: this package's own manifest
+ * defines it for its own build of this target (mcpp.toml, [target.'cfg
+ * (windows)'.build]), because `_WIN32` is no longer what a translation unit
+ * built for this target sees --- the environment this package presents is
+ * POSIX, and OKM_MUSL_INTERNAL already limits this block to this package's
+ * own sources, which are the only sources that need to be told the target
+ * rather than the C environment. */
+#if (defined(OKM_TARGET_WINDOWS) || defined(__APPLE__)) && defined(OKM_MUSL_INTERNAL)
 
 /* Whether a name is one the preprocessor has been told about. The idiom is the
  * usual one: a name that has been told about expands to a marker that shifts
@@ -283,6 +291,6 @@
 #undef weak_alias
 #define weak_alias(old, new) OKM_ALIAS_PICK(OKM_IS_PLACEHOLDER(old))(old, new)
 
-#endif  /* _WIN32 || __APPLE__ */
+#endif  /* OKM_TARGET_WINDOWS || __APPLE__ */
 
 #endif

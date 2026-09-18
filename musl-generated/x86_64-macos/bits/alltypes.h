@@ -1,39 +1,30 @@
 #define _Addr long
-#define _Int64 long
+#define _Int64 long long
 #define _Reg long
 
-#if __AARCH64EB__
-#define __BYTE_ORDER 4321
-#else
 #define __BYTE_ORDER 1234
-#endif
-
 #define __LONG_MAX 0x7fffffffffffffffL
 
 #ifndef __cplusplus
 #if defined(__NEED_wchar_t) && !defined(__DEFINED_wchar_t)
-typedef unsigned wchar_t;
+typedef int wchar_t;
 #define __DEFINED_wchar_t
 #endif
 
 #endif
-#if defined(__NEED_wint_t) && !defined(__DEFINED_wint_t)
-typedef unsigned wint_t;
-#define __DEFINED_wint_t
+
+#if defined(__FLT_EVAL_METHOD__) && __FLT_EVAL_METHOD__ == 2
+#if defined(__NEED_float_t) && !defined(__DEFINED_float_t)
+typedef long double float_t;
+#define __DEFINED_float_t
 #endif
 
-
-#if defined(__NEED_blksize_t) && !defined(__DEFINED_blksize_t)
-typedef int blksize_t;
-#define __DEFINED_blksize_t
+#if defined(__NEED_double_t) && !defined(__DEFINED_double_t)
+typedef long double double_t;
+#define __DEFINED_double_t
 #endif
 
-#if defined(__NEED_nlink_t) && !defined(__DEFINED_nlink_t)
-typedef unsigned int nlink_t;
-#define __DEFINED_nlink_t
-#endif
-
-
+#else
 #if defined(__NEED_float_t) && !defined(__DEFINED_float_t)
 typedef float float_t;
 #define __DEFINED_float_t
@@ -44,6 +35,7 @@ typedef double double_t;
 #define __DEFINED_double_t
 #endif
 
+#endif
 
 #if defined(__NEED_max_align_t) && !defined(__DEFINED_max_align_t)
 typedef struct { long long __ll; long double __ld; } max_align_t;
@@ -121,7 +113,7 @@ typedef signed _Int64   int64_t;
 #endif
 
 #if defined(__NEED_intmax_t) && !defined(__DEFINED_intmax_t)
-typedef signed _Int64   intmax_t;
+typedef long            intmax_t;
 #define __DEFINED_intmax_t
 #endif
 
@@ -151,7 +143,7 @@ typedef unsigned _Int64 u_int64_t;
 #endif
 
 #if defined(__NEED_uintmax_t) && !defined(__DEFINED_uintmax_t)
-typedef unsigned _Int64 uintmax_t;
+typedef unsigned long   uintmax_t;
 #define __DEFINED_uintmax_t
 #endif
 
@@ -203,7 +195,7 @@ typedef unsigned _Int64 fsfilcnt_t;
 
 
 #if defined(__NEED_wint_t) && !defined(__DEFINED_wint_t)
-typedef unsigned wint_t;
+typedef int wint_t;
 #define __DEFINED_wint_t
 #endif
 

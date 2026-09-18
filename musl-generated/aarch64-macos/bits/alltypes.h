@@ -12,13 +12,13 @@
 
 #ifndef __cplusplus
 #if defined(__NEED_wchar_t) && !defined(__DEFINED_wchar_t)
-typedef unsigned wchar_t;
+typedef int wchar_t;
 #define __DEFINED_wchar_t
 #endif
 
 #endif
 #if defined(__NEED_wint_t) && !defined(__DEFINED_wint_t)
-typedef unsigned wint_t;
+typedef int wint_t;
 #define __DEFINED_wint_t
 #endif
 
@@ -121,7 +121,7 @@ typedef signed _Int64   int64_t;
 #endif
 
 #if defined(__NEED_intmax_t) && !defined(__DEFINED_intmax_t)
-typedef signed _Int64   intmax_t;
+typedef long            intmax_t;
 #define __DEFINED_intmax_t
 #endif
 
@@ -151,7 +151,7 @@ typedef unsigned _Int64 u_int64_t;
 #endif
 
 #if defined(__NEED_uintmax_t) && !defined(__DEFINED_uintmax_t)
-typedef unsigned _Int64 uintmax_t;
+typedef unsigned long   uintmax_t;
 #define __DEFINED_uintmax_t
 #endif
 
@@ -203,7 +203,7 @@ typedef unsigned _Int64 fsfilcnt_t;
 
 
 #if defined(__NEED_wint_t) && !defined(__DEFINED_wint_t)
-typedef unsigned wint_t;
+typedef int wint_t;
 #define __DEFINED_wint_t
 #endif
 
@@ -272,7 +272,7 @@ typedef unsigned useconds_t;
 
 #ifdef __cplusplus
 #if defined(__NEED_pthread_t) && !defined(__DEFINED_pthread_t)
-typedef unsigned _Addr pthread_t;
+typedef unsigned long pthread_t;
 #define __DEFINED_pthread_t
 #endif
 

@@ -1,9 +1,9 @@
-#define _Addr long long
-#define _Int64 long long
-#define _Reg long long
+#define _Addr long
+#define _Int64 long
+#define _Reg long
 
 #define __BYTE_ORDER 1234
-#define __LONG_MAX 0x7fffffffL
+#define __LONG_MAX 0x7fffffffffffffffL
 
 #ifndef __cplusplus
 #if defined(__NEED_wchar_t) && !defined(__DEFINED_wchar_t)
@@ -264,7 +264,7 @@ typedef unsigned useconds_t;
 
 #ifdef __cplusplus
 #if defined(__NEED_pthread_t) && !defined(__DEFINED_pthread_t)
-typedef unsigned _Addr pthread_t;
+typedef unsigned long pthread_t;
 #define __DEFINED_pthread_t
 #endif
 

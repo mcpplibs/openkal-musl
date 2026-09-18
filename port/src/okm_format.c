@@ -20,8 +20,15 @@
  *   control to the entry point, whatever the entry point is named. There is
  *   nothing for this file to drive there, and driving it would run every
  *   initialiser twice.
+ *
+ * OKM_TARGET_WINDOWS names the first format rather than `_WIN32`: this file
+ * is OKM_MUSL_INTERNAL, so mcpp.toml defines it for this package's own build
+ * of the target, and `_WIN32` is no longer defined at all on it --- the
+ * environment this package presents is POSIX. `__APPLE__` is unchanged: it
+ * is the compiler's own statement of the target triple's system, which
+ * `[c-abi] presents = "posix"` does not touch.
  */
-#if defined(_WIN32) || defined(__APPLE__)
+#if defined(OKM_TARGET_WINDOWS) || defined(__APPLE__)
 
 #include "okm.h"
 
@@ -61,7 +68,7 @@ __asm__(
 	".text\n");
 #endif
 
-#if defined(_WIN32)
+#if defined(OKM_TARGET_WINDOWS)
 
 typedef void (*okm_hook)(void);
 
@@ -102,4 +109,4 @@ void _fini(void) { }
  * would replace it belongs to a dynamic linker this arrangement has none of. */
 void __ldso_atfork(int who) { (void)who; }
 
-#endif  /* _WIN32 || __APPLE__ */
+#endif  /* OKM_TARGET_WINDOWS || __APPLE__ */
