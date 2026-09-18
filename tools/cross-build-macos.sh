@@ -37,8 +37,11 @@ stub="$here/../openkal-macos/port/libSystem.tbd"
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 
+# `musl-generated/$arch-macos`, NOT `musl-generated/$arch` --- see the same
+# fix and its reasoning in probe-cross-macos.sh, this script's sibling and
+# the one that shares this hand-maintained include list's drift.
 inc=(-Iport/include -Imusl/src/include -Imusl/src/internal
-     -Imusl-generated/internal -Imusl-generated/"$arch"
+     -Imusl-generated/internal -Imusl-generated/"$arch"-macos
      -Imusl/arch/"$arch" -Imusl/arch/generic -Imusl/include
      -I"$here"/../openkal/include)
 # `-DOKM_MUSL_INTERNAL=1` IS LOAD-BEARING AND WAS ADDED AFTER THIS LIST WAS
