@@ -11,6 +11,16 @@ the claim can be checked rather than repeated.
 openkal-musl = "0.15.0"
 ```
 
+> **Engine floor (mcpp 2026.9.18.3):** this version of this package declares
+> `[c-abi]` (presents, data-model, wchar, builtins) and the engine
+> realises it per compile unit. The probe that verifies the declaration
+> matches what the compiler actually emitted needs the host-macro strip
+> (`-U_WIN32` etc. on Windows hosts) and the freestanding
+> `-fno-short-wchar` discipline — both shipped in `mcpp 2026.9.18.3`.
+> Older engines silently misbuild this package on Windows × any target:
+> the probe sees host contamination and reports mismatches the package
+> does not have. Upgrade: `xlings install mcpp --force`.
+
 It names no implementation and no platform: a C library is the one consumer that
 must know which implementation it needs, so it declares that itself.
 
