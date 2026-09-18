@@ -46,8 +46,18 @@ done
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 
+# `musl-generated/$arch-macos`, NOT `musl-generated/$arch`. This probe cross-
+# compiles for the other system, and mcpp.toml's own build picks the `-macos`
+# directory for exactly that reason — it is not always byte-identical to the
+# generic architecture one, and port/src/okm_type_identity.c is what found
+# that this second, hand-maintained copy of the include list had fallen
+# behind on it: aarch64-macos and x86_64-macos each override a handful of
+# typedefs (`wchar_t`, `wint_t`, `int64_t`/`uint64_t`, `intmax_t`/`uintmax_t`)
+# that Apple's own compiler disagrees with the generic answer on, and this
+# probe was compiling against the generic one regardless of which system it
+# claimed to be probing.
 inc=(-Iport/include -Imusl/src/include -Imusl/src/internal
-     -Imusl-generated/internal -Imusl-generated/"$arch"
+     -Imusl-generated/internal -Imusl-generated/"$arch"-macos
      -Imusl/arch/"$arch" -Imusl/arch/generic -Imusl/include
      -I"$here"/../openkal/include)
 # `-DOKM_MUSL_INTERNAL=1` IS LOAD-BEARING AND WAS ADDED AFTER THIS LIST WAS
