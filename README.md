@@ -142,6 +142,32 @@ with the final flags for the target and checks `sizeof(long)`,
 `__SIZEOF_WCHAR_T__` and whether `_WIN32` is defined against what is
 declared here, and refuses the build if they disagree.
 
+**On Windows, that declaration needs a Clang-based toolchain, and GCC/MinGW
+cannot realize it, on any version, with no flag that changes this.** Stating
+LP64 and no `_WIN32` for `x86_64-windows-*` is not merely a header choice:
+mcpp realizes it by compiling with a substituted target triple (`clang
+--target=x86_64-w64-windows-gnu … --target=x86_64-pc-cygwin -fno-short-wchar`,
+in that order — the object format and calling convention come from the
+first, the environment a translation unit sees from the second), which is a
+mechanism only Clang's driver has. Plain `x86_64-w64-mingw32-gcc` has no
+equivalent: its `long` is 32 bits on this target unconditionally —
+
+```sh
+$ x86_64-w64-mingw32-gcc -dM -E -x c /dev/null | grep __SIZEOF_LONG__
+#define __SIZEOF_LONG__ 4
+```
+
+— because that is the Windows ABI itself, not a default GCC happens to
+choose and a flag could override. A build that declares LP64 and hands GCC
+that compiler gets a `uint64_t` that is actually 32 bits wide, silently,
+everywhere this port's own sources or a program above it assume otherwise.
+This is why CI carries no "windows, gcc" row: it would not be testing a
+weaker configuration of this package, it would be testing a toolchain this
+package's own declared environment cannot be realized on at all. A program
+that builds this package for Windows needs `[toolchain] default =
+"llvm@<version>"` (or the target-scoped form), and gets a compile-time
+refusal from mcpp — not a silent 32-bit `long` — if it does not have one.
+
 ## What was changed, and what was not
 
 musl reaches its kernel through seven inline functions declared once per

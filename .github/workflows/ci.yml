@@ -65,17 +65,35 @@ jobs:
           #   --abort-signal      SIGABRT: openkal-linux raises it with tgkill
           #   --abort-status      exit 134: openkal-macos ends with a status no
           #                       program returns
-          #   --abort-terminated  a termination rather than a return: Windows
-          #                       fail-fasts, and the fault this replaces was
-          #                       reported there as an exit
+          #
+          # `--abort-terminated` (Windows fail-fasts rather than returning) is
+          # not exercised here any more — see below, where the Windows row
+          # used to be.
           - { name: 'linux, gcc',    os: ubuntu-24.04, toolchain: 'gcc@16.1.0',  target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-signal', dirtime: '--dir-time'    }
           - { name: 'linux, llvm',   os: ubuntu-24.04, toolchain: 'llvm@22.1.8', target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-signal', dirtime: '--dir-time'    }
           - { name: 'macos, llvm',   os: macos-14,     toolchain: 'llvm@20.1.7', target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-status', dirtime: '--dir-time'    }
-          # openkal-windows declines `openkal.space`: this system has no
-          # primitive that copies an address space and starts a context in the
-          # copy, and inventing one would be the simulation clause 3.1
-          # forbids. `--no-fork` asserts the refusal.
-          - { name: 'windows, gcc',  os: windows-2022, toolchain: 'gcc@16.1.0',  target: 'x86_64-windows-gnu', net: 'yes', fork: '--no-fork', shell: '--no-shell', abort: '--abort-terminated', dirtime: '--dir-time'     }
+          # THE WINDOWS ROW WAS HERE, BUILT WITH GCC, AND IS GONE RATHER THAN
+          # FIXED, BECAUSE IT COULD NOT BE.
+          #
+          # Since 0.15.0 this package declares [c-abi] presents = "posix" /
+          # data-model = "arch-default" (LP64) for this target, which mcpp
+          # realizes through a Clang-specific mechanism (a `--target=`
+          # substitution). Plain `x86_64-w64-mingw32-gcc` has no equivalent —
+          # measured, `__SIZEOF_LONG__` is 4 there unconditionally, which is
+          # the Windows ABI itself and not a flag any GCC version changes — so
+          # this row was testing a toolchain the package's own declared
+          # environment cannot be realized on, not a weaker configuration of
+          # it. See the README section "The C environment this package
+          # presents" for the full account and the measurement. A Clang-based
+          # Windows row does not replace it here: this package's own examples
+          # that name no C++ runtime (`posix`, `wordcount`, …) still meet the
+          # separate, already-documented compiler-rt-builtins limit for a C
+          # program naming this package directly on this target (same README
+          # section) regardless of which compiler realizes [c-abi] — a gap in
+          # coverage this repository's CI leaves open rather than papering
+          # over with a different toolchain and the same missing dependency.
+          # `openkal-llvm-runtime`'s own CI does exercise this target end to
+          # end, on a real Windows machine, with this package in its graph.
     defaults:
       run:
         shell: bash
