@@ -92,24 +92,6 @@ openkal-opensbi = { version = "0.6.0", features = ["standalone"] }
 [target.'cfg(os = "none")'.build]
 defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
 
-# WHAT THIS PACKAGE PRESENTS ON A TARGET WITH NO OPERATING SYSTEM.
-#
-# The package-level [c-abi] above states a hosted environment --- posix, LP64,
-# 32-bit wchar, ISO builtins --- and the engine probes every target that
-# resolves c-abi against it. A freestanding target has no C library to present
-# an environment for, and probing it against musl's hosted declaration finds a
-# mismatch the declaration did not mean to make: clang's freestanding
-# preprocessor reports __SIZEOF_WCHAR_T__ as 16, not 32; a Windows host cross
-# to a freestanding target leaks _WIN32 from the host preprocessor; both are
-# real, and neither is wrong about the target it is reporting.
-#
-# The override says, for os = "none" only, "this target has no C environment,
-# do not probe one here." Hosted targets keep the package-level declaration
-# unchanged; freestanding targets skip the probe and the structural mismatch
-# does not arise.
-[target.'cfg(os = "none")'.c-abi]
-presents = "none"
-
 [target.'cfg(windows)'.dependencies]
 openkal-windows = { version = "0.8.0", features = ["standalone"] }
 
