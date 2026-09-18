@@ -31,7 +31,7 @@ error: dependency 'mcpplibs.openkal-musl' has irreconcilable versions:
 
 ```toml
 [dependencies]
-openkal-llvm-runtime = "0.10.0"  # carries openkal-musl 0.14.0
+openkal-llvm-runtime = "0.11.0"  # carries openkal-musl 0.15.0
 ```
 
 Recorded here because it was got wrong by the people who maintain this
@@ -41,7 +41,7 @@ consumer needs to answer it without asking.
 
 | this package | is carried by |
 | --- | --- |
-| 0.15.0 | not yet carried by a released `openkal-llvm-runtime`; the C environment declared below is a breaking change and that package's pin moves once it is rebuilt against it |
+| 0.15.0 | `openkal-llvm-runtime = "0.11.0"` |
 | 0.14.0 | `openkal-llvm-runtime = "0.10.0"` |
 | 0.13.5 | `openkal-llvm-runtime = "0.9.6"`, `"0.9.7"` |
 | 0.13.4 | `openkal-llvm-runtime = "0.9.5"` |
