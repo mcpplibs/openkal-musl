@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.17.0"
+version     = "0.18.0"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 
@@ -164,7 +164,14 @@ openkal = "0.14.0"
 openkal-linux = { version = "0.15.0", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
-openkal-macos = { version = "0.11.0", features = ["standalone"] }
+# 0.12.0 is the first release of this implementation that declares which
+# interfaces of the layer it provides, so it is the first under which mcpp can
+# ANSWER a consumer's `[kernel-abi] requires-interfaces` on macOS. Below it the
+# question had no answer at all --- not a refusal and not a confirmation, which
+# is the shape of a check that silently does not run --- while the same
+# consumer was answered on Linux and Windows, whose implementations have
+# carried the array since openkal-linux 0.15.0 and openkal-windows 0.10.0.
+openkal-macos = { version = "0.12.0", features = ["standalone"] }
 
 # FIRST STEP TOWARD A BARE MACHINE, AND NOT THE WHOLE OF IT.
 #
