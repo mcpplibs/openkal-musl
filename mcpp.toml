@@ -140,7 +140,7 @@ openkal = "0.14.0"
 #
 # The consequence for a program is that it names this package and nothing else.
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = { version = "0.14.0", features = ["standalone"] }
+openkal-linux = { version = "0.15.0", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
 openkal-macos = { version = "0.11.0", features = ["standalone"] }
@@ -179,7 +179,7 @@ openkal-opensbi = { version = "0.8.0", features = ["standalone"] }
 defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
 
 [target.'cfg(windows)'.dependencies]
-openkal-windows = { version = "0.9.0", features = ["standalone"] }
+openkal-windows = { version = "0.10.0", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #
