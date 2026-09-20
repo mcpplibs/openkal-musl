@@ -273,6 +273,13 @@ unsupportedness a defect). The other two are departures from it, and a reader
 counting them is reading the cost of presenting POSIX above an interface that
 does not carry all of it.
 
+**One row of this table has no entry in the manifest, and that is stated rather
+than rounded off.** "A mode given at creation" is about an ARGUMENT of `open`
+and `mkdir`, not about those calls: they do what they are for and the mode is
+what is not applied. An entry keyed on `open` would say the call is absent,
+which is false and worse than no entry. The manifest keys on names, so a
+facility narrower than a name stays here until the schema can say it.
+
 | Absent | What a program observes | Why |
 | --- | --- | --- |
 | signal handlers | `sigaction` reports `ENOSYS` for any handler other than the default or ignore. **Since 0.16.0 a disposition is accepted only where it is the one already in effect**: `SIG_DFL` succeeds for every signal but `SIGPIPE`, `SIG_IGN` succeeds for `SIGPIPE` alone, and the enquiry reports `SIG_IGN` for `SIGPIPE` rather than a zeroed record | openkal has no asynchronous delivery. A handler that was accepted and could never run would be silently wrong; masking, which has nothing to mask, succeeds. Until 0.16.0 `SIG_IGN` was accepted for every signal and installed for none, so a program that asked not to be ended by the interrupt keystroke was told it had succeeded and was ended by it. `SIGPIPE` is the one disposition that is not the default, and not by accident: openkal requires a write to a stream whose far end is gone to report the condition rather than end the program, so an implementation beneath has already arranged that the signal does nothing. |

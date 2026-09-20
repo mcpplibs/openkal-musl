@@ -104,6 +104,9 @@ inotify_rm_watch  = { form = "link", note = "as timerfd_create" }
 
 # Reported to the caller, which can read the value and act on it.
 mprotect  = { form = "enosys", note = "openkal has no operation upon a mapping's protection; musl asks for a guard page and proceeds without one when told this" }
+sigaction = { form = "enosys", note = "a disposition other than the one already in effect; openkal has no asynchronous delivery, and a handler that was accepted and could never run would be silently wrong" }
+chmod     = { form = "enosys", note = "a request whose read or write bits differ from what stat already reports; a capability-oriented environment has no principal for a permission to name" }
+fchmodat  = { form = "enosys", note = "as chmod" }
 chown     = { form = "enosys", note = "a capability-oriented environment has no principal for an owner to name" }
 fchown    = { form = "enosys", note = "as chown" }
 lchown    = { form = "enosys", note = "as chown" }
@@ -111,6 +114,14 @@ lchown    = { form = "enosys", note = "as chown" }
 # The call succeeds and part of what it asked for is not done. Each of these
 # is a place where refusing would be worse than the partial answer, and the
 # README row beside it says why.
+#
+# ONE README ROW IS NOT EXPRESSIBLE HERE, AND THAT IS WORTH STATING RATHER THAN
+# ROUNDING OFF. "A mode given at creation" is about an ARGUMENT of `open` and
+# `mkdir`, not about those calls: they do what they are for, and the mode is
+# what is not applied. A row keyed on `open` would say the call is absent,
+# which is false and worse than the absence of a row. The table keys on names,
+# so a facility narrower than a name stays in the README until the schema can
+# say it.
 tcsetattr = { form = "accepted-no-effect", note = "openkal names three positions of the terminal mode word; a request that alters output post-processing, the line speed, the control characters or VMIN/VTIME is accepted and that part has no effect" }
 
 [dependencies]
