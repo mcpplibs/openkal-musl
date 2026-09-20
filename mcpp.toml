@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.16.0"
+version     = "0.17.0"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 
@@ -38,6 +38,113 @@ data-model = "arch-default"
 wchar      = 32
 builtins   = "iso"
 
+# WHAT THIS C LIBRARY DOES NOT SUPPLY, AND IN WHAT SHAPE EACH ABSENCE REACHES A
+# PROGRAM.
+#
+# The set of names a C library supplies is not enumerable here --- POSIX has
+# about twelve hundred --- and enumerating it is the mistake openkal's own
+# specification records withdrawing (SPEC 0.14 clause 3.3, on the name it gave
+# to a set of interfaces and then took back). The exceptions are enumerable.
+# README's "The following are absent" table has carried them in prose since
+# this port began, and nothing executed that prose: it was contradicted once
+# already, in the release before this one, where `SIG_IGN` was accepted for
+# every signal and installed for none and a program that asked not to be ended
+# by the interrupt keystroke was told it had succeeded and was ended by it.
+#
+# `form` is how the absence reaches the program, and it is the load-bearing
+# field:
+#
+#   link                 the definition is not in the archive; the program
+#                        fails to link, naming the symbol. This is the shape
+#                        openkal's capability model requires of an
+#                        implementation (clause 6.1: a conforming
+#                        implementation shall not provide an interface whose
+#                        operations report a lack of support at run time).
+#   enosys               the definition exists and reports that it cannot act.
+#                        POSIX has a value for this and a caller can read it,
+#                        which is what makes it a bounded answer rather than a
+#                        silent one.
+#   accepted-no-effect   the call succeeds and part of what it asked for is not
+#                        done. This is the shape of the defect the previous
+#                        release repaired, and it is named so that "how many of
+#                        these are there" is a question with an answer.
+#
+# tools/check-absent.sh asserts every row against the built archive: a `link`
+# name that IS defined, or an `enosys` name that is NOT, fails the build.
+#
+# THIS TABLE ASKS NOTHING OF AN OLDER ENGINE, AND ITS SPELLING IS WHY. mcpp
+# ignores a top-level table it does not know and refuses an unknown MEMBER of
+# a table it does know, so `[c-abi].absent` --- which reads better, and is
+# where the first draft of this file put it --- made every mcpp below
+# 2026.9.20.1 refuse THIS WHOLE MANIFEST on every target. Measured against the
+# published 2026.9.18.3 archive on exactly this file. Everything the table
+# does is diagnostic, so an engine that ignores it reports the same raw link
+# error it reports today; an engine that refused it would have taken this
+# package away entirely and forced the index floor up, costing every client
+# below that floor the whole index for a note they merely would not receive.
+#
+# The consequence here: 0.17.0 needs no `min_mcpp` move and may be registered
+# as soon as it is tagged. An older client builds it and gets the link error
+# without the sentence that explains it, which is what it gets today.
+[c-abi-absent]
+
+# Readiness held by the environment. A set is a facility of one kernel rather
+# than a capability; `poll` and `select` ask each descriptor in turn, which is
+# what an interface without a set permits. These five are not compiled at all
+# (see the withheld sources below), so the link names them.
+epoll_create      = { form = "link", note = "openkal has no readiness set; poll and select ask each descriptor in turn" }
+epoll_create1     = { form = "link", note = "as epoll_create" }
+epoll_ctl         = { form = "link", note = "as epoll_create" }
+epoll_wait        = { form = "link", note = "as epoll_create" }
+epoll_pwait       = { form = "link", note = "as epoll_create" }
+timerfd_create    = { form = "link", note = "a descriptor that is created and never becomes ready is worse than one that cannot be created" }
+timerfd_settime   = { form = "link", note = "as timerfd_create" }
+timerfd_gettime   = { form = "link", note = "as timerfd_create" }
+eventfd           = { form = "link", note = "as timerfd_create" }
+eventfd_read      = { form = "link", note = "as timerfd_create" }
+eventfd_write     = { form = "link", note = "as timerfd_create" }
+signalfd          = { form = "link", note = "as timerfd_create" }
+inotify_init      = { form = "link", note = "as timerfd_create" }
+inotify_init1     = { form = "link", note = "as timerfd_create" }
+inotify_add_watch = { form = "link", note = "as timerfd_create" }
+inotify_rm_watch  = { form = "link", note = "as timerfd_create" }
+
+# Reported to the caller, which can read the value and act on it.
+mprotect  = { form = "enosys", note = "openkal has no operation upon a mapping's protection; musl asks for a guard page and proceeds without one when told this" }
+sigaction = { form = "enosys", note = "a disposition other than the one already in effect; openkal has no asynchronous delivery, and a handler that was accepted and could never run would be silently wrong" }
+chmod     = { form = "enosys", note = "a request whose read or write bits differ from what stat already reports; a capability-oriented environment has no principal for a permission to name" }
+fchmodat  = { form = "enosys", note = "as chmod" }
+chown     = { form = "enosys", note = "a capability-oriented environment has no principal for an owner to name" }
+fchown    = { form = "enosys", note = "as chown" }
+lchown    = { form = "enosys", note = "as chown" }
+
+# The call succeeds and part of what it asked for is not done. Each of these
+# is a place where refusing would be worse than the partial answer, and the
+# README row beside it says why.
+#
+# TWO THINGS THIS TABLE CANNOT SAY TODAY, STATED RATHER THAN ROUNDED OFF.
+#
+# A FACILITY NARROWER THAN A NAME. "A mode given at creation" is about an
+# ARGUMENT of `open` and `mkdir`, not about those calls: they do what they are
+# for, and the mode is what is not applied. A row keyed on `open` would say the
+# call is absent, which is false and worse than the absence of a row.
+#
+# AN ABSENCE THAT VARIES BY TARGET. `fork` is composed here from
+# `openkal.space` (port/src/okm_fork.c), which the reference to it takes
+# WEAKLY: a backend that provides the interface gets a working `fork`, and one
+# that does not gets `-ENOSYS`. openkal-linux provides it; openkal-windows
+# declines it, for the reason its own README gives --- constructing the copy
+# out of `CreateProcessW` would be present, would look like the operation, and
+# would not produce a copy of the caller. So `fork` is `enosys` on Windows and
+# works on Linux, and every row here is unconditional. Writing it as `enosys`
+# would be false on Linux; omitting it is silent on Windows, and silence is the
+# lesser of the two. The row returns when the schema carries `targets`.
+#
+# Both stay in the README until then. A table that answered these two by
+# rounding them off would be a table nobody could assert against, which is the
+# state this one exists to leave.
+tcsetattr = { form = "accepted-no-effect", note = "openkal names three positions of the terminal mode word; a request that alters output post-processing, the line speed, the control characters or VMIN/VTIME is accepted and that part has no effect" }
+
 [dependencies]
 openkal = "0.14.0"
 
@@ -54,7 +161,7 @@ openkal = "0.14.0"
 #
 # The consequence for a program is that it names this package and nothing else.
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = { version = "0.14.0", features = ["standalone"] }
+openkal-linux = { version = "0.15.0", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
 openkal-macos = { version = "0.11.0", features = ["standalone"] }
@@ -93,7 +200,7 @@ openkal-opensbi = { version = "0.8.0", features = ["standalone"] }
 defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
 
 [target.'cfg(windows)'.dependencies]
-openkal-windows = { version = "0.9.0", features = ["standalone"] }
+openkal-windows = { version = "0.10.0", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #
