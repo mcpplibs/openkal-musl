@@ -405,6 +405,58 @@ jobs:
             || { echo "::error::isatty over this port disagrees with the system's own C library"; exit 1; }
           echo "  ok  isatty answers the same as the system's own C library"
 
+      # AND A TERMINAL PUT INTO RAW MODE BEHAVES AS ONE.
+      #
+      # `isatty` above establishes that this port can tell a terminal from a
+      # pipe. This establishes what a program does with the answer: enter raw
+      # mode, read the interrupt keystroke as the byte 0x03 rather than being
+      # ended by it, and leave the terminal as it was found. Until openkal 0.14
+      # the mode word had no position for the reserved keystrokes, and this port
+      # answered TCGETS and TIOCGWINSZ with a bare success while refusing TCSETS
+      # (mcpplibs/openkal-musl#36).
+      #
+      # THE CRITERION IS AGAIN A RELATION, AND FOR THE SAME REASON. The
+      # transcript above this port is compared with the transcript of the same
+      # source above the system's own C library, upon a pseudo-terminal of the
+      # same kind. An assertion written here --- "0x03 arrives" --- would pass on
+      # a system whose terminal does not deliver it at all, and would fail on a
+      # runner whose pty starts in a mode neither library chose.
+      - name: A terminal put into raw mode delivers the interrupt keystroke
+        if: runner.os == 'Linux' && matrix.target == ''
+        run: |
+          set -euo pipefail
+          ( cd examples/terminal && mcpp build --toolchain '${{ matrix.toolchain }}' )
+          bin="$(find examples/terminal/target -name terminal -type f | head -1)"
+          test -n "$bin" || { echo "::error::the terminal probe did not build"; exit 1; }
+
+          cc examples/terminal/src/main.c -o "$RUNNER_TEMP/terminal-control"
+          # THE CARRIAGE RETURNS ARE REMOVED BEFORE COMPARING, AND WHAT THAT
+          # EXCLUDES IS NAMED. openkal's mode word carries what is TYPED at a
+          # terminal and names nothing about what is written to one, so the
+          # output post-processing this environment performs (a newline written
+          # as a carriage return and a newline) is left in place by a
+          # `tcsetattr' over this port and cleared by one over the system's own
+          # C library. The probe's own lines therefore differ in that byte and
+          # in nothing else --- README's limits table records it --- while the
+          # keystrokes it read, the modes it reported and the order of both are
+          # what this step is for.
+          python3 tools/pty-keys.py reading 61620371 "$RUNNER_TEMP/terminal-control" \
+            | tr -d '\r' > "$RUNNER_TEMP/control.log"
+          python3 tools/pty-keys.py reading 61620371 "$bin" | tr -d '\r' > "$RUNNER_TEMP/port.log"
+
+          echo "--- the system's own C library"; cat "$RUNNER_TEMP/control.log"
+          echo "--- this port";                  cat "$RUNNER_TEMP/port.log"
+
+          # The control must show the thing being measured, or the comparison
+          # proves nothing: a pty that swallowed the keystroke would make two
+          # identical and equally wrong transcripts.
+          grep -q 'byte 0x03' "$RUNNER_TEMP/control.log" \
+            || { echo "::error::the harness cannot deliver the interrupt keystroke as data — this check would prove nothing"; exit 1; }
+
+          diff -u "$RUNNER_TEMP/control.log" "$RUNNER_TEMP/port.log" \
+            || { echo "::error::a terminal over this port does not behave as the system's own C library"; exit 1; }
+          echo "  ok  the transcripts agree, keystroke for keystroke"
+
       # THE INTERNAL OVERLAY STOPS AT THIS PACKAGE'S BOUNDARY.
       #
       # musl reaches its own declarations through `src/include`, whose headers
