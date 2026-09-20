@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.16.0"
+version     = "0.17.0"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 
@@ -37,6 +37,81 @@ presents   = "posix"
 data-model = "arch-default"
 wchar      = 32
 builtins   = "iso"
+
+# WHAT THIS C LIBRARY DOES NOT SUPPLY, AND IN WHAT SHAPE EACH ABSENCE REACHES A
+# PROGRAM.
+#
+# The set of names a C library supplies is not enumerable here --- POSIX has
+# about twelve hundred --- and enumerating it is the mistake openkal's own
+# specification records withdrawing (SPEC 0.14 clause 3.3, on the name it gave
+# to a set of interfaces and then took back). The exceptions are enumerable.
+# README's "The following are absent" table has carried them in prose since
+# this port began, and nothing executed that prose: it was contradicted once
+# already, in the release before this one, where `SIG_IGN` was accepted for
+# every signal and installed for none and a program that asked not to be ended
+# by the interrupt keystroke was told it had succeeded and was ended by it.
+#
+# `form` is how the absence reaches the program, and it is the load-bearing
+# field:
+#
+#   link                 the definition is not in the archive; the program
+#                        fails to link, naming the symbol. This is the shape
+#                        openkal's capability model requires of an
+#                        implementation (clause 6.1: a conforming
+#                        implementation shall not provide an interface whose
+#                        operations report a lack of support at run time).
+#   enosys               the definition exists and reports that it cannot act.
+#                        POSIX has a value for this and a caller can read it,
+#                        which is what makes it a bounded answer rather than a
+#                        silent one.
+#   accepted-no-effect   the call succeeds and part of what it asked for is not
+#                        done. This is the shape of the defect the previous
+#                        release repaired, and it is named so that "how many of
+#                        these are there" is a question with an answer.
+#
+# tools/check-absent.sh asserts every row against the built archive: a `link`
+# name that IS defined, or an `enosys` name that is NOT, fails the build.
+#
+# THIS TABLE REQUIRES mcpp 2026.9.20.1. An engine that does not know a key
+# refuses the whole manifest rather than ignoring the key, so a release
+# carrying this table cannot be registered before the index floor has moved:
+# mcpp releases, `index.toml` raises `min_mcpp`, and only then does this
+# version appear in the index. The order is not a convenience --- a descriptor
+# registered ahead of the floor makes every client below it fail to load this
+# package at all, which is a worse answer than not having the table.
+[c-abi.absent]
+
+# Readiness held by the environment. A set is a facility of one kernel rather
+# than a capability; `poll` and `select` ask each descriptor in turn, which is
+# what an interface without a set permits. These five are not compiled at all
+# (see the withheld sources below), so the link names them.
+epoll_create      = { form = "link", note = "openkal has no readiness set; poll and select ask each descriptor in turn" }
+epoll_create1     = { form = "link", note = "as epoll_create" }
+epoll_ctl         = { form = "link", note = "as epoll_create" }
+epoll_wait        = { form = "link", note = "as epoll_create" }
+epoll_pwait       = { form = "link", note = "as epoll_create" }
+timerfd_create    = { form = "link", note = "a descriptor that is created and never becomes ready is worse than one that cannot be created" }
+timerfd_settime   = { form = "link", note = "as timerfd_create" }
+timerfd_gettime   = { form = "link", note = "as timerfd_create" }
+eventfd           = { form = "link", note = "as timerfd_create" }
+eventfd_read      = { form = "link", note = "as timerfd_create" }
+eventfd_write     = { form = "link", note = "as timerfd_create" }
+signalfd          = { form = "link", note = "as timerfd_create" }
+inotify_init      = { form = "link", note = "as timerfd_create" }
+inotify_init1     = { form = "link", note = "as timerfd_create" }
+inotify_add_watch = { form = "link", note = "as timerfd_create" }
+inotify_rm_watch  = { form = "link", note = "as timerfd_create" }
+
+# Reported to the caller, which can read the value and act on it.
+mprotect  = { form = "enosys", note = "openkal has no operation upon a mapping's protection; musl asks for a guard page and proceeds without one when told this" }
+chown     = { form = "enosys", note = "a capability-oriented environment has no principal for an owner to name" }
+fchown    = { form = "enosys", note = "as chown" }
+lchown    = { form = "enosys", note = "as chown" }
+
+# The call succeeds and part of what it asked for is not done. Each of these
+# is a place where refusing would be worse than the partial answer, and the
+# README row beside it says why.
+tcsetattr = { form = "accepted-no-effect", note = "openkal names three positions of the terminal mode word; a request that alters output post-processing, the line speed, the control characters or VMIN/VTIME is accepted and that part has no effect" }
 
 [dependencies]
 openkal = "0.14.0"

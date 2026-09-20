@@ -490,7 +490,7 @@ jobs:
       # accumulates one per configuration, so a search across all of them reads
       # definitions from a build made before the change --- which is how this
       # check first reported every withheld symbol as still present.
-      - name: What is withheld is not defined, and what is not withheld is
+      - name: Every [c-abi.absent] row agrees with the archive
         if: runner.os == 'Linux' && matrix.target == ''
         run: |
           set -euo pipefail
@@ -503,30 +503,42 @@ jobs:
           echo "  examining $n objects in $(ls -d target/*/*/)"
           [ "$n" -gt 100 ] || { echo "::error::only $n objects; nothing was examined"; exit 1; }
 
-          defines() {   # symbol -> the number of definitions in these objects
-            nm $objs 2>/dev/null | grep -cE "^[0-9a-f]+ [TWi] $1\$" || true
-          }
+          # THE LIST LIVES IN THE MANIFEST AND NOT HERE. It used to be written
+          # out again in this step, which made the manifest's `[c-abi.absent]`
+          # table and this workflow two copies of one fact --- and a copy goes
+          # stale the first time only one of them is edited. The script reads
+          # the table and checks each row against the objects in the direction
+          # that row's `form` states: a `link` name must not be defined, an
+          # `enosys` name must be.
+          bash tools/check-absent.sh mcpp.toml $objs
 
+          # The other half, and a different property: that this package still
+          # compiles the things it is supposed to. Without it the check above
+          # would pass for a package that had stopped compiling anything whose
+          # names happen not to be in the table. `pipe` is here because openkal
+          # 0.8 made it expressible; `socket` and `fork` because their closures
+          # reach the password functions and the thread implementation, so they
+          # are deliberately NOT withheld and the manifest says why.
+          defines() { nm $objs 2>/dev/null | grep -cE "^[0-9a-f]+ [TWi] $1\$" || true; }
           fail=0
-          for s in epoll_create1 eventfd timerfd_create inotify_init signalfd; do
-            d=$(defines "$s")
-            if [ "$d" = 0 ]; then echo "  withheld, not defined: $s"
-            else echo "::error::$s is withheld and yet defined $d time(s)"; fail=1; fi
-          done
-
-          # The other half. Without it the check above would pass for a package
-          # that had stopped compiling anything at all. `pipe` is here because
-          # openkal 0.8 made it expressible; `socket` and `fork` because their
-          # closures reach the password functions and the thread implementation,
-          # so they are deliberately NOT withheld and the manifest says why.
           for s in printf malloc open pipe faccessat chmod socket fork; do
             d=$(defines "$s")
             if [ "$d" -ge 1 ]; then echo "  defined here: $s"
             else echo "::error::$s is not withheld and yet is not defined"; fail=1; fi
           done
-
           [ "$fail" = 0 ] || exit 1
-          echo "  ok  the withheld set is exactly what the manifest names"
+
+          # THE CHECK MUST BE ABLE TO FAIL. A row moved to the other form has
+          # to turn this step red; without this leg the step above passes
+          # identically against a script that reads no objects at all.
+          sed 's/^mprotect  = { form = "enosys"/mprotect  = { form = "link"/' \
+            mcpp.toml > /tmp/absent-flipped.toml
+          grep -q 'mprotect  = { form = "link"' /tmp/absent-flipped.toml || {
+            echo "::error::the flip that this leg depends on did not apply"; exit 1; }
+          if bash tools/check-absent.sh /tmp/absent-flipped.toml $objs; then
+            echo "::error::a row moved to the wrong form was accepted"; exit 1
+          fi
+          echo "  ok  the table is asserted, and the assertion can fail"
 
       - name: What this package is built from is not what it publishes
         working-directory: examples/cross-hello
