@@ -30,12 +30,19 @@ on:
         required: false
         default: ""
 env:
-  # TEMPORARY, AND REMOVED BEFORE THIS PULL REQUEST MERGES. `[c-abi-absent]`
-  # needs an engine that knows the key, and 2026.9.20.1 is not released yet;
-  # building mcpp from its own pull-request branch is what MCPP_SOURCE_REF is
-  # for. The final state is the pin below moved to 2026.9.20.1 and this line
-  # back to the repository variable.
-  MCPP_SOURCE_REF: ${{ github.event.inputs.mcpp_ref || vars.MCPP_SOURCE_REF || 'cenv-probe-target-and-interface-enumeration' }}
+  MCPP_SOURCE_REF: ${{ github.event.inputs.mcpp_ref || vars.MCPP_SOURCE_REF }}
+  # THE PIN STAYS ON THE RELEASE THAT PREDATES `[c-abi-absent]`, AND THAT IS
+  # THE POINT. The table is a top-level one, so an engine that does not know
+  # it ignores it (measured against this published archive on this file); the
+  # rows are asserted against the OBJECTS by tools/check-absent.sh, which
+  # reads the manifest itself and needs nothing from the engine. Building this
+  # package green here is therefore the end-to-end evidence for the claim the
+  # table's own comment makes: a client below 2026.9.20.1 keeps this package.
+  #
+  # An earlier draft of this branch built mcpp from its own pull-request
+  # branch through MCPP_SOURCE_REF, because the first spelling of the table
+  # WAS nested and did need the unreleased engine. Moving the table to the top
+  # level removed that need, and with it this release's dependency on mcpp's.
   MCPP_VERSION: 2026.9.18.3
   XLINGS_VERSION: v2026.8.17.2
   XLINGS_NON_INTERACTIVE: '1'
