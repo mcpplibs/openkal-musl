@@ -115,13 +115,27 @@ lchown    = { form = "enosys", note = "as chown" }
 # is a place where refusing would be worse than the partial answer, and the
 # README row beside it says why.
 #
-# ONE README ROW IS NOT EXPRESSIBLE HERE, AND THAT IS WORTH STATING RATHER THAN
-# ROUNDING OFF. "A mode given at creation" is about an ARGUMENT of `open` and
-# `mkdir`, not about those calls: they do what they are for, and the mode is
-# what is not applied. A row keyed on `open` would say the call is absent,
-# which is false and worse than the absence of a row. The table keys on names,
-# so a facility narrower than a name stays in the README until the schema can
-# say it.
+# TWO THINGS THIS TABLE CANNOT SAY TODAY, STATED RATHER THAN ROUNDED OFF.
+#
+# A FACILITY NARROWER THAN A NAME. "A mode given at creation" is about an
+# ARGUMENT of `open` and `mkdir`, not about those calls: they do what they are
+# for, and the mode is what is not applied. A row keyed on `open` would say the
+# call is absent, which is false and worse than the absence of a row.
+#
+# AN ABSENCE THAT VARIES BY TARGET. `fork` is composed here from
+# `openkal.space` (port/src/okm_fork.c), which the reference to it takes
+# WEAKLY: a backend that provides the interface gets a working `fork`, and one
+# that does not gets `-ENOSYS`. openkal-linux provides it; openkal-windows
+# declines it, for the reason its own README gives --- constructing the copy
+# out of `CreateProcessW` would be present, would look like the operation, and
+# would not produce a copy of the caller. So `fork` is `enosys` on Windows and
+# works on Linux, and every row here is unconditional. Writing it as `enosys`
+# would be false on Linux; omitting it is silent on Windows, and silence is the
+# lesser of the two. The row returns when the schema carries `targets`.
+#
+# Both stay in the README until then. A table that answered these two by
+# rounding them off would be a table nobody could assert against, which is the
+# state this one exists to leave.
 tcsetattr = { form = "accepted-no-effect", note = "openkal names three positions of the terminal mode word; a request that alters output post-processing, the line speed, the control characters or VMIN/VTIME is accepted and that part has no effect" }
 
 [dependencies]

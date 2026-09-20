@@ -273,12 +273,23 @@ unsupportedness a defect). The other two are departures from it, and a reader
 counting them is reading the cost of presenting POSIX above an interface that
 does not carry all of it.
 
-**One row of this table has no entry in the manifest, and that is stated rather
-than rounded off.** "A mode given at creation" is about an ARGUMENT of `open`
-and `mkdir`, not about those calls: they do what they are for and the mode is
-what is not applied. An entry keyed on `open` would say the call is absent,
-which is false and worse than no entry. The manifest keys on names, so a
-facility narrower than a name stays here until the schema can say it.
+**Two things this table says and the manifest cannot, stated rather than rounded
+off.**
+
+*A facility narrower than a name.* "A mode given at creation" is about an
+ARGUMENT of `open` and `mkdir`, not about those calls: they do what they are
+for and the mode is what is not applied. An entry keyed on `open` would say the
+call is absent, which is false and worse than no entry.
+
+*An absence that varies by target.* `fork` is composed here from
+`openkal.space`, and the reference to it is weak: a backend that provides the
+interface gets a working `fork`, and one that does not gets `ENOSYS`.
+openkal-linux provides it; openkal-windows declines it, and its README gives
+the reason --- constructing the copy out of `CreateProcessW` would be present,
+would look like the operation, and would not produce a copy of the caller.
+Every row of `[c-abi.absent]` is unconditional, so `fork` written as `enosys`
+would be false on Linux and omitting it is silent on Windows; silence is the
+lesser of the two, and the row returns when the schema carries `targets`.
 
 | Absent | What a program observes | Why |
 | --- | --- | --- |
