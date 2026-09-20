@@ -30,7 +30,12 @@ on:
         required: false
         default: ""
 env:
-  MCPP_SOURCE_REF: ${{ github.event.inputs.mcpp_ref || vars.MCPP_SOURCE_REF }}
+  # TEMPORARY, AND REMOVED BEFORE THIS PULL REQUEST MERGES. `[c-abi.absent]`
+  # needs an engine that knows the key, and 2026.9.20.1 is not released yet;
+  # building mcpp from its own pull-request branch is what MCPP_SOURCE_REF is
+  # for. The final state is the pin below moved to 2026.9.20.1 and this line
+  # back to the repository variable.
+  MCPP_SOURCE_REF: ${{ github.event.inputs.mcpp_ref || vars.MCPP_SOURCE_REF || 'cenv-probe-target-and-interface-enumeration' }}
   MCPP_VERSION: 2026.9.18.3
   XLINGS_VERSION: v2026.8.17.2
   XLINGS_NON_INTERACTIVE: '1'
