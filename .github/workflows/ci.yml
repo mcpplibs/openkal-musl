@@ -430,9 +430,19 @@ jobs:
           test -n "$bin" || { echo "::error::the terminal probe did not build"; exit 1; }
 
           cc examples/terminal/src/main.c -o "$RUNNER_TEMP/terminal-control"
+          # THE CARRIAGE RETURNS ARE REMOVED BEFORE COMPARING, AND WHAT THAT
+          # EXCLUDES IS NAMED. openkal's mode word carries what is TYPED at a
+          # terminal and names nothing about what is written to one, so the
+          # output post-processing this environment performs (a newline written
+          # as a carriage return and a newline) is left in place by a
+          # `tcsetattr' over this port and cleared by one over the system's own
+          # C library. The probe's own lines therefore differ in that byte and
+          # in nothing else --- README's limits table records it --- while the
+          # keystrokes it read, the modes it reported and the order of both are
+          # what this step is for.
           python3 tools/pty-keys.py reading 61620371 "$RUNNER_TEMP/terminal-control" \
-            > "$RUNNER_TEMP/control.log"
-          python3 tools/pty-keys.py reading 61620371 "$bin" > "$RUNNER_TEMP/port.log"
+            | tr -d '\r' > "$RUNNER_TEMP/control.log"
+          python3 tools/pty-keys.py reading 61620371 "$bin" | tr -d '\r' > "$RUNNER_TEMP/port.log"
 
           echo "--- the system's own C library"; cat "$RUNNER_TEMP/control.log"
           echo "--- this port";                  cat "$RUNNER_TEMP/port.log"
