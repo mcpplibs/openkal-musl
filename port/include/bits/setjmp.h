@@ -44,7 +44,35 @@
 #ifndef OKM_BITS_SETJMP_H
 #define OKM_BITS_SETJMP_H
 
-#if defined(__CYGWIN__) && defined(__x86_64__)
+/* `__MCPP_TARGET_WINDOWS__` FIRST, `__CYGWIN__` STILL ACCEPTED.
+ *
+ * The question this file asks is "is the target Windows",
+ * because that decides the calling convention and so the size of the record
+ * below. `__CYGWIN__` answered it only by accident: mcpp kept the name
+ * defined because nothing else named the target, and upstream code reads it
+ * as "Win32 is available" --- a 30-member measurement found four packages
+ * doing exactly that and reaching `#include <windows.h>`. A BORROWED NAME
+ * MEANS WHAT THE LENDER'S HISTORY MADE IT MEAN.
+ *
+ * mcpp now states the fact itself, for every target and under its own name
+ * (`docs/21`, "The macros mcpp defines").
+ *
+ * TWO OPERANDS COVER EVERY ENGINE, AND THE ORDER OF RELEASES DOES NOT MATTER.
+ * An engine up to and including 2026.9.21.1 defines `__CYGWIN__`, which
+ * answers; the release that withdraws it defines `__MCPP_TARGET_WINDOWS__`,
+ * which answers instead. There is no engine that defines neither, so this
+ * header has no flag day and the two releases may land in either order.
+ *
+ * 2026.9.21.1 spelt the name in lower case. It is not read here and does not
+ * need to be: that spelling existed for one release, nothing consumed it, and
+ * the release that withdraws `__CYGWIN__` renames it in the same change ---
+ * project-owned macros are upper case, as `NDEBUG` and every other are, while
+ * lower case belongs to the compiler's own predefines (`__linux__`), which
+ * mcpp supplies but does not own. The second operand is not redundancy; it is
+ * what removes the ordering constraint, and it goes once the withdrawal has
+ * shipped. */
+#if (defined(__MCPP_TARGET_WINDOWS__) || defined(__CYGWIN__)) \
+    && defined(__x86_64__)
 /* eight general registers, the stack pointer, the resumption address, and ten
  * vector registers of sixteen bytes each: thirty machine words, rounded up. */
 typedef unsigned long long __jmp_buf[32];
