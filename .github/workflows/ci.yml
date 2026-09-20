@@ -30,7 +30,7 @@ on:
         required: false
         default: ""
 env:
-  # TEMPORARY, AND REMOVED BEFORE THIS PULL REQUEST MERGES. `[c-abi.absent]`
+  # TEMPORARY, AND REMOVED BEFORE THIS PULL REQUEST MERGES. `[c-abi-absent]`
   # needs an engine that knows the key, and 2026.9.20.1 is not released yet;
   # building mcpp from its own pull-request branch is what MCPP_SOURCE_REF is
   # for. The final state is the pin below moved to 2026.9.20.1 and this line
@@ -495,7 +495,7 @@ jobs:
       # accumulates one per configuration, so a search across all of them reads
       # definitions from a build made before the change --- which is how this
       # check first reported every withheld symbol as still present.
-      - name: Every [c-abi.absent] row agrees with the archive
+      - name: Every [c-abi-absent] row agrees with the archive
         if: runner.os == 'Linux' && matrix.target == ''
         run: |
           set -euo pipefail
@@ -509,7 +509,7 @@ jobs:
           [ "$n" -gt 100 ] || { echo "::error::only $n objects; nothing was examined"; exit 1; }
 
           # THE LIST LIVES IN THE MANIFEST AND NOT HERE. It used to be written
-          # out again in this step, which made the manifest's `[c-abi.absent]`
+          # out again in this step, which made the manifest's `[c-abi-absent]`
           # table and this workflow two copies of one fact --- and a copy goes
           # stale the first time only one of them is edited. The script reads
           # the table and checks each row against the objects in the direction

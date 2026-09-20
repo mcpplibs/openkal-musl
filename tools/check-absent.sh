@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Asserts `[c-abi.absent]` against the archive this package actually builds.
+# Asserts `[c-abi-absent]` against the archive this package actually builds.
 #
 #   check-absent.sh <manifest> <archive-or-object>...
 #
@@ -54,7 +54,7 @@ rows=0
 in_table=0
 while IFS= read -r line; do
     case "$line" in
-        '[c-abi.absent]'*) in_table=1; continue ;;
+        '[c-abi-absent]'*) in_table=1; continue ;;
         '['*)              in_table=0; continue ;;
     esac
     [ "$in_table" -eq 1 ] || continue
@@ -80,9 +80,9 @@ while IFS= read -r line; do
 done < "$manifest"
 
 if [ "$rows" -eq 0 ]; then
-    echo "[c-abi.absent] has no rows; this script asserted nothing" >&2
+    echo "[c-abi-absent] has no rows; this script asserted nothing" >&2
     exit 1
 fi
 
-[ "$status" -eq 0 ] && echo "every [c-abi.absent] row agrees with the archive: $rows row(s)"
+[ "$status" -eq 0 ] && echo "every [c-abi-absent] row agrees with the archive: $rows row(s)"
 exit "$status"

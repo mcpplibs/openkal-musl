@@ -72,14 +72,21 @@ builtins   = "iso"
 # tools/check-absent.sh asserts every row against the built archive: a `link`
 # name that IS defined, or an `enosys` name that is NOT, fails the build.
 #
-# THIS TABLE REQUIRES mcpp 2026.9.20.1. An engine that does not know a key
-# refuses the whole manifest rather than ignoring the key, so a release
-# carrying this table cannot be registered before the index floor has moved:
-# mcpp releases, `index.toml` raises `min_mcpp`, and only then does this
-# version appear in the index. The order is not a convenience --- a descriptor
-# registered ahead of the floor makes every client below it fail to load this
-# package at all, which is a worse answer than not having the table.
-[c-abi.absent]
+# THIS TABLE ASKS NOTHING OF AN OLDER ENGINE, AND ITS SPELLING IS WHY. mcpp
+# ignores a top-level table it does not know and refuses an unknown MEMBER of
+# a table it does know, so `[c-abi].absent` --- which reads better, and is
+# where the first draft of this file put it --- made every mcpp below
+# 2026.9.20.1 refuse THIS WHOLE MANIFEST on every target. Measured against the
+# published 2026.9.18.3 archive on exactly this file. Everything the table
+# does is diagnostic, so an engine that ignores it reports the same raw link
+# error it reports today; an engine that refused it would have taken this
+# package away entirely and forced the index floor up, costing every client
+# below that floor the whole index for a note they merely would not receive.
+#
+# The consequence here: 0.17.0 needs no `min_mcpp` move and may be registered
+# as soon as it is tagged. An older client builds it and gets the link error
+# without the sentence that explains it, which is what it gets today.
+[c-abi-absent]
 
 # Readiness held by the environment. A set is a facility of one kernel rather
 # than a capability; `poll` and `select` ask each descriptor in turn, which is

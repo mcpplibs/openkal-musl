@@ -252,7 +252,7 @@ The following are absent, and each is refused rather than quietly accepted,
 because a facility that reports success and does nothing is the one kind of
 answer that leaves a program wrong without telling it.
 
-**Since 0.17.0 this table has an executor.** `[c-abi.absent]` in `mcpp.toml`
+**Since 0.17.0 this table has an executor.** `[c-abi-absent]` in `mcpp.toml`
 states each facility and the SHAPE in which its absence reaches a program ---
 `link` (the definition is not in the archive), `enosys` (it is, and reports
 that it cannot act), `accepted-no-effect` (the call succeeds and part of what
@@ -287,7 +287,7 @@ interface gets a working `fork`, and one that does not gets `ENOSYS`.
 openkal-linux provides it; openkal-windows declines it, and its README gives
 the reason --- constructing the copy out of `CreateProcessW` would be present,
 would look like the operation, and would not produce a copy of the caller.
-Every row of `[c-abi.absent]` is unconditional, so `fork` written as `enosys`
+Every row of `[c-abi-absent]` is unconditional, so `fork` written as `enosys`
 would be false on Linux and omitting it is silent on Windows; silence is the
 lesser of the two, and the row returns when the schema carries `targets`.
 
