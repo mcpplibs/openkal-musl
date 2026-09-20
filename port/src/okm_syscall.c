@@ -28,6 +28,7 @@
 /* For pipe and pipe2, which are kal_process_channel. Included here rather than
  * through okm.h because this is the only source that reaches for it. */
 #include <openkal/process.h>
+#include <openkal/terminal.h>
 /* WEAK, OR AN INTERFACE A BACKEND MAY DECLINE BECOMES ONE IT MUST PROVIDE.
  *
  * Clause 6.1 expresses an interface an implementation does not provide as the
@@ -49,6 +50,15 @@ extern __typeof(kal_process_channel_close) kal_process_channel_close __attribute
  * optional, and an implementation that does not provide it is absent as a
  * definition rather than present and refusing. */
 extern __typeof(kal_random_fill) kal_random_fill __attribute__((__weak__));
+/* openkal.terminal, weak by the same rule. An environment with no terminal ---
+ * a bare machine, firmware --- provides none of these, and clause 6.1 states
+ * that absence as the absence of a definition. A strong reference here would
+ * make every program above this library fail to link upon such a backend,
+ * whether or not it ever asked a terminal anything. The ioctl branch tests
+ * each pointer before it calls. */
+extern __typeof(kal_terminal_get_mode) kal_terminal_get_mode __attribute__((__weak__));
+extern __typeof(kal_terminal_set_mode) kal_terminal_set_mode __attribute__((__weak__));
+extern __typeof(kal_terminal_size)     kal_terminal_size     __attribute__((__weak__));
 /* WHAT `WNOHANG' IS EXPRESSED AS, AND IT WAS ALREADY IN THE SPECIFICATION.
  *
  * `waitpid' discarded its options, so a caller polling for a child that had not
@@ -533,6 +543,111 @@ struct linux_dirent64 {
 	uint8_t  d_type;
 	char     d_name[];
 };
+
+/* --- the terminal ------------------------------------------------------- *
+ *
+ * A C library asks a terminal four things through `ioctl': what its mode is,
+ * that its mode be this, how large its display is, and --- by way of the third
+ * --- whether it is a terminal at all. openkal answers all four through
+ * `openkal.terminal', and until 0.14 this port answered none of them: TCGETS
+ * and TIOCGWINSZ reported success and wrote nothing into the caller's
+ * structure, and TCSETS was refused with ENOTTY. A program that entered raw
+ * mode therefore edited its own uninitialised stack and offered it to a
+ * terminal that never received it, which is reported as mcpplibs/openkal-musl#36.
+ *
+ * WHAT THE STRUCTURE CARRIES THAT openkal DOES NOT NAME. `struct termios' has
+ * four flag words, a line speed and twenty control characters; openkal names
+ * three positions of one mode word. The composition below states the rest
+ * rather than inventing it: the flags whose effect this environment really has
+ * (the newline translation the terminal performs, the output post-processing),
+ * the control characters at their agreed values, and a line speed --- because
+ * zero in that field is not "unknown" but "hang up", and a caller that asked
+ * `cfgetospeed' would be told the line had dropped. What a program cannot do
+ * over this port is change any of them: a `tcsetattr' that clears OPOST is
+ * accepted and the post-processing remains, which port/README.md lists among
+ * the things this environment does not carry. */
+static int okm_termios_get(struct kal_stream s, struct termios* t)
+{
+	if (!t) return -EFAULT;
+	if (!kal_terminal_get_mode) return -ENOTTY;
+	kal_uintptr mode = 0;
+	const int e = kal_terminal_get_mode(s, &mode);
+	if (e != kal_ok) return -okm_errno(e);
+
+	struct termios out = { 0 };
+	out.c_iflag = ICRNL;
+	out.c_oflag = OPOST | ONLCR;
+	out.c_cflag = CREAD | CS8 | B38400;
+	if (mode & KAL_TERM_LINE_EDIT) out.c_lflag |= ICANON | ECHOE | ECHOK;
+	if (mode & KAL_TERM_ECHO)      out.c_lflag |= ECHO;
+	/* The three mechanisms this environment reserves keystrokes with are the
+	 * three openkal states as one position, so they are reported together. */
+	if (!(mode & KAL_TERM_PASS_CONTROL)) {
+		out.c_lflag |= ISIG | IEXTEN;
+		out.c_iflag |= IXON;
+	}
+	out.c_cc[VINTR]    = 3;    out.c_cc[VQUIT]  = 28;
+	out.c_cc[VERASE]   = 127;  out.c_cc[VKILL]  = 21;
+	out.c_cc[VEOF]     = 4;    out.c_cc[VSTART] = 17;
+	out.c_cc[VSTOP]    = 19;   out.c_cc[VSUSP]  = 26;
+	out.c_cc[VREPRINT] = 18;   out.c_cc[VWERASE] = 23;
+	out.c_cc[VLNEXT]   = 22;   out.c_cc[VDISCARD] = 15;
+	/* A read of a terminal with line assembly off waits for one byte, which is
+	 * what the implementation beneath establishes and what openkal requires of
+	 * it: a read reporting zero would mean the input had ended. */
+	out.c_cc[VMIN]  = 1;
+	out.c_cc[VTIME] = 0;
+	*t = out;
+	return 0;
+}
+
+/* THE MODE IS TAKEN FROM ISIG AND NOT FROM ALL THREE FLAGS, WHICH IS NOT THE
+ * READING DIRECTION'S RULE AND IS DELIBERATE.
+ *
+ * `KAL_TERM_PASS_CONTROL' set means that NO keystroke is reserved, so the
+ * reading direction sets it only where all three flags are clear --- that is
+ * what the terminal is. Asking is a different question: a program clears ISIG
+ * because it wants the interrupt keystroke as data, and that is the whole of
+ * what it can say here. Requiring all three to be clear before asking would
+ * make `cfmakeraw' work and a program that cleared ISIG alone silently do
+ * nothing, which is the shape of the defect this branch exists to remove.
+ *
+ * A program that clears IXON alone keeps every keystroke reserved: openkal has
+ * one position and this environment has three mechanisms, and the position is
+ * about the one that decides whether the program survives the keystroke. */
+static int okm_termios_set(struct kal_stream s, const struct termios* t)
+{
+	if (!t) return -EFAULT;
+	if (!kal_terminal_set_mode) return -ENOTTY;
+	kal_uintptr mode = 0;
+	if (t->c_lflag & ICANON) mode |= KAL_TERM_LINE_EDIT;
+	if (t->c_lflag & ECHO)   mode |= KAL_TERM_ECHO;
+	if (!(t->c_lflag & ISIG)) mode |= KAL_TERM_PASS_CONTROL;
+	const int e = kal_terminal_set_mode(s, mode);
+	return e == kal_ok ? 0 : -okm_errno(e);
+}
+
+/* THE SIZE, AND THE QUESTION THAT TRAVELS WITH IT. `isatty' asks this request
+ * and reads only whether it succeeded (musl/src/unistd/isatty.c), so the answer
+ * here decides whether every program above this library believes it is talking
+ * to a terminal. An interactive stream therefore answers, and an environment
+ * that does not know the size answers with zero --- which is what a serial line
+ * reports natively, and is a written answer rather than the untouched structure
+ * this branch used to leave behind. */
+static int okm_winsize_get(struct kal_stream s, struct winsize* w)
+{
+	if (!w) return -EFAULT;
+	kal_uintptr cols = 0, rows = 0;
+	if (kal_terminal_size && kal_terminal_size(s, &cols, &rows) != kal_ok) {
+		cols = 0;
+		rows = 0;
+	}
+	w->ws_row    = (unsigned short)rows;
+	w->ws_col    = (unsigned short)cols;
+	w->ws_xpixel = 0;
+	w->ws_ypixel = 0;
+	return 0;
+}
 
 static syscall_arg_t do_getdents(int fd, void* buf, size_t cap)
 {
@@ -1842,16 +1957,38 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			 * that decides on colour or on line buffering by asking decided
 			 * wrongly and in silence.
 			 *
-			 * THE SIZE IS REPORTED AS UNKNOWN RATHER THAN GUESSED. openkal
-			 * has no operation that answers it, and `winsize' is already
-			 * zeroed by the caller; a fabricated 80x24 would be this file's one
-			 * forbidden shape --- reporting success having done nothing.
-			 * A caller that wants the size reads zero, which is what a serial
-			 * line reports too. */
+			 * AND THE REST OF THE TERMINAL IS NOW openkal's, WHICH IT WAS
+			 * NOT UNTIL 0.16. This branch recognised the two requests above and
+			 * answered both with a bare `return 0' --- success, with the
+			 * caller's own structure left exactly as it was found. What
+			 * `cfmakeraw' then edited was the caller's uninitialised stack, and
+			 * `tcsetattr' offered it to a terminal that never received it,
+			 * because TCSETS fell through to the refusal below. openkal 0.14
+			 * names the third position a raw mode needs, so every one of these
+			 * requests corresponds to an operation and is performed. */
 			if (!interactive) return -ENOTTY;
-			if ((unsigned long)a2 == TCGETS)     return 0;
-			if ((unsigned long)a2 == TIOCGWINSZ) return 0;
-			return -ENOTTY;
+			switch ((unsigned long)a2) {
+			case TCGETS:
+				return okm_termios_get(s, (struct termios*)a3);
+			/* TCSETS, TCSETSW and TCSETSF, which musl composes as TCSETS plus
+			 * the action (musl/src/termios/tcsetattr.c). The three differ in
+			 * what happens to the bytes already in flight, and openkal has no
+			 * operation that drains or discards them: the mode is established
+			 * for all three, and port/README.md records that the draining forms
+			 * do not drain. */
+			case TCSETS:
+			case TCSETSW:
+			case TCSETSF:
+				return okm_termios_set(s, (const struct termios*)a3);
+			case TIOCGWINSZ:
+				return okm_winsize_get(s, (struct winsize*)a3);
+			default:
+				/* Everything else a terminal can be asked --- the size being
+				 * SET, the line being flushed, the pseudo-terminal pair being
+				 * unlocked --- names no openkal operation, and a refusal is
+				 * what a caller can act upon. */
+				return -ENOTTY;
+			}
 		}
 		return -ENOTTY;
 	}
@@ -2657,6 +2794,26 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * takes it, and the layout from the architecture the port is built
 		 * for. */
 		const struct { void* handler; unsigned long flags; void* restorer; }* act = (const void*)a2;
+		/* WHICH DISPOSITION IS ALREADY IN EFFECT, WHICH IS THE WHOLE OF WHAT
+		 * THIS PORT CAN ANSWER WITH.
+		 *
+		 * openkal has no operation upon a signal, so nothing here installs
+		 * anything. What a program asks for is therefore either the disposition
+		 * that is already in effect --- in which case saying yes is true --- or
+		 * one that is not, in which case saying yes is the one shape this file
+		 * does not contain. It contained it: `SIG_IGN' was accepted for every
+		 * signal and installed for none, so a program that asked not to be
+		 * ended by the interrupt keystroke was told it had succeeded and was
+		 * ended by it anyway (mcpplibs/openkal-musl#36).
+		 *
+		 * SIGPIPE IS THE ONE SIGNAL WHOSE DISPOSITION IS NOT THE DEFAULT, and
+		 * it is not an accident of a backend. openkal requires a write to a
+		 * stream whose far end is gone to REPORT the condition rather than end
+		 * the program, so an implementation beneath this library has already
+		 * arranged that the signal does nothing. A program asking to ignore it
+		 * is asking for what it already has. */
+		const int signo = (int)a1;
+		const uintptr_t ignored_here = (signo == SIGPIPE);
 		if (a3) {
 			/* handler, flags, restorer, and the mask whose width the caller
 			 * declared in a4. */
@@ -2664,10 +2821,19 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			if (mask > sizeof(sigset_t)) return -EINVAL;
 			char* old = (char*)a3;
 			for (kal_uintptr i = 0; i < sizeof *act + mask; i++) old[i] = 0;
+			/* AND THE ENQUIRY ANSWERS WITH THE DISPOSITION, NOT WITH ZERO.
+			 * A program that asks what SIGPIPE is set to is told SIG_IGN,
+			 * which is what it is; the zeroed structure said SIG_DFL, and a
+			 * program that reads its way to that conclusion acts upon it. */
+			if (ignored_here) {
+				struct { void* handler; unsigned long flags; void* restorer; }* o = (void*)a3;
+				o->handler = (void*)(uintptr_t)1;   /* SIG_IGN */
+			}
 		}
 		if (!act) return 0;
 		const uintptr_t h = (uintptr_t)act->handler;
-		if (h == 0 || h == 1) return 0;      /* SIG_DFL and SIG_IGN */
+		if (h == 0) return ignored_here ? -ENOSYS : 0;   /* SIG_DFL */
+		if (h == 1) return ignored_here ? 0 : -ENOSYS;   /* SIG_IGN */
 		return -ENOSYS;
 	}
 #ifdef SYS_sigaltstack
