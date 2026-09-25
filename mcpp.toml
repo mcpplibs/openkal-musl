@@ -543,14 +543,13 @@ ldflags = ["-nostdlib", "-static", "-Wl,--no-dynamic-linker",
 # anything new about this package.
 #
 # Where that lands relative to a consumer's own `-lm` does not matter.
-# Measured (`clang -###`, both toolchain families this package supports on
-# Linux): the driver collects every `-L` --- a dependency's, in the order
-# its `ldflags` were seen, then whatever host directories it detects because
-# no `--sysroot` is passed yet --- ahead of every `-l` name in the actual
-# invocation it hands to the linker, regardless of where `-l` and `-L`
-# tokens sit in this package's or a consumer's own `ldflags`. This entry is
-# the only explicit `-L` a graph link has today, so it lands first in that
-# list and is consulted, and found, before any host directory: verified
+# Measured (`clang -###`): the driver collects every `-L` --- a dependency's,
+# in the order its `ldflags` were seen, then whatever host directories it
+# detects because no `--sysroot` is passed yet --- ahead of every `-l` name
+# in the actual invocation it hands to the linker, regardless of where `-l`
+# and `-L` tokens sit in this package's or a consumer's own `ldflags`. This
+# entry is the only explicit `-L` a graph link has today, so it lands first
+# in that list and is consulted, and found, before any host directory: verified
 # against both `ld.lld` (its own `--verbose` names the exact file it opened)
 # and GNU `ld` (`--verbose` reports "attempt to open … succeeded" against
 # this path, and no other) for `-lm`, `-lpthread`, `-ldl` and `-lrt` --- the
