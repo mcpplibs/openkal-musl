@@ -1,0 +1,26 @@
+# mcpp-community/mcpp#696, this package's half (see `port/lib` in the
+# manifest one level up).
+#
+# This program exists to be linked, not to exercise anything novel at run
+# time: `-lm`, `-lpthread`, `-ldl` and `-lrt` are the four of the eight names
+# in `port/lib` that a C program is conventionally written to name explicitly,
+# and this is that program. What `.github/workflows/ci.yml` checks about it is
+# not anything it prints --- it is the linker's own account, read from
+# `mcpp build --verbose`, of which file answered each of those four names. A
+# leak to the host answers silently and this program would still build, run
+# and report correctly on x86_64, which is exactly why #696 went unnoticed
+# there; only the linker's own trace tells the two apart.
+[package]
+name    = "link-stubs"
+version = "0.1.0"
+
+[dependencies]
+openkal-musl = { path = "../.." }
+
+[targets.link-stubs]
+kind = "bin"
+main = "src/main.c"
+
+[build]
+cxx_runtime = "host-coupled"
+ldflags = ["-lm", "-lpthread", "-ldl", "-lrt", "-Wl,--verbose"]

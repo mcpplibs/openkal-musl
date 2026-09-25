@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.19.1"
+version     = "0.19.2"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 
@@ -488,9 +488,87 @@ cxx_runtime = "host-coupled"
 # arithmetic musl's own <complex.h> calls.
 [target.'cfg(os = "linux")'.build]
 ldflags = ["-nostdlib", "-static", "-Wl,--no-dynamic-linker",
-           "-Wl,--gc-sections"]
+           "-Wl,--gc-sections", "-Lport/lib"]
 # `-lgcc` was here; it is now named by build.mcpp, and only when the compiler
 # is the one whose runtime has that name. See that file.
+
+# `port/lib` HOLDS THE EIGHT ARCHIVES musl'S OWN `make install` PLACES BESIDE
+# `libc.a`, AND THIS PACKAGE NEVER SHIPPED THEM.
+#
+# musl's Makefile states `EMPTY_LIB_NAMES = m rt pthread crypt util xnet
+# resolv dl` and builds each as `ar rc lib<name>.a` with no member named ---
+# eight bytes, `!<arch>\n`, the ar format's magic string and nothing else,
+# the same eight bytes on every host and every architecture. They exist
+# because libc.a already holds every definition POSIX ascribes to `libm`,
+# `librt`, `libpthread`, `libcrypt`, `libutil`, `libxnet`, `libresolv` and
+# `libdl`: musl is one library that answers eight names, not eight
+# libraries, and a program's `-lm` or `-lpthread` is answered by handing the
+# linker a real, empty archive rather than by there being nothing at that
+# name at all. `port/lib` holds the same eight files, built the same way,
+# because this package never ran musl's `make install` and so never
+# produced them.
+#
+# THE ABSENCE WAS INVISIBLE FOR AS LONG AS THE LINK WAS ALLOWED TO LOOK
+# ELSEWHERE. Before mcpp#696, a link whose C library comes from this package
+# --- a graph dependency, not the host's --- still let clang search the
+# build machine's own library directories: `-nostdlib` above removes the
+# startup files and the default libraries, not the search path. So a
+# program's `-lm` was answered by the HOST's `libm`: silently, by a glibc
+# archive, on x86_64-linux-musl (a glibc `s_fmaximum.o` linked into a musl
+# static image, with no diagnostic); loudly, by a linker script naming the
+# wrong object format (`OUTPUT_FORMAT(elf64-x86-64)`), on
+# aarch64-linux-musl, or by `unable to find library -lm` where the host has
+# no such script. mcpp's own repair (mcpp#696) hands a graph link
+# `--sysroot=<an empty directory>`, which removes every host search
+# directory --- and removes the accidental answer along with it, so `-lm`
+# becomes `unable to find library -lm` on every target unless the graph
+# answers it. This package is the graph's C library, so it must.
+#
+# WHY AN EMPTY ARCHIVE, RATHER THAN TELLING A CONSUMER TO DROP THE FLAG.
+# `-lm` on a POSIX system is not a mistake to edit away --- every portable
+# build recipe in existence writes it, and it must keep meaning what it has
+# always meant: a request the linker satisfies by opening a real file. An
+# empty archive lets it do exactly that. The linker opens
+# `port/lib/libm.a`, finds no member the link needs (because nothing outside
+# libc.a defines one), and moves on --- which is the truthful outcome,
+# rather than a special case in this package or in a consumer's manifest
+# that makes the flag disappear before the linker ever sees it.
+#
+# WHY THIS NEEDS NO ENGINE CHANGE. mcpp already resolves a relative `-L` in
+# a dependency's own `[build] ldflags` against that dependency's root
+# directory and forwards the resolved, absolute path to the consumer's link
+# line (the `normalizeDepLdflag` / `propagateLinkFlags` lambdas,
+# `src/build/prepare.cppm`). So `-Lport/lib` above reaches a consumer as
+# `-L<this package's checkout>/port/lib`, without mcpp needing to know
+# anything new about this package.
+#
+# Where that lands relative to a consumer's own `-lm` does not matter.
+# Measured (`clang -###`, both toolchain families this package supports on
+# Linux): the driver collects every `-L` --- a dependency's, in the order
+# its `ldflags` were seen, then whatever host directories it detects because
+# no `--sysroot` is passed yet --- ahead of every `-l` name in the actual
+# invocation it hands to the linker, regardless of where `-l` and `-L`
+# tokens sit in this package's or a consumer's own `ldflags`. This entry is
+# the only explicit `-L` a graph link has today, so it lands first in that
+# list and is consulted, and found, before any host directory: verified
+# against both `ld.lld` (its own `--verbose` names the exact file it opened)
+# and GNU `ld` (`--verbose` reports "attempt to open … succeeded" against
+# this path, and no other) for `-lm`, `-lpthread`, `-ldl` and `-lrt` --- the
+# four names `examples/link-stubs` links and this repository's own CI
+# checks; the search this package's `-L` wins is the same one for the other
+# four, which nothing here links explicitly. Once mcpp#696's sysroot lands,
+# no host directory is searched at all, and this is the only `-L` a graph
+# link has left for these eight names. Either way, nothing else on the
+# command line contends with it.
+#
+# WHY ONLY THIS TARGET, FOR NOW. musl's own interface makes libc the answer
+# to all eight names on every target this package supports, and nothing
+# about that is specific to Linux. This `-L` is added here because this is
+# the target mcpp#696 measured and the one this repository's own CI asserts
+# against (see .github/workflows/ci.yml). Extending it to `cfg(windows)`
+# and `cfg(os = "macos")` is very likely correct and is left for whoever
+# next measures a graph link there, rather than asserted from the reasoning
+# alone.
 
 # The link line on this system.
 #
