@@ -603,6 +603,73 @@ jobs:
           [ "$bad" = 0 ] || exit 1
           echo "  ok  the internal overlay stops here; the public headers do not"
 
+      # mcpp-community/mcpp#696: A LINK OVER A GRAPH-SUPPLIED C LIBRARY MUST
+      # NOT LET THE HOST ANSWER A NAME THE GRAPH DID NOT.
+      #
+      # `examples/link-stubs` links `-lm`, `-lpthread`, `-ldl` and `-lrt`
+      # explicitly and calls one function through each, and every one of the
+      # four is already defined by musl's own objects, which are on this
+      # program's link line without any of the four. So a correct RUN of the
+      # program is not the evidence a leak was closed: a leak to the host
+      # answers `-lm` silently and the program still builds, runs and reports
+      # correctly, which is exactly why #696 went unnoticed on x86_64 until
+      # something called a symbol only the host's archive had. The evidence
+      # this step reads is the linker's own account of which file answered
+      # each of the four names, and `mcpp build` shows that only with
+      # `--verbose`: a command that succeeds is otherwise reported by mcpp's
+      # own summary line, not by what the command itself printed.
+      #
+      # THIS HOLDS BEFORE AND AFTER mcpp#696's OWN ENGINE FIX. Today, with no
+      # `--sysroot` yet on a graph link, this package's `-L` (mcpp.toml,
+      # beside `port/lib`) precedes the host directories clang and gcc both
+      # still add on this row, so it is what answers all four names first;
+      # once that fix removes those directories from a graph link entirely,
+      # this package's `-L` is the only one left. Either way, the file that
+      # answers each of the four names is this package's own archive, never a
+      # path under `/usr` or `/lib`.
+      - name: The C library answers its own link names, not the host's
+        if: runner.os == 'Linux' && matrix.target == ''
+        working-directory: examples/link-stubs
+        run: |
+          set -euo pipefail
+          pkgroot="$(cd ../.. && pwd)"
+          mcpp build --toolchain '${{ matrix.toolchain }}' --verbose > build.log 2>&1 \
+            || { echo "::error::the build itself failed"; cat build.log; exit 1; }
+
+          bad=0
+          for name in m pthread dl rt; do
+            hits=$(grep -c -- "lib${name}\.a" build.log || true)
+            if [ "$hits" = 0 ]; then
+              echo "::error::-l$name left no trace in the linker's own output — nothing was checked"
+              bad=1
+              continue
+            fi
+            # EVERY line naming this archive, not only the last, so a linker
+            # that logs a failed attempt before a successful one (GNU ld's
+            # own `--verbose` does exactly this) cannot hide a host attempt
+            # behind the eventual, correct answer.
+            others=$(grep -- "lib${name}\.a" build.log \
+                       | grep -v -F -- "$pkgroot/port/lib/lib${name}.a" || true)
+            if [ -n "$others" ]; then
+              echo "::error::-l$name was answered by something other than this package's own archive:"
+              echo "$others" | sed 's/^/        /'
+              bad=1
+            fi
+          done
+          if [ "$bad" != 0 ]; then
+            echo "the full linker trace:"; cat build.log; exit 1
+          fi
+          echo "  ok  -lm -lpthread -ldl -lrt each resolved to $pkgroot/port/lib," \
+               "and nowhere under /usr or /lib"
+
+      # THE SAME FOUR NAMES, RUN RATHER THAN READ. `-lm`, `-lpthread`, `-ldl`
+      # and `-lrt` resolving to an empty archive is only half of "honest": an
+      # empty archive that broke the four calls examples/link-stubs makes
+      # would be answering these names dishonestly in the other direction.
+      - name: The four archives are empty and still correct
+        if: runner.os == 'Linux'
+        run: bash tools/run-probe.sh examples/link-stubs link-stubs
+
       # A program above this package names one package. It does not name
       # openkal, it does not name an implementation, and it says nothing about
       # the platform.
