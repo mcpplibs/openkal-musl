@@ -487,7 +487,17 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 				 * value that looks like one means the opposite. Accepting it and
 				 * doing nothing would hand a program the standard input its
 				 * caller had just taken away, which is the failure a caller
-				 * cannot see and cannot act upon. */
+				 * cannot see and cannot act upon.
+				 *
+				 * Above position two the answer rests on openkal clause 7.13,
+				 * which requires it of every implementation since 0.14.1: a
+				 * started program receives the three streams and the directories
+				 * granted, and no other handle, including one this program itself
+				 * inherited. openkal-linux before 0.15.1 conveyed one such handle,
+				 * for the directory the program was found in, and nothing here
+				 * could close it. The one exception the clause permits, a handle
+				 * for the program itself left to a `#!' script's interpreter, is
+				 * not one a caller could name either. */
 				if (op->fd > 2) break;
 				refused = ENOSYS;
 				break;
