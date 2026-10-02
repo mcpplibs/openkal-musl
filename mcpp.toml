@@ -117,6 +117,7 @@ fchmodat  = { form = "enosys", note = "as chmod" }
 chown     = { form = "enosys", note = "a capability-oriented environment has no principal for an owner to name" }
 fchown    = { form = "enosys", note = "as chown" }
 lchown    = { form = "enosys", note = "as chown" }
+pthread_getattr_np = { form = "enosys", note = "openkal reports no bounds for the stack a context runs on" }
 
 # The call succeeds and part of what it asked for is not done. Each of these
 # is a place where refusing would be worse than the partial answer, and the
@@ -257,6 +258,8 @@ sources = [
   # before the calls that end a detached thread, and this port's path for those
   # calls needs far more --- it overwrote the context table on macOS.
   "!musl/src/thread/__unmapself.c",
+  # Replaced in port/src/okm_thread.c: its main-thread branch reads the initial stack from the auxiliary vector.
+  "!musl/src/thread/pthread_getattr_np.c",
   "!musl/src/process/posix_spawn.c",
   # AND ITS SIBLING, WHICH IS EXCLUDED BECAUSE THE ONE ABOVE IS.
   # musl's posix_spawnp does not search a PATH: it stores `__execvpe' in the

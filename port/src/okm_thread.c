@@ -25,6 +25,7 @@
 #include "okm_opt.h"
 
 #include <errno.h>
+#include <pthread.h>
 #include <setjmp.h>
 #include <stdint.h>
 #include <string.h>
@@ -182,6 +183,13 @@ void __unmapself(void* base, size_t size)
 {
 	__syscall(SYS_munmap, base, size);
 	__syscall(SYS_exit, 0);
+}
+
+/* openkal reports no bounds for the stack a context runs on. */
+int pthread_getattr_np(pthread_t t, pthread_attr_t* a)
+{
+	(void)t; (void)a;
+	return ENOSYS;
 }
 
 /* --- the suspension primitive ------------------------------------------------ */
