@@ -36,3 +36,10 @@ build.log
 # sources. No trailing slash: the pattern must match a symbolic link as well.
 .spec
 .impl
+
+# What a review of a change leaves behind. A review is a reading of one
+# proposal at one moment, by one reviewer; it is not a fact about the package,
+# and the proposal it describes is not in this tree. The notes under
+# `.agents/docs/` are kept because they state design decisions this repository
+# stands behind; these are not.
+.agents/docs/reviews/

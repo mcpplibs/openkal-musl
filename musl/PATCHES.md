@@ -164,20 +164,31 @@ table, so the exiting thread read its own record out of the bytes it had just
 written and jumped through them. `port/src/okm_thread.c` releases the mapping
 from the stack the thread is on; `examples/threads-detached` is the probe.
 
-`src/thread/pthread_getattr_np.c` answers a question openkal does not carry, and
-what it answered here was **wrong rather than absent**. For a context it started
-it reports the mapping `pthread_create` allocated, which `__clone` ignores — the
-context runs on the stack `kal_task_start` supplied. For the first context it
-begins at `libc.auxv`, which this port points at a static array, and finds the
-bottom by growing a mapping with `mremap`, which the dispatcher refuses with
-`ENOSYS`: so it returned a page of the program's own data, as the top of the
+`src/thread/pthread_getattr_np.c` answers a question openkal did not carry until
+0.15, and what it answered here was **wrong rather than absent**. For a context
+it started it reports the mapping `pthread_create` allocated, which `__clone`
+ignores — the context runs on the stack `kal_task_start` supplied. For the first
+context it begins at `libc.auxv`, which this port points at a static array, and
+finds the bottom by growing a mapping with `mremap`, which the dispatcher refuses
+with `ENOSYS`: so it returned a page of the program's own data, as the top of the
 stack, with a status of **success**. A caller that walked to the boundary it was
 given walked off the stack it was on — WebAssembly Micro Runtime 2.4.5 did, and
-died with `SIGSEGV` inside `wasm_runtime_init`. `port/src/okm_thread.c` returns
-`ENOSYS` instead, which is both the truth and what this port already answers for
-`getrlimit(RLIMIT_STACK)`; `examples/stack-bounds` asserts it for the first
-context and for a started one, and the row in the README's absent table states
-what a program observes.
+died with `SIGSEGV` inside `wasm_runtime_init`.
+
+**What replaced it changed once, and the change is the point of this entry.**
+0.19.3 answered `ENOSYS` for every thread, which was honest and was not an
+answer. openkal 0.15 states where a running context stands (`kal_task_stack`,
+clause 11 entry 21), so `port/src/okm_thread.c` now answers for the **calling**
+thread from that region — the one the context is actually on, not the mapping
+`pthread_create` allocated — and refuses with `ENOSYS` for any other thread,
+uniformly and never with a range. The refusal is not a gap left by this port: a
+context can only be asked about itself, because openkal's handles are meaningful
+only to the party that obtained them, and there is no handle to a context at all.
+
+`examples/stack-bounds` asserts containment — the region contains a local of the
+context that asked, for the first context and for a started one — and asserts
+the refusal for another thread. Musl's own source stays excluded: both of its
+branches remain wrong here, and restoring it would require correcting it.
 
 `src/mman/mmap.c` returns a pointer through a `long`. It is replaced rather than
 patched because the replacement is also better where a `long` does hold a

@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.19.3"
+version     = "0.20.0"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 
@@ -117,7 +117,23 @@ fchmodat  = { form = "enosys", note = "as chmod" }
 chown     = { form = "enosys", note = "a capability-oriented environment has no principal for an owner to name" }
 fchown    = { form = "enosys", note = "as chown" }
 lchown    = { form = "enosys", note = "as chown" }
-pthread_getattr_np = { form = "enosys", note = "openkal reports no bounds for the stack a context runs on" }
+# WITHDRAWN IN 0.20.0, AND THIS IS WHERE ITS ROW WAS: `pthread_getattr_np'.
+#
+# 0.19.3 declared the name `enosys', because musl's own answer described a range
+# that was not the stack --- a page of this port's static auxiliary vector for
+# the first context, and a mapping no context runs on for a started one --- and a
+# refusal was the only honest answer then available.
+#
+# openkal 0.15 lets a context say where it stands, so the port now ANSWERS for
+# the calling thread with the region it is actually on, and refuses for any other
+# thread rather than describing one it cannot see. No single form describes the
+# call as a whole: `enosys' would be false of the common spelling,
+# `accepted-no-effect' false of the general case, and `link' false of both.
+#
+# THE ASSERTION MOVED TO THE EXAMPLE THAT READS IT rather than being dropped:
+# examples/stack-bounds checks the reported region against the caller's own
+# stack, checks that a started context is told its own, and checks that another
+# thread is refused.
 
 # The call succeeds and part of what it asked for is not done. Each of these
 # is a place where refusing would be worse than the partial answer, and the
@@ -147,7 +163,7 @@ pthread_getattr_np = { form = "enosys", note = "openkal reports no bounds for th
 tcsetattr = { form = "accepted-no-effect", note = "openkal names three positions of the terminal mode word; a request that alters output post-processing, the line speed, the control characters or VMIN/VTIME is accepted and that part has no effect" }
 
 [dependencies]
-openkal = "0.14.1"
+openkal = "0.15.0"
 
 # An ordinary consumer of openkal declares the specification and leaves the
 # choice of implementation to whoever builds the program, which is what the
@@ -162,7 +178,7 @@ openkal = "0.14.1"
 #
 # The consequence for a program is that it names this package and nothing else.
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = { version = "0.15.1", features = ["standalone"] }
+openkal-linux = { version = "0.16.0", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
 # 0.12.0 is the first release of this implementation that declares which
@@ -172,7 +188,7 @@ openkal-linux = { version = "0.15.1", features = ["standalone"] }
 # is the shape of a check that silently does not run --- while the same
 # consumer was answered on Linux and Windows, whose implementations have
 # carried the array since openkal-linux 0.15.0 and openkal-windows 0.10.0.
-openkal-macos = { version = "0.12.1", features = ["standalone"] }
+openkal-macos = { version = "0.13.0", features = ["standalone"] }
 
 # FIRST STEP TOWARD A BARE MACHINE, AND NOT THE WHOLE OF IT.
 #
@@ -183,7 +199,7 @@ openkal-macos = { version = "0.12.1", features = ["standalone"] }
 # runtime that receives control, and a C library configured for an environment
 # with no process to exit from. So this declares the implementation and stops.
 [target.'cfg(os = "none")'.dependencies]
-openkal-opensbi = { version = "0.8.1", features = ["standalone"] }
+openkal-opensbi = { version = "0.8.2", features = ["standalone"] }
 
 # WHICH OPENKAL INTERFACES THE IMPLEMENTATION BENEATH IS EXPECTED TO PROVIDE.
 #
@@ -208,7 +224,7 @@ openkal-opensbi = { version = "0.8.1", features = ["standalone"] }
 defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
 
 [target.'cfg(windows)'.dependencies]
-openkal-windows = { version = "0.10.2", features = ["standalone"] }
+openkal-windows = { version = "0.11.0", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #
