@@ -31,6 +31,7 @@
 #include <string.h>
 #include <time.h>
 #include "futex.h"
+#include "pthread_impl.h"
 #include "syscall.h"
 
 void      __okm_set_tp(uintptr_t value);
@@ -185,33 +186,56 @@ void __unmapself(void* base, size_t size)
 	__syscall(SYS_exit, 0);
 }
 
-/* openkal reports no bounds for the stack a context runs on.
+/* The region a context runs on, and the one question musl asks about it.
  *
- * musl answers this from two places, and neither is true here. For a context it
- * started it reports the mapping `pthread_create' allocated --- which `__clone'
- * above ignores, so the context runs on the stack `kal_task_start' supplied. For
- * the first context it derives the top of the stack from `libc.auxv', which this
- * port points at a static array (`port/src/okm_start.c'), and finds the bottom by
- * growing a mapping with `mremap' --- which the dispatcher refuses with `ENOSYS'
- * (`port/src/okm_syscall.c'). What it returned was therefore a range inside the
- * program's own data, reported as a success: a caller that walked to the boundary
- * it was given walked off the stack it was on.
+ * MUSL'S OWN ANSWER IS WRONG HERE IN TWO DIRECTIONS, which is why the source is
+ * excluded and this is written instead. For a context it started, musl reports
+ * the mapping `pthread_create' allocated --- and `__clone' above ignores that
+ * mapping, because kal_task_start supplies the stack, so the range it names is
+ * one the context never runs on. For the first context it derives a top from
+ * `libc.auxv', which this port points at a static array, and computes a bottom
+ * by growing a mapping with `mremap', which the dispatcher refuses: what it
+ * reported was a range inside the program's own data, as a success. A caller
+ * that walked to the boundary it was given walked off the stack it was on.
  *
- * ⇒ The refusal is the answer, and the form a caller reads it in is `ENOSYS',
- * which is what `getrlimit(RLIMIT_STACK)' already answers here. Nothing is
- * written to `*a': the enquiry has failed, and an attribute filled in anyway
- * would be the same wrong range with a lighter warning. It is not zeroed either,
- * because zero is a value this structure can legitimately hold, and a caller that
- * ignored the return would then read "no stack recorded" rather than "this call
- * did not answer".
+ * SO THE ANSWER COMES FROM openkal, WHICH MEASURES THE MAPPING THE CONTEXT IS
+ * ACTUALLY ON (openkal 0.15, `kal_task_stack'), AND IT IS ANSWERED FOR THE
+ * CALLING THREAD ONLY. A context that is running can say where it stands; a
+ * thread this port was not asked about cannot be asked at all, because openkal
+ * has no operation that takes a context and the record of one is not this
+ * port's to keep. `ENOSYS' is the answer there --- the same shape the absence
+ * of the capability had before --- and never a range: a caller that reads the
+ * return is told the truth, and a caller that does not is handed nothing.
  *
- * When openkal offers a way to learn the stack of the calling context, this
- * function reports those bounds instead and musl's own source returns to the
- * build. */
+ * WHAT IS WRITTEN AND WHAT IS NOT. On success the attribute is zeroed and three
+ * fields are filled, in the arrangement musl reads: the stack ADDRESS is the
+ * high end and the size is the distance down from it, which is what
+ * `pthread_attr_getstack' subtracts to answer POSIX's lowest usable address.
+ * The guard size is zero because the region openkal reports has no guard inside
+ * it --- musl's guard belongs to the mapping it allocated and nothing runs
+ * there. On failure nothing is written at all, not even zeroed: zero is a value
+ * this structure can legitimately hold, and a caller that ignored the return
+ * would read "no stack recorded" rather than "this call did not answer".
+ *
+ * WHEN THIS PORT RUNS ON AN IMPLEMENTATION THAT CANNOT MEASURE, THE ENQUIRY
+ * FAILS AND THIS REPORTS `ENOSYS' --- which is the honest answer and is what
+ * `getrlimit(RLIMIT_STACK)' answers here as well. */
 int pthread_getattr_np(pthread_t t, pthread_attr_t* a)
 {
-	(void)t; (void)a;
-	return ENOSYS;
+	if (a == 0) return EINVAL;
+	if (t != __pthread_self()) return ENOSYS;
+
+	void* base = 0;
+	kal_uintptr size = 0;
+	if (kal_task_stack(&base, &size) != kal_ok) return ENOSYS;
+	if (base == 0 || size == 0) return ENOSYS;
+
+	*a = (pthread_attr_t){0};
+	a->_a_detach = __pthread_self()->detach_state >= DT_DETACHED;
+	a->_a_guardsize = 0;
+	a->_a_stackaddr = (uintptr_t)base + size;
+	a->_a_stacksize = size;
+	return 0;
 }
 
 /* --- the suspension primitive ------------------------------------------------ */
