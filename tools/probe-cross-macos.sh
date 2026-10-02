@@ -95,8 +95,11 @@ cd "$here"
 # Which is the whole reason this list carries the warning it does: it is a
 # SECOND statement of what mcpp.toml already states, and a second statement is
 # a thing that falls behind the first. It fell behind on the release that added
-# the tenth entry, and it is this job that said so.
-skip='__libc_start_main|__init_tls|__set_thread_area|__unmapself|clone|posix_spawn|posix_spawnp|mmap|syscall_ret|getcwd|fcntl|dl_iterate_phdr|okm_phdr|cache'
+# the tenth entry, and it is this job that said so --- and again on
+# `pthread_getattr_np', with the same line in the log and that name in it. A
+# reader who adds an exclusion to mcpp.toml adds the basename here in the same
+# commit; the compiler below globs the directory, so nothing else will tell them.
+skip='__libc_start_main|__init_tls|__set_thread_area|__unmapself|clone|pthread_getattr_np|posix_spawn|posix_spawnp|mmap|syscall_ret|getcwd|fcntl|dl_iterate_phdr|okm_phdr|cache'
 units=0
 for f in musl/src/*/*.c musl/src/malloc/mallocng/*.c port/src/*.c port/src/*.S; do
     base=$(basename "$f"); base=${base%.*}
