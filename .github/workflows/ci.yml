@@ -780,12 +780,26 @@ jobs:
           bash tools/run-probe.sh examples/threads-detached threads-detached
           grep -q 'detached: 8 started, 8 ended' examples/threads-detached/run.log
 
-      - name: pthread_getattr_np reports that it cannot say
+      # AN ANSWER THAT IS REFUSED, WHICH IS NOT THE SAME AS AN ANSWER THAT IS
+      # ABSENT. musl's `pthread_getattr_np` derived a stack range from the
+      # auxiliary vector and from a thread's mapping; here the one is a static
+      # array and the other is a mapping no context runs on, so it described a
+      # range inside the program's own data and reported success. The port
+      # refuses it the way it already refuses `getrlimit(RLIMIT_STACK)`, and the
+      # probe walks to the boundary it is given, which is what an embedder does.
+      # musl/PATCHES.md, `src/thread/pthread_getattr_np.c`.
+      #
+      # THE ASSERTION NAMES THE REFUSAL AND NOT ITS NUMBER. `ENOSYS` is 38 on
+      # Linux and 78 on Darwin, and this step runs on both rows; a literal here
+      # would be a criterion that could only hold on one of them. The program
+      # compares against the symbol, and tools/run-probe.sh already holds both
+      # readings --- the count of failures, and that no line reports one.
+      - name: A stack's bounds are refused rather than invented
         env:
           MCPP_TARGET: ${{ matrix.target }}
         run: |
           bash tools/run-probe.sh examples/stack-bounds stack-bounds
-          grep -q 'stack bounds: first 38, started 38' examples/stack-bounds/run.log
+          grep -q -- '-- failures: 0 --' examples/stack-bounds/run.log
 
       # A LARGE ALLOCATION IS A MAPPING, AND A MAPPING IS WHOLE PAGES.
       #

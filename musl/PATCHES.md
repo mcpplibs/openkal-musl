@@ -130,7 +130,8 @@ carry it in a `long`.
 Twelve, and the list in the manifest carries the same reasons. Five read the shape
 of one environment directly. Two carry a machine word through a variable
 declared `long`. Three more were found only by running the result. And one is
-replaced because another already was:
+replaced because another already was. **The exclusions this port added later are
+in that list too; read it for what is replaced, and this section for why.**
 
 `src/process/posix_spawnp.c` does not search a PATH. It stores `__execvpe` in
 the attributes and lets `posix_spawn` call it **in the duplicate** instead of
@@ -162,6 +163,21 @@ arm64 macOS that is the table of thread-specific keys and then the context
 table, so the exiting thread read its own record out of the bytes it had just
 written and jumped through them. `port/src/okm_thread.c` releases the mapping
 from the stack the thread is on; `examples/threads-detached` is the probe.
+
+`src/thread/pthread_getattr_np.c` answers a question openkal does not carry, and
+what it answered here was **wrong rather than absent**. For a context it started
+it reports the mapping `pthread_create` allocated, which `__clone` ignores — the
+context runs on the stack `kal_task_start` supplied. For the first context it
+begins at `libc.auxv`, which this port points at a static array, and finds the
+bottom by growing a mapping with `mremap`, which the dispatcher refuses with
+`ENOSYS`: so it returned a page of the program's own data, as the top of the
+stack, with a status of **success**. A caller that walked to the boundary it was
+given walked off the stack it was on — WebAssembly Micro Runtime 2.4.5 did, and
+died with `SIGSEGV` inside `wasm_runtime_init`. `port/src/okm_thread.c` returns
+`ENOSYS` instead, which is both the truth and what this port already answers for
+`getrlimit(RLIMIT_STACK)`; `examples/stack-bounds` asserts it for the first
+context and for a started one, and the row in the README's absent table states
+what a program observes.
 
 `src/mman/mmap.c` returns a pointer through a `long`. It is replaced rather than
 patched because the replacement is also better where a `long` does hold a
