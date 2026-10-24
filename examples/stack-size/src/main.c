@@ -21,8 +21,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+extern char** environ;
 
 static int failures = 0;
 
@@ -77,22 +80,35 @@ static long resident_kib(void) {
     return kib;
 }
 
+/* Run in a program of its own, which this one starts: the read is meant to end
+ * the program it is made in. What it prints says what it was about to read,
+ * so a read that does not fault is a fact with an address rather than a bare
+ * failure. */
 static void* touch_below(void* unused) {
     (void)unused;
     pthread_attr_t a; void* base = 0; size_t size = 0;
-    if (pthread_getattr_np(pthread_self(), &a) == 0) {
+    const int e = pthread_getattr_np(pthread_self(), &a);
+    if (e == 0) {
         pthread_attr_getstack(&a, &base, &size);
         pthread_attr_destroy(&a);
     }
-    if (base) {
-        volatile char c = *((volatile char*)base - 1);
-        (void)c;
-    }
+    char here = 0;
+    printf("touch: getattr=%d base=%p size=%zu local=%p reading %p\n",
+           e, base, size, (void*)&here, base ? (void*)((char*)base - 1) : (void*)0);
+    if (!base) { printf("touch: no region to read below\n"); exit(2); }
+    volatile char c = *((volatile char*)base - 1);
+    (void)c;
+    printf("touch: the read returned\n");
     return 0;
 }
 
-int main(void) {
+int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
+    if (argc > 1 && strcmp(argv[1], "touch-below") == 0) {
+        pthread_t t;
+        if (pthread_create(&t, 0, touch_below, 0) == 0) pthread_join(t, 0);
+        return 0;
+    }
     struct probe q;
 
     int rc = run(4u << 20, 3 * 1024, &q);
@@ -124,18 +140,15 @@ int main(void) {
         check(rc == EINVAL, "a stack the caller supplies is refused");
     }
 
-    const pid_t child = fork();
-    if (child == 0) {
-        pthread_t t;
-        if (pthread_create(&t, 0, touch_below, 0) == 0) pthread_join(t, 0);
-        _exit(0);
-    }
+    char* const args[] = { argv[0], "touch-below", 0 };
+    pid_t child = -1;
     int status = 0;
-    if (child > 0 && waitpid(child, &status, 0) == child) {
+    if (posix_spawn(&child, argv[0], 0, 0, args, environ) == 0 && waitpid(child, &status, 0) == child) {
         printf("guard: exited=%d status=%d\n", WIFEXITED(status), WIFEXITED(status) ? WEXITSTATUS(status) : -1);
         check(!(WIFEXITED(status) && WEXITSTATUS(status) == 0), "a read below a thread's stack does not succeed");
+        check(!(WIFEXITED(status) && WEXITSTATUS(status) == 2), "the thread was told a region to read below");
     } else {
-        printf("  not observed  the program could not be duplicated\n");
+        printf("  not observed  the program could not be started again\n");
     }
 
     printf("-- failures: %d --\n", failures);
