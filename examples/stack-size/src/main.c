@@ -151,19 +151,6 @@ int main(int argc, char** argv) {
         printf("  not observed  the program could not be started again\n");
     }
 
-    /* DIAGNOSTIC, NOT ASSERTED: the same read in a program duplicated by fork,
-     * which on one system was seen to return. */
-    const pid_t dup = fork();
-    if (dup == 0) {
-        pthread_t t;
-        const int crc = pthread_create(&t, 0, touch_below, 0);
-        printf("diagnostic fork: pthread_create in the copy rc=%d\n", crc);
-        if (crc == 0) pthread_join(t, 0);
-        _exit(0);
-    }
-    if (dup > 0 && waitpid(dup, &status, 0) == dup)
-        printf("diagnostic fork: exited=%d status=%d\n", WIFEXITED(status), WIFEXITED(status) ? WEXITSTATUS(status) : -1);
-
     printf("-- failures: %d --\n", failures);
     return failures != 0;
 }
