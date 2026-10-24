@@ -7,15 +7,21 @@
  * to begin with the thread pointer it was given. openkal offers
  * kal_task_start, which supplies a whole execution context: the stack is the
  * implementation's, and so is whatever register names the context. The two
- * cannot express each other, and the specification says why --- an environment
- * that does not allocate stacks separately cannot honour a request for one.
+ * cannot express each other where the stack is concerned: an environment that
+ * allocates a context's stack itself cannot run it on a region it did not
+ * allocate. What openkal 0.16 does carry is the SIZE, as a least size
+ * (`kal_task_start_sized'), and that is what is passed on.
  *
- * musl anticipates this. `src/thread/clone.c' is a generic stub returning
+ * musl anticipates the rest. `src/thread/clone.c' is a generic stub returning
  * -ENOSYS, present so that a target without `clone' can be built. This file
- * replaces that stub with an implementation upon kal_task_start rather than
- * altering pthread_create, so the only thing musl loses is the ability to
- * choose the stack --- and the stack it would have chosen is unused rather
- * than absent, which costs memory and no correctness.
+ * replaces that stub with an implementation upon openkal.task. `pthread_create'
+ * is changed in five lines (musl/PATCHES.md): it maps the thread's own storage
+ * and no stack, it records the size asked for where this file reads it, and it
+ * refuses a stack the caller supplies, because running the thread somewhere
+ * else and reporting success would hand a program that scans its own region a
+ * region the thread never stood on. The stack it used to map was never used
+ * and was committed in full when it was mapped --- a thread asked to have 1 GiB
+ * raised the resident size by 1 GiB (mcpplibs/openkal-musl#48).
  *
  * What the caller does still get is the thread pointer it asked for: the
  * created context assigns it to __okm_tp before running anything, which is
@@ -134,7 +140,19 @@ int __clone(int (*fn)(void*), void* stack, int flags, void* arg, ...)
 	okm_unlock();
 	if (ptid) *ptid = t->tid;
 
-	if (okm_task_start(entry, t, &t->task) != kal_ok) {
+	/* THE SIZE THE PROGRAM ASKED FOR, WHICH IS HONOURED NOW (openkal 0.16).
+	 * `pthread_create' records it in the thread's own structure and no longer
+	 * maps a stack for it (musl/PATCHES.md), and the structure is the one the
+	 * thread pointer names --- TP_ADJ is how musl derived the second from the
+	 * first, and this is that step undone. The implementation gives at least
+	 * the size and never less than its own default, so musl's own default of
+	 * 128 KiB does not shrink what a thread had. */
+#ifdef TLS_ABOVE_TP
+	const struct pthread* p = (const void*)((char*)tls - sizeof(struct pthread) - TP_OFFSET);
+#else
+	const struct pthread* p = tls;
+#endif
+	if (okm_task_start_sized(entry, t, p ? p->stack_size : 0, &t->task) != kal_ok) {
 		kal_free(t, sizeof *t, _Alignof(struct okm_thread));
 		return -EAGAIN;
 	}

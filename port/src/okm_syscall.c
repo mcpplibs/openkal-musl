@@ -144,7 +144,7 @@ static syscall_arg_t do_write(int fd, const void* buf, size_t len)
 	return n < 0 ? -okm_errno((int)-n) : (syscall_arg_t)n;
 }
 
-static syscall_arg_t do_read(int fd, void* buf, size_t len)
+static syscall_arg_t do_read_stream(int fd, void* buf, size_t len)
 {
 	kal_uintptr s;
 	const syscall_arg_t r = stream_of(fd, &s);
@@ -195,6 +195,38 @@ static syscall_arg_t do_read(int fd, void* buf, size_t len)
 	struct kal_stream st; st.h = s;
 	const kal_intptr n = kal_stream_read(st, buf, len);
 	return n < 0 ? -okm_errno((int)-n) : (syscall_arg_t)n;
+}
+
+/* WHAT THIS LAYER DOES TO WHAT IS TYPED, WHERE IT TOOK THE TASK OVER.
+ *
+ * `tcsetattr' in raw mode without echo, with ICRNL (or ISTRIP) asked for, asks
+ * the environment for unaltered input and performs the alteration here
+ * (`okm_termios_set'). The reason is that the environments beneath alter input
+ * differently when left to it: two rewrite the return key into a line feed, and
+ * the third delivers the return key unchanged and consumes Ctrl+J. Asked for
+ * nothing, all three deliver 0x0d and 0x0a, so performing the one rewriting the
+ * program asked for here gives it the same bytes on every system. Without echo
+ * nothing shows which layer did it.
+ *
+ * It is the terminal's, not a descriptor's: a program sets the mode through
+ * one standard stream and reads through another, and both are the same
+ * terminal. It applies to reads of a standard stream that is interactive. */
+static tcflag_t g_term_alter;
+
+static syscall_arg_t do_read(int fd, void* buf, size_t len)
+{
+	const syscall_arg_t r = do_read_stream(fd, buf, len);
+	if (r <= 0 || !g_term_alter) return r;
+	struct okm_desc* d = okm_desc_of(fd);
+	if (!d || d->kind != OKM_STREAM) return r;
+	struct kal_stream st; st.h = d->stream;
+	if (!(kal_stream_props(st) & KAL_STREAM_PROP_INTERACTIVE)) return r;
+	unsigned char* b = buf;
+	for (syscall_arg_t i = 0; i < r; i++) {
+		if (g_term_alter & ISTRIP) b[i] &= 0x7f;
+		if ((g_term_alter & ICRNL) && b[i] == '\r') b[i] = '\n';
+	}
+	return r;
 }
 
 /* --- opening --------------------------------------------------------------- */
@@ -575,7 +607,15 @@ static int okm_termios_get(struct kal_stream s, struct termios* t)
 	if (e != kal_ok) return -okm_errno(e);
 
 	struct termios out = { 0 };
-	out.c_iflag = ICRNL;
+	/* ICRNL IS WHAT IS IN EFFECT, which openkal 0.16 states as a position:
+	 * KAL_TERM_PASS_INPUT set means the environment alters nothing typed, and
+	 * clear means it may --- which, for every environment this port runs on,
+	 * includes the return key. What this layer performs itself
+	 * (`g_term_alter') is in effect as well. An environment that predates the
+	 * position reads it as clear, and ICRNL is then reported set, which is true
+	 * of it (mcpplibs/openkal#48). */
+	if (!(mode & KAL_TERM_PASS_INPUT)) out.c_iflag = ICRNL;
+	out.c_iflag |= g_term_alter;
 	out.c_oflag = OPOST | ONLCR;
 	out.c_cflag = CREAD | CS8 | B38400;
 	if (mode & KAL_TERM_LINE_EDIT) out.c_lflag |= ICANON | ECHOE | ECHOK;
@@ -623,8 +663,30 @@ static int okm_termios_set(struct kal_stream s, const struct termios* t)
 	if (t->c_lflag & ICANON) mode |= KAL_TERM_LINE_EDIT;
 	if (t->c_lflag & ECHO)   mode |= KAL_TERM_ECHO;
 	if (!(t->c_lflag & ISIG)) mode |= KAL_TERM_PASS_CONTROL;
+	/* THE FOUR INPUT FLAGS ARE ONE POSITION, KAL_TERM_PASS_INPUT (openkal
+	 * 0.16), and it is asked for where the program cleared all four --- which
+	 * `cfmakeraw' does, and which leaves the return key and Ctrl+J two
+	 * different bytes, the pair mcpplibs/openkal#48 could not tell apart.
+	 *
+	 * In raw mode without echo it is asked for as well where the program kept
+	 * ICRNL or ISTRIP, and this layer performs those (`g_term_alter'), because
+	 * the environments beneath alter input differently and deliver the same
+	 * bytes only when asked for none. INLCR and IGNCR are left to the
+	 * environment: the first is not one any environment here applies, and the
+	 * second removes bytes, which a read that may then have nothing to report
+	 * cannot do without waiting again. */
+	const tcflag_t want = t->c_iflag & (ICRNL | INLCR | IGNCR | ISTRIP);
+	const int take = want && !(t->c_lflag & (ICANON | ECHO)) && !(want & (INLCR | IGNCR));
+	if (!want || take) mode |= KAL_TERM_PASS_INPUT;
 	const int e = kal_terminal_set_mode(s, mode);
-	return e == kal_ok ? 0 : -okm_errno(e);
+	if (e != kal_ok) return -okm_errno(e);
+	/* What the environment did is read back: an environment that predates the
+	 * position leaves its own alteration in place, and this layer then adds
+	 * nothing to it. */
+	kal_uintptr now = 0;
+	g_term_alter = take && kal_terminal_get_mode && kal_terminal_get_mode(s, &now) == kal_ok
+	             && (now & KAL_TERM_PASS_INPUT) ? want : 0;
+	return 0;
 }
 
 /* THE SIZE, AND THE QUESTION THAT TRAVELS WITH IT. `isatty' asks this request
@@ -1226,6 +1288,17 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
                             syscall_arg_t a6)
 {
 	(void)a5; (void)a6;
+	/* ONE PLACE FOR A RESOLVED NAME, AND NOT ONE PER CASE.
+	 *
+	 * Fifteen cases each declared their own `struct okm_at', which carries a
+	 * whole path, and one declared an 8 KiB copy buffer. An optimising
+	 * compiler gives them one slot because no two are alive at once; an
+	 * unoptimised one gives each its own, and this function's frame was
+	 * 69,008 bytes (`sub rsp, 0x10d90'), measured by the consumer who reported
+	 * mcpplibs/openkal-musl#48 --- a quarter of the stack every thread then
+	 * had, spent by any system call. No case uses two of these at once, so
+	 * they share one union, which is what the optimiser had been doing. */
+	union { struct okm_at one; struct okm_at two[2]; char block[8192]; } scratch;
 	switch (n) {
 
 	/* --- transfer --------------------------------------------------------- */
@@ -1409,13 +1482,13 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			if (okm_fs_seek(dobj->file, *off_out, SEEK_SET, &(kal_u64){0}) != kal_ok) return -EIO;
 		}
 
-		char block[8192];
+		char* const block = scratch.block;
 		size_t done = 0;
 		syscall_arg_t failure = 0;
 
 		while (done < want) {
 			size_t chunk = want - done;
-			if (chunk > sizeof block) chunk = sizeof block;
+			if (chunk > sizeof scratch.block) chunk = sizeof scratch.block;
 
 			const syscall_arg_t got = do_read(fd_in, block, chunk);
 			if (got < 0) { failure = got; break; }
@@ -1489,9 +1562,9 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			return e == kal_ok ? 0 : -okm_errno(e);
 		}
 
-		struct okm_at at;
+		struct okm_at* const at = &scratch.one;
 		{
-			const long r = okm_resolve((int)a1, (const char*)a2, &at, 0);
+			const long r = okm_resolve((int)a1, (const char*)a2, at, 0);
 			if (r) return r;
 		}
 		/* A DIRECTORY COULD NOT HAVE ITS TIME SET, AND IT IS AN ORDINARY
@@ -1523,7 +1596,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * older way is kept below for a backend that has not followed yet, and is
 		 * tried only where the new operation is absent. */
 		struct kal_node_info kind = { .self_size = sizeof kind };
-		const int ke = okm_fs_info(at.base, at.rel, slen(at.rel), 0,
+		const int ke = okm_fs_info(at->base, at->rel, slen(at->rel), 0,
 		                           KAL_INFO_KIND, &kind);
 		/* AN ENQUIRY THAT CANNOT BE MADE IS NOT AN ANSWER OF `NO', so a build
 		 * without `openkal.fs' asks for what the interface requires and lets the
@@ -1535,14 +1608,14 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		                       : (KAL_OPEN_READ | KAL_OPEN_WRITE);
 
 		{
-			const int se = okm_fs_set_modified_at(at.base, at.rel,
-			                                      slen(at.rel), when);
+			const int se = okm_fs_set_modified_at(at->base, at->rel,
+			                                      slen(at->rel), when);
 			if (se != kal_err_not_supported)
 				return se == kal_ok ? 0 : -okm_errno(se);
 		}
 
 		struct kal_file f;
-		int e = okm_fs_open(at.base, at.rel, slen(at.rel), want, &f);
+		int e = okm_fs_open(at->base, at->rel, slen(at->rel), want, &f);
 		if (e != kal_ok) return -okm_errno(e);
 		e = okm_fs_set_modified(f, when);
 		okm_fs_close_file(f);
@@ -1568,13 +1641,13 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * from POSIX, which asks for write permission and not for read, is the one
 	 * already recorded there. */
 	case SYS_truncate: {
-		struct okm_at at;
+		struct okm_at* const at = &scratch.one;
 		{
-			const long r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
+			const long r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
 			if (r) return r;
 		}
 		struct kal_file f;
-		int e = okm_fs_open(at.base, at.rel, slen(at.rel),
+		int e = okm_fs_open(at->base, at->rel, slen(at->rel),
 		                    KAL_OPEN_READ | KAL_OPEN_WRITE, &f);
 		if (e != kal_ok) return -okm_errno(e);
 		e = okm_fs_truncate(f, (uint64_t)a2);
@@ -1650,43 +1723,43 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_getdents64: return do_getdents((int)a1, (void*)a2, (size_t)a3);
 
 	case SYS_mkdirat: {
-		struct okm_at at;
-		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, &at, 0);
+		struct okm_at* const at = &scratch.one;
+		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, at, 0);
 		if (r) return r;
-		const int e = okm_fs_mkdir(at.base, at.rel, slen(at.rel));
+		const int e = okm_fs_mkdir(at->base, at->rel, slen(at->rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 #ifdef SYS_mkdir
 	case SYS_mkdir: {
-		struct okm_at at;
-		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
+		struct okm_at* const at = &scratch.one;
+		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
 		if (r) return r;
-		const int e = okm_fs_mkdir(at.base, at.rel, slen(at.rel));
+		const int e = okm_fs_mkdir(at->base, at->rel, slen(at->rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 #endif
 	case SYS_unlinkat: {
-		struct okm_at at;
-		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, &at, 0);
+		struct okm_at* const at = &scratch.one;
+		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, at, 0);
 		if (r) return r;
-		const int e = okm_fs_remove(at.base, at.rel, slen(at.rel));
+		const int e = okm_fs_remove(at->base, at->rel, slen(at->rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 #ifdef SYS_unlink
 	case SYS_unlink: {
-		struct okm_at at;
-		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
+		struct okm_at* const at = &scratch.one;
+		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
 		if (r) return r;
-		const int e = okm_fs_remove(at.base, at.rel, slen(at.rel));
+		const int e = okm_fs_remove(at->base, at->rel, slen(at->rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 #endif
 #ifdef SYS_rmdir
 	case SYS_rmdir: {
-		struct okm_at at;
-		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
+		struct okm_at* const at = &scratch.one;
+		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
 		if (r) return r;
-		const int e = okm_fs_remove(at.base, at.rel, slen(at.rel));
+		const int e = okm_fs_remove(at->base, at->rel, slen(at->rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 #endif
@@ -1701,24 +1774,26 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_renameat2:
 #endif
 	{
-		struct okm_at from, to;
-		syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, &from, 0);
+		struct okm_at* const from = &scratch.two[0];
+		struct okm_at* const to   = &scratch.two[1];
+		syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, from, 0);
 		if (r) return r;
-		r = okm_resolve((int)a3, (const char*)a4, &to, 0);
+		r = okm_resolve((int)a3, (const char*)a4, to, 0);
 		if (r) return r;
-		const int e = okm_fs_rename(from.base, from.rel, slen(from.rel),
-		                            to.base, to.rel, slen(to.rel));
+		const int e = okm_fs_rename(from->base, from->rel, slen(from->rel),
+		                            to->base, to->rel, slen(to->rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 #ifdef SYS_rename
 	case SYS_rename: {
-		struct okm_at from, to;
-		syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &from, 0);
+		struct okm_at* const from = &scratch.two[0];
+		struct okm_at* const to   = &scratch.two[1];
+		syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, from, 0);
 		if (r) return r;
-		r = okm_resolve(AT_FDCWD, (const char*)a2, &to, 0);
+		r = okm_resolve(AT_FDCWD, (const char*)a2, to, 0);
 		if (r) return r;
-		const int e = okm_fs_rename(from.base, from.rel, slen(from.rel),
-		                            to.base, to.rel, slen(to.rel));
+		const int e = okm_fs_rename(from->base, from->rel, slen(from->rel),
+		                            to->base, to->rel, slen(to->rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 #endif
@@ -1727,11 +1802,11 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_faccessat2:
 #endif
 	{
-		struct okm_at at;
-		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, &at, 0);
+		struct okm_at* const at = &scratch.one;
+		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, at, 0);
 		if (r) return r;
 		struct kal_node_info info = { .self_size = sizeof info };
-		const int e = okm_fs_info(at.base, at.rel, slen(at.rel), 0,
+		const int e = okm_fs_info(at->base, at->rel, slen(at->rel), 0,
 		                          KAL_INFO_KIND | KAL_INFO_WRITABLE
 		                          | KAL_INFO_EXECUTABLE, &info);
 		if (e != kal_ok) return -okm_errno(e);
@@ -1749,11 +1824,11 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	}
 #ifdef SYS_access
 	case SYS_access: {
-		struct okm_at at;
-		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
+		struct okm_at* const at = &scratch.one;
+		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
 		if (r) return r;
 		struct kal_node_info info = { .self_size = sizeof info };
-		const int e = okm_fs_info(at.base, at.rel, slen(at.rel), 0,
+		const int e = okm_fs_info(at->base, at->rel, slen(at->rel), 0,
 		                          KAL_INFO_KIND | KAL_INFO_WRITABLE
 		                          | KAL_INFO_EXECUTABLE, &info);
 		if (e != kal_ok) return -okm_errno(e);
@@ -2645,11 +2720,11 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			unsigned long namelen, frsize, flags, spare[4];
 		}* out = (void*)a2;
 		if (!out) return -EFAULT;
-		struct okm_at at;
-		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, &at, 0);
+		struct okm_at* const at = &scratch.one;
+		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
 		if (r) return r;
 		struct kal_dir d;
-		int e = okm_fs_open_dir(at.base, ".", 1, &d);
+		int e = okm_fs_open_dir(at->base, ".", 1, &d);
 		if (e != kal_ok) return -okm_errno(e);
 		kal_u64 total = 0, avail = 0;
 		e = okm_fs_capacity(d, &total, &avail);

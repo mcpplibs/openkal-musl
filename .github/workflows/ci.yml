@@ -452,22 +452,32 @@ jobs:
           # in nothing else --- README's limits table records it --- while the
           # keystrokes it read, the modes it reported and the order of both are
           # what this step is for.
-          python3 tools/pty-keys.py reading 61620371 "$RUNNER_TEMP/terminal-control" \
-            | tr -d '\r' > "$RUNNER_TEMP/control.log"
-          python3 tools/pty-keys.py reading 61620371 "$bin" | tr -d '\r' > "$RUNNER_TEMP/port.log"
+          # a, b, the return key, Ctrl+J, the interrupt, q. The return key and
+          # Ctrl+J are the pair mcpplibs/openkal#48 could not tell apart: under
+          # `cfmakeraw' they are 0x0d and 0x0a, and with the return key's
+          # rewriting left on (`keep-icrnl') both are 0x0a, on the system's own
+          # C library and over this port alike.
+          keys=61620d0a0371
+          for mode in raw keep-icrnl; do
+            python3 tools/pty-keys.py reading $keys "$RUNNER_TEMP/terminal-control" $mode \
+              | tr -d '\r' > "$RUNNER_TEMP/control-$mode.log"
+            python3 tools/pty-keys.py reading $keys "$bin" $mode | tr -d '\r' > "$RUNNER_TEMP/port-$mode.log"
 
-          echo "--- the system's own C library"; cat "$RUNNER_TEMP/control.log"
-          echo "--- this port";                  cat "$RUNNER_TEMP/port.log"
+            echo "--- $mode: the system's own C library"; cat "$RUNNER_TEMP/control-$mode.log"
+            echo "--- $mode: this port";                  cat "$RUNNER_TEMP/port-$mode.log"
 
-          # The control must show the thing being measured, or the comparison
-          # proves nothing: a pty that swallowed the keystroke would make two
-          # identical and equally wrong transcripts.
-          grep -q 'byte 0x03' "$RUNNER_TEMP/control.log" \
-            || { echo "::error::the harness cannot deliver the interrupt keystroke as data — this check would prove nothing"; exit 1; }
+            # The control must show the thing being measured, or the comparison
+            # proves nothing: a pty that swallowed the keystroke would make two
+            # identical and equally wrong transcripts.
+            grep -q 'byte 0x03' "$RUNNER_TEMP/control-$mode.log" \
+              || { echo "::error::the harness cannot deliver the interrupt keystroke as data — this check would prove nothing"; exit 1; }
 
-          diff -u "$RUNNER_TEMP/control.log" "$RUNNER_TEMP/port.log" \
-            || { echo "::error::a terminal over this port does not behave as the system's own C library"; exit 1; }
-          echo "  ok  the transcripts agree, keystroke for keystroke"
+            diff -u "$RUNNER_TEMP/control-$mode.log" "$RUNNER_TEMP/port-$mode.log" \
+              || { echo "::error::a terminal over this port does not behave as the system's own C library ($mode)"; exit 1; }
+            echo "  ok  $mode: the transcripts agree, keystroke for keystroke"
+          done
+          grep -q 'byte 0x0d' "$RUNNER_TEMP/port-raw.log" \
+            || { echo "::error::under cfmakeraw the return key did not arrive as 0x0d"; exit 1; }
 
       # THE INTERNAL OVERLAY STOPS AT THIS PACKAGE'S BOUNDARY.
       #
@@ -816,6 +826,17 @@ jobs:
       # musl's allocator uses a mapping up to the end of its last page; the port
       # obtained only the length asked for, and on Windows the rest of that page
       # was the next heap block. port/src/okm_syscall.c, `do_mmap`.
+      # A THREAD HAS THE STACK IT ASKED FOR, NOTHING IS COMMITTED FOR ONE IT
+      # DOES NOT USE, A STACK THE CALLER SUPPLIES IS REFUSED, AND A READ BELOW
+      # THE STACK FAULTS. mcpplibs/openkal-musl#48; examples/stack-size says
+      # what each line observes.
+      - name: A thread has the stack it asked for, and a guard beneath it
+        env:
+          MCPP_TARGET: ${{ matrix.target }}
+        run: |
+          bash tools/run-probe.sh examples/stack-size stack-size
+          grep -q -- '-- failures: 0 --' examples/stack-size/run.log
+
       - name: A large allocation is a mapping and a mapping is whole pages
         env:
           MCPP_TARGET: ${{ matrix.target }}

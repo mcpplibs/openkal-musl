@@ -269,6 +269,8 @@ int __pthread_create(pthread_t *restrict res, const pthread_attr_t *restrict att
 	}
 
 	if (attr._a_stackaddr) {
+		__release_ptc();
+		return EINVAL;
 		size_t need = libc.tls_size + __pthread_tsd_size;
 		size = attr._a_stacksize;
 		stack = (void *)(attr._a_stackaddr & -16);
@@ -285,9 +287,8 @@ int __pthread_create(pthread_t *restrict res, const pthread_attr_t *restrict att
 		}
 		guard = 0;
 	} else {
-		guard = ROUND(attr._a_guardsize);
-		size = guard + ROUND(attr._a_stacksize
-			+ libc.tls_size +  __pthread_tsd_size);
+		guard = 0;
+		size = ROUND(libc.tls_size + __pthread_tsd_size + 1024);
 	}
 
 	if (!tsd) {
@@ -306,7 +307,7 @@ int __pthread_create(pthread_t *restrict res, const pthread_attr_t *restrict att
 		tsd = map + size - __pthread_tsd_size;
 		if (!stack) {
 			stack = tsd - libc.tls_size;
-			stack_limit = map + guard;
+			stack_limit = stack - ROUND(attr._a_stacksize);
 		}
 	}
 
