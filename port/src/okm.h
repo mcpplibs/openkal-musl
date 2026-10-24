@@ -127,6 +127,15 @@ struct okm_desc {
 	int          pending_kind;
 	char         pending_name[256];
 	int          sock;           /* OKM_SOCKET: the slot in okm_net.c, else -1 */
+	/* THIS LAYER REWRITES A CARRIAGE RETURN INTO A LINE FEED ON READS. Set by
+	 * `tcsetattr' where the program asked for ICRNL and the environment
+	 * beneath reports that it alters nothing typed (KAL_TERM_PASS_INPUT read
+	 * back set) --- one environment alters input only while it assembles lines
+	 * and has no switch for it, so with lines off it would hand the program
+	 * the return key as 0x0d where the other two hand it 0x0a. Performing the
+	 * one rewriting the program asked for is what keeps the bytes the same on
+	 * all three. */
+	int          crnl;
 	/* ONE BYTE READ AHEAD, WHICH IS HOW A READINESS ENQUIRY IS ANSWERED.
 	 *
 	 * openkal has no operation that reports whether a transfer would proceed.

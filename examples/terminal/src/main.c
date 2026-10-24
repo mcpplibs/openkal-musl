@@ -29,16 +29,23 @@
 #include <unistd.h>
 
 static void show(const char* tag, const struct termios* t) {
-    printf("%s lflag_icanon=%d lflag_echo=%d lflag_isig=%d iflag_ixon=%d vmin=%d vtime=%d\r\n",
+    printf("%s lflag_icanon=%d lflag_echo=%d lflag_isig=%d iflag_ixon=%d iflag_icrnl=%d vmin=%d vtime=%d\r\n",
            tag,
            (t->c_lflag & ICANON) != 0,
            (t->c_lflag & ECHO) != 0,
            (t->c_lflag & ISIG) != 0,
            (t->c_iflag & IXON) != 0,
+           (t->c_iflag & ICRNL) != 0,
            (int)t->c_cc[VMIN], (int)t->c_cc[VTIME]);
 }
 
-int main(void) {
+int main(int argc, char** argv) {
+    /* `keep-icrnl' enters raw mode the way a program that only wants
+     * keystrokes one at a time does --- line assembly, echo and every reserved
+     * keystroke off, the return key's rewriting left alone --- rather than the way
+     * `cfmakeraw' does. The two differ in the byte the return key produces,
+     * which is what mcpplibs/openkal#48 was about. */
+    const int keep_icrnl = argc > 1 && strcmp(argv[1], "keep-icrnl") == 0;
     setvbuf(stdout, NULL, _IONBF, 0);
     printf("isatty %d\r\n", isatty(0));
 
@@ -51,7 +58,8 @@ int main(void) {
     show("before", &original);
 
     struct termios raw = original;
-    cfmakeraw(&raw);
+    if (keep_icrnl) { raw.c_lflag &= ~(ICANON | ECHO | ISIG | IEXTEN); raw.c_iflag &= ~IXON; }
+    else cfmakeraw(&raw);
     errno = 0;
     const int set = tcsetattr(0, TCSANOW, &raw);
     printf("tcsetattr rc=%d errno=%d\r\n", set, set == 0 ? 0 : errno);

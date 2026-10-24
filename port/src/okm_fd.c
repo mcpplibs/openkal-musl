@@ -175,7 +175,7 @@ static void desc_release(int d)
 	else if (p->kind == OKM_SOCKET) okm_sock_release(p->sock);
 	if (p->path_slot >= 0) g_dirpath_used[p->path_slot] = 0;
 	p->kind = OKM_FREE; p->iter = 0; p->iter_open = 0; p->path_slot = -1;
-	p->pending = 0; p->sock = -1; p->ahead = 0; p->ahead_eof = 0;
+	p->pending = 0; p->sock = -1; p->ahead = 0; p->ahead_eof = 0; p->crnl = 0;
 }
 
 int okm_fd_alloc(int from)
@@ -212,7 +212,7 @@ int okm_fd_bind(int fd, int kind, kal_uintptr stream,
 	p->kind = kind; p->flags = flags; p->stream = stream;
 	p->file = file; p->dir = dir; p->iter = 0; p->iter_open = 0;
 	p->path_slot = -1; p->pending = 0;
-	p->sock = -1; p->ahead = 0; p->ahead_eof = 0;
+	p->sock = -1; p->ahead = 0; p->ahead_eof = 0; p->crnl = 0;
 	if (g_fd[fd].desc >= 0) desc_release(g_fd[fd].desc);
 	g_fd[fd].desc = d;
 	g_fd[fd].cloexec = (flags & O_CLOEXEC) ? 1 : 0;
