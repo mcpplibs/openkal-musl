@@ -1,6 +1,6 @@
 # What was changed in musl, and why
 
-musl 1.2.5 is vendored here unmodified except for the three lines below, and
+musl 1.2.5 is vendored here unmodified except for the lines below, and
 the list is exhaustive: `git log -p -- musl/` shows every one of them. Each is
 recorded with the reason, because a port that silently edits the library it
 ports is a port nobody can check.
@@ -104,6 +104,50 @@ equivalent line in the other two files compile on every target, unmodified
 from musl. A program above this package that writes `L"..."` now compiles on
 Windows as it does everywhere else, and a code point above U+FFFF round-trips
 through it — `examples/c-abi` asserts this (see the package README).
+
+## `src/thread/pthread_create.c`, five lines (0.21.0)
+
+```diff
+ 	if (attr._a_stackaddr) {
++		__release_ptc();
++		return EINVAL;
+ 		size_t need = libc.tls_size + __pthread_tsd_size;
+ ...
+-		guard = ROUND(attr._a_guardsize);
+-		size = guard + ROUND(attr._a_stacksize
+-			+ libc.tls_size +  __pthread_tsd_size);
++		guard = 0;
++		size = ROUND(libc.tls_size + __pthread_tsd_size + 1024);
+ ...
+-			stack_limit = map + guard;
++			stack_limit = stack - ROUND(attr._a_stacksize);
+```
+
+**The stack musl mapped was never the thread's.** `__clone` here starts the
+context through openkal, and openkal's implementation supplies the stack itself,
+so the region this function mapped was not used. It was still committed: this
+port's `mmap` zeroes what it returns, because openkal's allocator does not
+promise zeroed memory, and that wrote every page. A thread asked to have 64 MiB
+took 0.1 to 0.4 s to start and raised the resident size by 66 MB, and one asked
+to have 1 GiB raised it by 1 GiB (`mcpplibs/openkal-musl#48`). The size itself
+was then ignored: every thread ran on 256 KiB.
+
+So the mapping holds what the thread needs from it — its thread-local image,
+its thread-specific data, and the start arguments this function writes just
+below them, for which the 1024 bytes are — and no stack. The size asked for is
+recorded in `stack_size`, which `port/src/okm_thread.c` reads and passes to
+`kal_task_start_sized` (openkal 0.16). `stack_size` has no other reader in
+musl once `pthread_getattr_np` is replaced; `stack` does (`h_errno.c` asks
+whether it is null to tell the first thread apart), and it is not null.
+
+**A stack the caller supplies is refused with `EINVAL`.** The context cannot run
+on it, because the implementation beneath allocates its own, and starting it
+elsewhere while reporting success would give a program that keeps its own
+records of the region — a collector that scans it, a run-time that places
+frames in it — a region the thread never stood on. The port refused the same
+shape twice before: `mprotect` reports `ENOSYS` rather than claim a guard it did
+not place, and `sigaltstack` was changed in 0.10.0 from reporting success and
+installing nothing to reporting `ENOSYS`.
 
 ## Not changed: the five excluded sources
 

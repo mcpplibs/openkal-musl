@@ -234,6 +234,17 @@ static inline void okm_process_close(struct kal_process) {}
 extern __typeof(kal_task_parallelism) kal_task_parallelism __attribute__((__weak__));
 #define okm_task_parallelism kal_task_parallelism
 
+/* WEAK, BECAUSE openkal 0.16 ADDED IT, for the reason given above. Without it
+ * the context is started with the implementation's own size, which is what
+ * every version before 0.16 did. */
+extern __typeof(kal_task_start_sized) kal_task_start_sized __attribute__((__weak__));
+static inline int okm_task_start_sized(void (*entry)(void*), void* arg, kal_uintptr size,
+                                       struct kal_task* out)
+{
+	return kal_task_start_sized ? kal_task_start_sized(entry, arg, size, out)
+	                            : kal_task_start(entry, arg, out);
+}
+
 /* The identity of the execution context in progress. */
 #define OKM_CONTEXT_ID() kal_task_current()
 
@@ -247,6 +258,8 @@ extern __typeof(kal_task_parallelism) kal_task_parallelism __attribute__((__weak
  * failure and the caller's existing path produces the right errno. */
 static inline int okm_task_start(void (*)(void*), void*,
                                  struct kal_task*) { return kal_err_not_supported; }
+static inline int okm_task_start_sized(void (*)(void*), void*, kal_uintptr,
+                                       struct kal_task*) { return kal_err_not_supported; }
 /* Joining one that cannot have been started. The list of contexts to join is
  * empty because nothing is ever added to it. */
 static inline int okm_task_join(struct kal_task) { return kal_ok; }
