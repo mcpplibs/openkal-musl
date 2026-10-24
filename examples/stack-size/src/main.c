@@ -156,7 +156,9 @@ int main(int argc, char** argv) {
     const pid_t dup = fork();
     if (dup == 0) {
         pthread_t t;
-        if (pthread_create(&t, 0, touch_below, 0) == 0) pthread_join(t, 0);
+        const int crc = pthread_create(&t, 0, touch_below, 0);
+        printf("diagnostic fork: pthread_create in the copy rc=%d\n", crc);
+        if (crc == 0) pthread_join(t, 0);
         _exit(0);
     }
     if (dup > 0 && waitpid(dup, &status, 0) == dup)
