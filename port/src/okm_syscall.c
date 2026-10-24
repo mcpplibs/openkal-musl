@@ -197,17 +197,34 @@ static syscall_arg_t do_read_stream(int fd, void* buf, size_t len)
 	return n < 0 ? -okm_errno((int)-n) : (syscall_arg_t)n;
 }
 
-/* The read a program sees: what the stream delivered, with the one rewriting
- * this layer performs where the environment beneath would not (`crnl' in
- * okm.h). Applied here rather than in the stream's own read so that a byte a
- * readiness enquiry took ahead is rewritten as well. */
+/* WHAT THIS LAYER DOES TO WHAT IS TYPED, WHERE IT TOOK THE TASK OVER.
+ *
+ * `tcsetattr' in raw mode without echo, with ICRNL (or ISTRIP) asked for, asks
+ * the environment for unaltered input and performs the alteration here
+ * (`okm_termios_set'). The reason is that the environments beneath alter input
+ * differently when left to it: two rewrite the return key into a line feed, and
+ * the third delivers the return key unchanged and consumes Ctrl+J. Asked for
+ * nothing, all three deliver 0x0d and 0x0a, so performing the one rewriting the
+ * program asked for here gives it the same bytes on every system. Without echo
+ * nothing shows which layer did it.
+ *
+ * It is the terminal's, not a descriptor's: a program sets the mode through
+ * one standard stream and reads through another, and both are the same
+ * terminal. It applies to reads of a standard stream that is interactive. */
+static tcflag_t g_term_alter;
+
 static syscall_arg_t do_read(int fd, void* buf, size_t len)
 {
 	const syscall_arg_t r = do_read_stream(fd, buf, len);
+	if (r <= 0 || !g_term_alter) return r;
 	struct okm_desc* d = okm_desc_of(fd);
-	if (r > 0 && d && d->crnl) {
-		unsigned char* b = buf;
-		for (syscall_arg_t i = 0; i < r; i++) if (b[i] == '\r') b[i] = '\n';
+	if (!d || d->kind != OKM_STREAM) return r;
+	struct kal_stream st; st.h = d->stream;
+	if (!(kal_stream_props(st) & KAL_STREAM_PROP_INTERACTIVE)) return r;
+	unsigned char* b = buf;
+	for (syscall_arg_t i = 0; i < r; i++) {
+		if (g_term_alter & ISTRIP) b[i] &= 0x7f;
+		if ((g_term_alter & ICRNL) && b[i] == '\r') b[i] = '\n';
 	}
 	return r;
 }
@@ -581,7 +598,7 @@ struct linux_dirent64 {
  * over this port is change any of them: a `tcsetattr' that clears OPOST is
  * accepted and the post-processing remains, which port/README.md lists among
  * the things this environment does not carry. */
-static int okm_termios_get(struct okm_desc* d, struct kal_stream s, struct termios* t)
+static int okm_termios_get(struct kal_stream s, struct termios* t)
 {
 	if (!t) return -EFAULT;
 	if (!kal_terminal_get_mode) return -ENOTTY;
@@ -593,11 +610,12 @@ static int okm_termios_get(struct okm_desc* d, struct kal_stream s, struct termi
 	/* ICRNL IS WHAT IS IN EFFECT, which openkal 0.16 states as a position:
 	 * KAL_TERM_PASS_INPUT set means the environment alters nothing typed, and
 	 * clear means it may --- which, for every environment this port runs on,
-	 * means it rewrites the return key. Where this layer performs the rewriting
-	 * itself (`crnl') it is in effect as well. An environment that predates the
+	 * includes the return key. What this layer performs itself
+	 * (`g_term_alter') is in effect as well. An environment that predates the
 	 * position reads it as clear, and ICRNL is then reported set, which is true
 	 * of it (mcpplibs/openkal#48). */
-	if (!(mode & KAL_TERM_PASS_INPUT) || d->crnl) out.c_iflag = ICRNL;
+	if (!(mode & KAL_TERM_PASS_INPUT)) out.c_iflag = ICRNL;
+	out.c_iflag |= g_term_alter;
 	out.c_oflag = OPOST | ONLCR;
 	out.c_cflag = CREAD | CS8 | B38400;
 	if (mode & KAL_TERM_LINE_EDIT) out.c_lflag |= ICANON | ECHOE | ECHOK;
@@ -637,7 +655,7 @@ static int okm_termios_get(struct okm_desc* d, struct kal_stream s, struct termi
  * A program that clears IXON alone keeps every keystroke reserved: openkal has
  * one position and this environment has three mechanisms, and the position is
  * about the one that decides whether the program survives the keystroke. */
-static int okm_termios_set(struct okm_desc* d, struct kal_stream s, const struct termios* t)
+static int okm_termios_set(struct kal_stream s, const struct termios* t)
 {
 	if (!t) return -EFAULT;
 	if (!kal_terminal_set_mode) return -ENOTTY;
@@ -648,20 +666,26 @@ static int okm_termios_set(struct okm_desc* d, struct kal_stream s, const struct
 	/* THE FOUR INPUT FLAGS ARE ONE POSITION, KAL_TERM_PASS_INPUT (openkal
 	 * 0.16), and it is asked for where the program cleared all four --- which
 	 * `cfmakeraw' does, and which leaves the return key and Ctrl+J two
-	 * different bytes, the pair mcpplibs/openkal#48 could not tell apart. A
-	 * program that clears ICRNL alone has also cleared the only one of the four
-	 * a terminal ordinarily applies, so it is asked for then as well. */
-	if (!(t->c_iflag & (ICRNL | INLCR | IGNCR | ISTRIP))) mode |= KAL_TERM_PASS_INPUT;
+	 * different bytes, the pair mcpplibs/openkal#48 could not tell apart.
+	 *
+	 * In raw mode without echo it is asked for as well where the program kept
+	 * ICRNL or ISTRIP, and this layer performs those (`g_term_alter'), because
+	 * the environments beneath alter input differently and deliver the same
+	 * bytes only when asked for none. INLCR and IGNCR are left to the
+	 * environment: the first is not one any environment here applies, and the
+	 * second removes bytes, which a read that may then have nothing to report
+	 * cannot do without waiting again. */
+	const tcflag_t want = t->c_iflag & (ICRNL | INLCR | IGNCR | ISTRIP);
+	const int take = want && !(t->c_lflag & (ICANON | ECHO)) && !(want & (INLCR | IGNCR));
+	if (!want || take) mode |= KAL_TERM_PASS_INPUT;
 	const int e = kal_terminal_set_mode(s, mode);
 	if (e != kal_ok) return -okm_errno(e);
-	/* AND WHAT THE ENVIRONMENT DID IS READ BACK, because one environment cannot
-	 * separate the alteration from line assembly and leaves the position as it
-	 * stands. Where the program asked for ICRNL and the environment alters
-	 * nothing, this layer performs the rewriting itself, so that the program
-	 * reads what it would read on the other two. */
+	/* What the environment did is read back: an environment that predates the
+	 * position leaves its own alteration in place, and this layer then adds
+	 * nothing to it. */
 	kal_uintptr now = 0;
-	d->crnl = (t->c_iflag & ICRNL) && kal_terminal_get_mode
-	       && kal_terminal_get_mode(s, &now) == kal_ok && (now & KAL_TERM_PASS_INPUT);
+	g_term_alter = take && kal_terminal_get_mode && kal_terminal_get_mode(s, &now) == kal_ok
+	             && (now & KAL_TERM_PASS_INPUT) ? want : 0;
 	return 0;
 }
 
@@ -2020,7 +2044,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			if (!interactive) return -ENOTTY;
 			switch ((unsigned long)a2) {
 			case TCGETS:
-				return okm_termios_get(d, s, (struct termios*)a3);
+				return okm_termios_get(s, (struct termios*)a3);
 			/* TCSETS, TCSETSW and TCSETSF, which musl composes as TCSETS plus
 			 * the action (musl/src/termios/tcsetattr.c). The three differ in
 			 * what happens to the bytes already in flight, and openkal has no
@@ -2030,7 +2054,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			case TCSETS:
 			case TCSETSW:
 			case TCSETSF:
-				return okm_termios_set(d, s, (const struct termios*)a3);
+				return okm_termios_set(s, (const struct termios*)a3);
 			case TIOCGWINSZ:
 				return okm_winsize_get(s, (struct winsize*)a3);
 			default:
