@@ -448,10 +448,10 @@ that false positive; the linker did.**
 
 So the whole of what this system supplies to a program built above this package
 was two names, and a stub naming them was eight lines of text. `openkal-macos`
-carries it as `port/libSystem.tbd`. Since 0.21.1 it is five: the three
-`_libSystem_atfork_*` preparations this system's `fork` performs around the
-duplication primitive, which `openkal-macos` 0.14.1 calls so that a program
-duplicated by `fork` can start a thread (#55).
+carries it as `port/libSystem.tbd`. Since 0.21.1 it is fifteen: the thirteen
+preparations this system's `fork` performs around the duplication primitive,
+part by part, which `openkal-macos` 0.14.1 calls so that a program duplicated
+by `fork` can start a thread (#55).
 
 ## Four more, added with the socket, datagram and readiness routes
 
