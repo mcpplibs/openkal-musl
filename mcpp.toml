@@ -591,9 +591,9 @@ ldflags = ["-nostdlib", "-static", "-Wl,--no-dynamic-linker",
 # The link line on this system.
 #
 # -nostdlib is the statement that the program carries one C library and that it
-# is this one. -lSystem follows it because two names this system's openkal
-# implementation needs live there and nowhere else, and both were chosen for the
-# property that no C library defines them.
+# is this one. -lSystem follows it because the names this system's openkal
+# implementation needs live there and nowhere else, and each was chosen for the
+# property that no C library defines it.
 #
 # Naming that library alongside a C library of our own is safe here and would
 # not be on the first system, and the difference is a property of the object

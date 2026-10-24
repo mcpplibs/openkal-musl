@@ -1092,7 +1092,7 @@ jobs:
   # It is a job rather than a note because the claim it supports --- that a
   # program for that system can be built, and linked, without any file that
   # system supplies --- is one that a change to this port could silently undo.
-  # The two numbers it asserts are zero indirect symbols and exactly two names.
+  # The two numbers it asserts are zero indirect symbols and exactly five names.
   cross-macos:
     name: cross-link for the other system, from this one
     runs-on: ubuntu-24.04
@@ -1126,7 +1126,7 @@ jobs:
           "$d/llvm-nm" --version | head -1
           clang --version | head -1
 
-      - name: Zero indirect symbols, and two names
+      - name: Zero indirect symbols, and five names
         run: |
           bash tools/probe-cross-macos.sh aarch64
           bash tools/probe-cross-macos.sh x86_64

@@ -150,14 +150,17 @@ set -e
 # is not an answer to this question: no source names it, the linker emits the
 # reference for its own lazy binding, and whether it appears at all depends on
 # the linker's version. It belongs to the stub, which the link below exercises.
-expected=$'_clock_gettime_nsec_np\n_pthread_create_from_mach_thread'
+# The three `__libSystem_atfork_*' are the preparations this system's `fork'
+# performs around the duplication primitive, which openkal-macos 0.14.1 calls so
+# that a program duplicated by `fork' can start a thread (#55).
+expected=$'__libSystem_atfork_child\n__libSystem_atfork_parent\n__libSystem_atfork_prepare\n_clock_gettime_nsec_np\n_pthread_create_from_mach_thread'
 echo "probe: names this system supplies:"
 printf '  %s\n' $undef
 
 fail=0
 [ "$indirect" -eq 0 ] || { echo "FAIL: $indirect indirect symbols; recorded 0" >&2; fail=1; }
 [ "$undef" = "$expected" ] || {
-    echo "FAIL: the set of names differs from the recorded two" >&2
+    echo "FAIL: the set of names differs from the recorded five" >&2
     echo "  recorded:" >&2; printf '    %s\n' $expected >&2
     fail=1
 }
