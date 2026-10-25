@@ -14,6 +14,7 @@
  *   supplied    a stack the caller supplies is refused, not ignored
  *   guard       a read just below a thread's stack ends the program that made
  *               it, rather than reading whatever mapping lies there
+ *   fork        a program duplicated by fork starts a thread (#55)
  */
 #define _GNU_SOURCE 1
 #include <errno.h>
@@ -149,6 +150,26 @@ int main(int argc, char** argv) {
         check(!(WIFEXITED(status) && WEXITSTATUS(status) == 2), "the thread was told a region to read below");
     } else {
         printf("  not observed  the program could not be started again\n");
+    }
+
+    /* A program duplicated by fork starts a thread, as the original did.
+     * mcpplibs/openkal-musl#55: on one system the copy's first thread failed
+     * with EAGAIN, because the duplication left the system library's state the
+     * original's. */
+    const pid_t dup = fork();
+    if (dup == 0) {
+        pthread_t t;
+        struct probe c;
+        c.kib = 1; c.told = 0; c.done = 0;
+        if (pthread_create(&t, 0, body, &c) != 0) _exit(4);
+        pthread_join(t, 0);
+        _exit(c.done == 1 ? 3 : 5);
+    }
+    if (dup > 0 && waitpid(dup, &status, 0) == dup) {
+        printf("fork: exited=%d status=%d\n", WIFEXITED(status), WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+        check(WIFEXITED(status) && WEXITSTATUS(status) == 3, "a program duplicated by fork starts a thread");
+    } else {
+        printf("  not observed  the program could not be duplicated\n");
     }
 
     printf("-- failures: %d --\n", failures);
