@@ -650,8 +650,10 @@ four places, all in `port/src/image`:
 | `dl_iterate_phdr` | this image, then every placed one, so an unwinder finds each image's frames |
 
 The compiler-rt builtins come from `llvm.compiler-rt-builtins` (22.1.8.6), built
-with the image's flags: on AArch64 a `long double` is 128 bits and `printf`
-reaches its routines. `examples/image-dlopen` and
+with the image's flags, behind the default feature `image-builtins`: on AArch64
+a `long double` is 128 bits and `printf` reaches its routines. A package that
+supplies the layer itself (`openkal-llvm-runtime`) depends on this one with
+`default-features = false`, since a build has one compiler runtime. `examples/image-dlopen` and
 `examples/image-early-constructor` are built once on Linux for both
 architectures and run through `okrun` on four systems in CI.
 

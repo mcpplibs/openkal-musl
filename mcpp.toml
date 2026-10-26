@@ -230,12 +230,16 @@ defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
 # defines --- for `dlopen', which places further images the same way.
 [target.'cfg(os = "openkal")'.dependencies]
 openkal-ld = "0.1.0"
+
 # The routines a compiler emits calls to and no C library defines --- on
 # AArch64, every arithmetic operation on a 128-bit `long double`, which
 # `printf' reaches. An image carries its own (SPEC 12.2: it imports `kal_*'
 # alone), compiled with the image's flags from the source package, as picolibc
-# does on a bare machine. The edge can be replaced by a package that provides
-# `mcpp:compiler-runtime' itself (openkal-llvm-runtime).
+# does on a bare machine. Behind the default feature `image-builtins', because
+# the layer has one supplier: a package that supplies `mcpp:compiler-runtime'
+# itself (openkal-llvm-runtime) depends on this one with
+# `default-features = false'.
+[target.'cfg(os = "openkal")'.feature-deps.image-builtins]
 llvm.compiler-rt-builtins = "22.1.8.6"
 
 # The image form's own sources (port/src/image): the entry SPEC 12.2 names,
@@ -277,8 +281,11 @@ openkal-windows = { version = "0.13.0", features = ["standalone"] }
 # own sources has a static variable of that name. The macro musl's features.h
 # would have inferred is therefore not the macro musl is built with.
 [features]
-default = ["posix"]
+default = ["posix", "image-builtins"]
 posix = { defines = ["_XOPEN_SOURCE=700"] }
+# The compiler-rt builtins of an ok image (`<arch>-openkal'); nothing on any
+# other target. See the image form's feature-deps below.
+image-builtins = []
 
 [build]
 c_standard = "c99"
