@@ -7,10 +7,19 @@
  * here they are one array, ordered by the link, and a program's object comes
  * before the library's --- measured: the example's constructor called `malloc'
  * with the allocator's secret not yet drawn, and faulted. A priority puts this
- * one first: the linker sorts `.init_array.<priority>' ahead of the rest. */
+ * one first: the linker sorts `.init_array.<priority>' ahead of the rest.
+ *
+ * AND AHEAD OF THE C++ RUN-TIME'S, which is why the priority is in the range
+ * the implementation reserves (0 to 100). libc++ constructs the standard
+ * streams at priority 100, and their locale needs this library: at 101 the
+ * streams came first and faulted in `__stdinbuf::imbue' (measured, a C++
+ * image over openkal-llvm-runtime). */
 void __okm_libc_init(void);
 
-__attribute__((constructor(101))) static void okm_image_init(void)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wprio-ctor-dtor"
+__attribute__((constructor(1))) static void okm_image_init(void)
 {
 	__okm_libc_init();
 }
+#pragma clang diagnostic pop
