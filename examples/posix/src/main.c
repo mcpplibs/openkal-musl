@@ -177,6 +177,30 @@ int main(int argc, char **argv, char **envp) {
 	check(el >= 20000000, "the monotonic clock advanced by at least the requested interval");
 	check(time(NULL) > 1700000000, "the wall clock reports a plausible time");
 
+	/* The processor clock counts work, not time asleep: the program slept
+	 * 200 ms above and spins about as long here. */
+	{
+		struct timespec c0, c1, s0, s1;
+		const int had = clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &c0) == 0;
+		check(had, "the processor clock is read");
+		struct timespec nap = { 0, 200 * 1000 * 1000 };
+		nanosleep(&nap, NULL);
+		clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &c1);
+		const long long slept = (long long)(c1.tv_sec - c0.tv_sec) * 1000000000 + (c1.tv_nsec - c0.tv_nsec);
+		check(had && slept < 100000000, "time asleep is not processor time");
+		clock_gettime(CLOCK_MONOTONIC, &s0);
+		volatile unsigned long long sink = 0;
+		do {
+			for (int i = 0; i < 100000; ++i) sink = sink + 1;
+			clock_gettime(CLOCK_MONOTONIC, &s1);
+		} while ((s1.tv_sec - s0.tv_sec) * 1000000000LL + (s1.tv_nsec - s0.tv_nsec) < 200000000LL);
+		struct timespec c2;
+		clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &c2);
+		const long long worked = (long long)(c2.tv_sec - c1.tv_sec) * 1000000000 + (c2.tv_nsec - c1.tv_nsec);
+		check(had && worked > 50000000, "and work is");
+		check(clock() != (clock_t)-1, "clock() reports the processor time");
+	}
+
 	/* threads and mutexes: contended */
 	pthread_t th[4];
 	counter = 0;
