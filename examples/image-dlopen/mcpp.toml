@@ -1,0 +1,17 @@
+# An ok image that places another with `dlopen' (target `<arch>-openkal';
+# openkal SPEC clause 12). The image this program places is built from
+# plugin/, an image of its own with no C library, and is named on the command
+# line: it is not linked to this one.
+[package]
+name    = "image-dlopen"
+version = "0.1.0"
+
+[dependencies]
+openkal-musl = { path = "../.." }
+
+[build-dependencies]
+openkal-tools = { git = "https://github.com/mcpplibs/openkal-image.git", branch = "openkal-0.17.0", tools = ["okld", "okrun"] }
+
+[targets.image-dlopen]
+kind = "bin"
+main = "src/main.c"

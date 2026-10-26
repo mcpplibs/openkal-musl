@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.21.1"
+version     = "0.22.0"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 
@@ -163,7 +163,7 @@ lchown    = { form = "enosys", note = "as chown" }
 tcsetattr = { form = "accepted-no-effect", note = "openkal names four positions of the terminal mode word, the fourth covering ICRNL, INLCR, IGNCR and ISTRIP together; a request that alters output post-processing, the line speed, the control characters or VMIN/VTIME is accepted and that part has no effect" }
 
 [dependencies]
-openkal = "0.16.0"
+openkal = "0.17.0"
 
 # An ordinary consumer of openkal declares the specification and leaves the
 # choice of implementation to whoever builds the program, which is what the
@@ -178,7 +178,7 @@ openkal = "0.16.0"
 #
 # The consequence for a program is that it names this package and nothing else.
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = { version = "0.17.0", features = ["standalone"] }
+openkal-linux = { version = "0.18.0", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
 # 0.12.0 is the first release of this implementation that declares which
@@ -188,7 +188,7 @@ openkal-linux = { version = "0.17.0", features = ["standalone"] }
 # is the shape of a check that silently does not run --- while the same
 # consumer was answered on Linux and Windows, whose implementations have
 # carried the array since openkal-linux 0.15.0 and openkal-windows 0.10.0.
-openkal-macos = { version = "0.14.1", features = ["standalone"] }
+openkal-macos = { version = "0.15.0", features = ["standalone"] }
 
 # FIRST STEP TOWARD A BARE MACHINE, AND NOT THE WHOLE OF IT.
 #
@@ -223,8 +223,42 @@ openkal-opensbi = { version = "0.8.2", features = ["standalone"] }
 [target.'cfg(os = "none")'.build]
 defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
 
+# AN OK IMAGE (`<arch>-openkal`, openkal SPEC clause 12) HOLDS NO IMPLEMENTATION.
+# Its `kal_*' names are bound by the loader that runs it, to the one
+# implementation of that process; this library is above them as it is above any
+# other. What the image form adds is libokld --- the loader the image format
+# defines --- for `dlopen', which places further images the same way.
+[target.'cfg(os = "openkal")'.dependencies]
+openkal-ld = "0.1.0"
+# The routines a compiler emits calls to and no C library defines --- on
+# AArch64, every arithmetic operation on a 128-bit `long double`, which
+# `printf' reaches. An image carries its own (SPEC 12.2: it imports `kal_*'
+# alone), compiled with the image's flags from the source package, as picolibc
+# does on a bare machine. The edge can be replaced by a package that provides
+# `mcpp:compiler-runtime' itself (openkal-llvm-runtime).
+llvm.compiler-rt-builtins = "22.1.8.6"
+
+# The image form's own sources (port/src/image): the entry SPEC 12.2 names,
+# `dlopen' and its companions over libokld, the image's `dl_iterate_phdr', the
+# helper of emulated thread-local storage, and the prioritised constructor that
+# brings the library up before any other initialiser --- the loader runs them
+# before the entry. musl's own `dl*' sources are for a program linked
+# statically and are replaced.
+[target.'cfg(os = "openkal")'.build]
+sources = [
+  "!port/src/okm_phdr.c",
+  "!musl/src/ldso/dlopen.c",
+  "!musl/src/ldso/dlsym.c",
+  "!musl/src/ldso/__dlsym.c",
+  "!musl/src/ldso/dlclose.c",
+  "!musl/src/ldso/dladdr.c",
+  "!musl/src/ldso/dlerror.c",
+  "!musl/src/ldso/dlinfo.c",
+  "port/src/image/*.c",
+]
+
 [target.'cfg(windows)'.dependencies]
-openkal-windows = { version = "0.12.0", features = ["standalone"] }
+openkal-windows = { version = "0.13.0", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #
@@ -674,7 +708,7 @@ ldflags = ["-nostdlib", "-lSystem",
 # would land in, not because the content differs today.
 # musl-generated/README.md records the three lines and how they are
 # produced.
-[target.'cfg(all(arch = "x86_64", not(windows), not(os = "macos")))'.build]
+[target.'cfg(all(arch = "x86_64", not(windows), not(os = "macos"), not(os = "openkal")))'.build]
 include_dirs = ["musl-generated/x86_64", "musl/arch/x86_64", "musl/arch/generic"]
 
 [target.'cfg(all(arch = "x86_64", windows))'.build]
@@ -715,8 +749,20 @@ include_dirs = ["musl-generated/x86_64-macos", "musl/arch/x86_64", "musl/arch/ge
 # `kal_u64` comes from the COMPILER (`__UINT64_TYPE__`), which is authoritative
 # about the target's ABI; `uint64_t` came from these three lines, which carried
 # Linux's answer. Same width, different type, and the two do not convert.
-[target.'cfg(all(arch = "aarch64", not(os = "macos")))'.build]
+[target.'cfg(all(arch = "aarch64", not(os = "macos"), not(os = "openkal")))'.build]
 include_dirs = ["musl-generated/aarch64", "musl/arch/aarch64", "musl/arch/generic"]
+
+# AN OK IMAGE IS COMPILED FOR NO OPERATING SYSTEM (`<arch>-unknown-none-elf`), and
+# there the compiler states `wint_t` as `int` where the Linux answer is
+# `unsigned` --- the one difference `okm_type_identity.c` finds between the two
+# triples on either architecture (measured with clang 23, `-dM -E`). The
+# calling convention, the data model and every other type are the
+# architecture's, as SPEC 12.2 fixes them.
+[target.'cfg(all(arch = "x86_64", os = "openkal"))'.build]
+include_dirs = ["musl-generated/x86_64-openkal", "musl/arch/x86_64", "musl/arch/generic"]
+
+[target.'cfg(all(arch = "aarch64", os = "openkal"))'.build]
+include_dirs = ["musl-generated/aarch64-openkal", "musl/arch/aarch64", "musl/arch/generic"]
 
 [target.'cfg(all(arch = "aarch64", os = "macos"))'.build]
 include_dirs = ["musl-generated/aarch64-macos", "musl/arch/aarch64", "musl/arch/generic"]

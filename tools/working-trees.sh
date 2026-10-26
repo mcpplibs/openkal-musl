@@ -30,6 +30,10 @@ beside="$(cd "$here/.." && pwd)"
 # at a working tree --- reported as one package requested as a path and as a
 # version at once, which names neither the host nor the target.
 case "${target:-$(uname -s)}" in
+    # An ok image holds no implementation: the loader that runs it does. What
+    # the image form adds is libokld (openkal-image) and the compiler-rt
+    # builtins built from source, both taken from the same-named branch.
+    *openkal*)                      implementation=none ;;
     *windows*|MINGW*|MSYS*|CYGWIN*) implementation=openkal-windows ;;
     *macos*|*darwin*|Darwin)        implementation=openkal-macos   ;;
     *linux*|Linux)                  implementation=openkal-linux   ;;
@@ -54,7 +58,12 @@ fetch() {
 }
 
 fetch openkal
-fetch "$implementation"
+if [ "$implementation" = none ]; then
+    fetch openkal-image
+    fetch compiler-rt-builtins
+else
+    fetch "$implementation"
+fi
 
 # AND WHAT WAS FETCHED HAS TO BE WHAT THE MANIFEST ASKED FOR.
 #
@@ -78,6 +87,9 @@ fetch "$implementation"
 # the same mismatch would have passed while testing the wrong specification.
 satisfies() {   # satisfies <required> <actual> --- caret, for 0.x and above
     local rq="$1" ac="$2"
+    # The same version satisfies itself, in any number of segments (the
+    # compiler-rt builtins carry four: LLVM's three and a packaging revision).
+    [ "$rq" = "$ac" ] && return 0
     local rmaj="${rq%%.*}" amaj="${ac%%.*}"
     [ "$rmaj" = "$amaj" ] || return 1
     local rrest="${rq#*.}" arest="${ac#*.}"
@@ -120,7 +132,12 @@ in_step() {   # in_step <package> <tree>
 }
 
 in_step openkal "$beside/openkal"
-in_step "$implementation" "$beside/$implementation"
+if [ "$implementation" = none ]; then
+    in_step openkal-ld "$beside/openkal-image/ld"
+    in_step llvm.compiler-rt-builtins "$beside/compiler-rt-builtins"
+else
+    in_step "$implementation" "$beside/$implementation"
+fi
 
 # On one of the three systems the shell and the build tool disagree about what
 # a path is. The translation exists there and is a no-op everywhere else.
@@ -152,6 +169,18 @@ point() {
     echo "pointed $1 at the specification's working tree"
 }
 point "$here/mcpp.toml"
+if [ "$implementation" = none ]; then
+    point "$beside/openkal-image/ld/mcpp.toml"
+    for pair in "openkal-ld:$beside/openkal-image/ld" "llvm.compiler-rt-builtins:$beside/compiler-rt-builtins"; do
+        pkg="${pair%%:*}"; tree="$(native "${pair#*:}")"
+        sed "s|^$pkg = .*$|$pkg = { path = \"$tree\" }|" "$here/mcpp.toml" > "$here/mcpp.toml.next"
+        mv "$here/mcpp.toml.next" "$here/mcpp.toml"
+        echo "pointed this package at $pkg's working tree"
+    done
+    sed -n '/^\[target/,/^$/p' "$here/mcpp.toml"
+    echo none
+    exit 0
+fi
 point "$beside/$implementation/mcpp.toml"
 
 # And this package's own reference to the implementation. It names a version,

@@ -1,0 +1,11 @@
+# The image image-dlopen places: no C library, its exports marked, its imports
+# `kal_*' alone. A constructor and a destructor say when the loader ran them.
+[package]
+name    = "plug"
+version = "0.1.0"
+
+[build-dependencies]
+openkal-tools = { git = "https://github.com/mcpplibs/openkal-image.git", branch = "openkal-0.17.0", tools = ["okld", "okrun"] }
+
+[targets.plug]
+kind = "shared"

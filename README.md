@@ -633,6 +633,28 @@ rather than beneath because openkal is deliberately literal about names: it
 passes on the name it was given and does not know that a program is a kind of
 file.
 
+## As the C library of an ok image (0.22.0)
+
+For the target `<arch>-openkal` (openkal SPEC clause 12) this library is built
+into an **ok image**: one artifact per architecture that `okrun` runs on
+Linux, macOS and Windows. Nothing of an implementation is beneath it in the
+image --- the loader holds the one implementation of the process and binds the
+image's `kal_*` imports to it --- so the image form differs from the others in
+four places, all in `port/src/image`:
+
+| Item | The image form |
+|---|---|
+| entry | `int ok_main(void)`, the entry SPEC 12.2 names: the library comes up (if its prioritised constructor has not already brought it up), `main` runs, then the `atexit` handlers and the flush of every stream; the loader runs the finalisers and ends with the status |
+| thread-local storage | emulated (SPEC 12.2): `__emutls_get_address` keeps each variable under a key of this library's own |
+| `dlopen`, `dlsym`, `dladdr`, `dlclose`, `dlerror` | over libokld (`openkal-ld`), filled from `openkal.exec`; a placed image's `kal_*` imports are bound through a table of every name of `SURFACE.txt`, held weakly so that it requires no interface (SPEC 12.4), then to this image's exports and to images placed with `RTLD_GLOBAL` |
+| `dl_iterate_phdr` | this image, then every placed one, so an unwinder finds each image's frames |
+
+The compiler-rt builtins come from `llvm.compiler-rt-builtins` (22.1.8.6), built
+with the image's flags: on AArch64 a `long double` is 128 bits and `printf`
+reaches its routines. `examples/image-dlopen` and
+`examples/image-early-constructor` are built once on Linux for both
+architectures and run through `okrun` on four systems in CI.
+
 ## What runs above it
 
 | | |
