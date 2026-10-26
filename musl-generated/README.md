@@ -122,3 +122,12 @@ until then, `x86_64` targeting macOS fell into the generic
 `cfg(all(arch = "x86_64", not(windows)))` row and silently got Linux's
 answer for all four of these, untested, because nothing in this repository
 builds or runs for it.
+
+## The ok-image variants (`x86_64-openkal`, `aarch64-openkal`)
+
+Added for 0.22.0 by the same three commands, with the architecture's `ARCH`,
+and one line changed: `typedef int wint_t;` where the generic header has
+`typedef unsigned wint_t;`. An ok image is compiled for `<arch>-unknown-none-elf`,
+and on that triple the compiler's `__WINT_TYPE__` is `int` (clang 23, both
+architectures); `port/src/okm_type_identity.c` checks the header against it.
+Every other line is the architecture's, as the image convention fixes it.

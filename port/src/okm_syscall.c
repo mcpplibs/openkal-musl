@@ -69,6 +69,24 @@ extern __typeof(kal_terminal_size)     kal_terminal_size     __attribute__((__we
  * Weak by the same rule as everything else in that interface: a backend may
  * bound some of its resources and not others, or decline the interface. */
 extern __typeof(kal_timeout_wait_process) kal_timeout_wait_process __attribute__((__weak__));
+/* The processor time of this program (openkal 0.17, kal_program_info), for
+ * CLOCK_PROCESS_CPUTIME_ID; weak by the same rule. */
+extern __typeof(kal_process_self)  kal_process_self  __attribute__((__weak__));
+extern __typeof(kal_process_info)  kal_process_info  __attribute__((__weak__));
+extern __typeof(kal_process_close) kal_process_close __attribute__((__weak__));
+
+/* This program's processor time in nanoseconds, or -1 where the interface
+ * cannot say. */
+static long long okm_self_cpu_ns(void) {
+	if (!kal_process_self || !kal_process_info || !kal_process_close) return -1;
+	struct kal_process me;
+	if (kal_process_self(&me) != kal_ok) return -1;
+	struct kal_program_info info = { .self_size = sizeof info };
+	const int rc = kal_process_info(me, KAL_PINFO_CPU, &info);
+	kal_process_close(me);
+	if (rc != kal_ok || !(info.present & KAL_PINFO_CPU)) return -1;
+	return (long long)info.cpu_ns;
+}
 
 #include <errno.h>
 #include <fcntl.h>
@@ -2092,11 +2110,30 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 #endif
 
 	/* --- time -------------------------------------------------------------- */
+	/* A PROCESSOR CLOCK IS THE PROCESSOR TIME, NOT THE MONOTONIC CLOCK. Every
+	 * clock but the wall clock was answered with the monotonic one, so `clock()'
+	 * and CLOCK_PROCESS_CPUTIME_ID counted time asleep as work --- measured above
+	 * this port, a program idle for a second reported a second of processor
+	 * time. The program's is kal_program_info's; a context's own is not in the
+	 * interface, and is refused rather than invented. */
 	case SYS_clock_gettime: {
 		struct timespec* ts = (struct timespec*)a2;
-		if ((int)a1 == CLOCK_REALTIME) to_timespec(kal_time_wall(), ts);
-		else                            to_timespec(kal_time_monotonic(), ts);
-		return 0;
+		switch ((int)a1) {
+		case CLOCK_REALTIME:
+			to_timespec(kal_time_wall(), ts);
+			return 0;
+		case CLOCK_PROCESS_CPUTIME_ID: {
+			const long long ns = okm_self_cpu_ns();
+			if (ns < 0) return -EINVAL;
+			to_timespec((kal_duration)ns, ts);
+			return 0;
+		}
+		case CLOCK_THREAD_CPUTIME_ID:
+			return -EINVAL;
+		default:
+			to_timespec(kal_time_monotonic(), ts);
+			return 0;
+		}
 	}
 	case SYS_clock_getres:
 		if (a2) to_timespec(kal_time_monotonic_granularity(), (struct timespec*)a2);

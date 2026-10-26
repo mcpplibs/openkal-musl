@@ -305,6 +305,7 @@ lesser of the two, and the row returns when the schema carries `targets`.
 | the identity of a node | `st_dev` and `st_ino` are the implementation's answer where it has one, and **zero for both where it has none** | They were the constants 0 and 1, so every file compared equal to every other: `std::filesystem::equivalent` on two separately created files answered `true` **with no error**. openkal 0.9 carries an identity and reports whether it knows one; a caller must not read two zeroes as sameness, which is why nothing is invented for an implementation that cannot distinguish nodes. |
 | ownership | `chown` reports `ENOSYS`; `stat` reports 1000 for both | as the row above: a capability-oriented environment has no principal for an owner to name. |
 | a mode given at creation | `open(…, O_CREAT, 0600)` and `mkdir(path, 0700)` **succeed** and `stat` afterwards reports 0666 and 0777 | the row above, in the one place where it does not read as a refusal. openkal opens a file for a purpose and not for an audience, so the argument has nowhere to go. Refusing every mode but the one `stat` will report would refuse nearly every program; what a caller can rely on instead is stated below. |
+| processor clocks | `CLOCK_PROCESS_CPUTIME_ID` and `clock()` are the program's processor time (**since 0.22.0**; before, every clock but the wall clock was the monotonic one, and time asleep counted as work); `CLOCK_THREAD_CPUTIME_ID` reports `EINVAL` | openkal 0.17 reports a program's processor time in `kal_program_info` and has no context's own; a clock that answered with another quantity would be answered wrongly rather than refused. |
 | entropy | `getrandom` reports `ENOSYS` where the backend declines `openkal.random` | openkal has no source of one to require, and this port does not invent one. The allocator's cookie and the stack canary are derived from the clock and from an address; neither is a security property here. |
 | a signal delivered anywhere | `raise` and `kill` perform a signal's **default action** and nothing else: terminating signals end the program, ignored ones succeed, stopping ones report `ENOSYS`, and musl's own three (32, 33, 34) are refused, so `pthread_cancel` reports `ENOSYS` | there is no delivery, so there is no handler to reach; what remains of a signal is what it does when no handler exists. `abort` reaches `kal_abort`, which raises the signal on Linux and ends with a distinguished status elsewhere — a parent can tell an abnormal end from an ordinary one on every system. |
 | an immediate answer about a started program | `waitpid(…, WNOHANG)` returns without the program having finished, but may wait up to one polling interval of the implementation beneath (one millisecond on Linux) | `kal_timeout_wait_process` takes a bound and openkal spells "no bound" as zero, so a caller that does not want to wait asks for the smallest bound there is. An environment rounds a bound up to what its clock can distinguish; a bound shorter than the clock is a promise no environment can keep. |
@@ -632,6 +633,30 @@ second, which is what every C library for that environment does. It is here
 rather than beneath because openkal is deliberately literal about names: it
 passes on the name it was given and does not know that a program is a kind of
 file.
+
+## As the C library of an ok image (0.22.0)
+
+For the target `<arch>-openkal` (openkal SPEC clause 12) this library is built
+into an **ok image**: one artifact per architecture that `okrun` runs on
+Linux, macOS and Windows. Nothing of an implementation is beneath it in the
+image --- the loader holds the one implementation of the process and binds the
+image's `kal_*` imports to it --- so the image form differs from the others in
+four places, all in `port/src/image`:
+
+| Item | The image form |
+|---|---|
+| entry | `int ok_main(void)`, the entry SPEC 12.2 names: the library comes up (if its prioritised constructor has not already brought it up), `main` runs, then the `atexit` handlers and the flush of every stream; the loader runs the finalisers and ends with the status |
+| thread-local storage | emulated (SPEC 12.2): `__emutls_get_address` keeps each variable under a key of this library's own |
+| `dlopen`, `dlsym`, `dladdr`, `dlclose`, `dlerror` | over libokld (`openkal-ld`), filled from `openkal.exec`; a placed image's `kal_*` imports are bound through a table of every name of `SURFACE.txt`, held weakly so that it requires no interface (SPEC 12.4), then to this image's exports and to images placed with `RTLD_GLOBAL` |
+| `dl_iterate_phdr` | this image, then every placed one, so an unwinder finds each image's frames |
+
+The compiler-rt builtins come from `llvm.compiler-rt-builtins` (22.1.8.6), built
+with the image's flags, behind the default feature `image-builtins`: on AArch64
+a `long double` is 128 bits and `printf` reaches its routines. A package that
+supplies the layer itself (`openkal-llvm-runtime`) depends on this one with
+`default-features = false`, since a build has one compiler runtime. `examples/image-dlopen` and
+`examples/image-early-constructor` are built once on Linux for both
+architectures and run through `okrun` on four systems in CI.
 
 ## What runs above it
 

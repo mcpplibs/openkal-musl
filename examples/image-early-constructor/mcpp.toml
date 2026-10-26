@@ -1,0 +1,15 @@
+# The C library is up before the program's own constructors run: the loader
+# runs an image's initialisers before its entry (openkal SPEC 12.3).
+[package]
+name    = "image-early-constructor"
+version = "0.1.0"
+
+[dependencies]
+openkal-musl = { path = "../.." }
+
+[build-dependencies]
+openkal-tools = { git = "https://github.com/mcpplibs/openkal-image.git", branch = "openkal-0.17.0", tools = ["okld", "okrun"] }
+
+[targets.image-early-constructor]
+kind = "bin"
+main = "src/main.c"
