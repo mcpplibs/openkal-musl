@@ -13,11 +13,22 @@
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <spawn.h>
+#include <sys/syscall.h>
 
 static int failures = 0;
 static void check(int ok, const char *what) {
 	if (!ok) { printf("FAIL: %s (errno=%d)\n", what, errno); failures++; }
 	else printf("ok: %s\n", what);
+}
+
+/* The first byte of a file, or -1. */
+static int first_byte(const char *name) {
+	unsigned char c;
+	const int fd = open(name, O_RDONLY);
+	if (fd < 0) return -1;
+	const ssize_t n = read(fd, &c, 1);
+	close(fd);
+	return n == 1 ? c : -1;
 }
 
 static volatile int counter;
@@ -166,6 +177,34 @@ int main(int argc, char **argv, char **envp) {
 	check(rename(name, "okm-probe2.tmp") == 0, "a file is renamed");
 	check(access(name, F_OK) != 0 && errno == ENOENT, "the old name is gone, and says so");
 	check(unlink("okm-probe2.tmp") == 0, "the new name is removed");
+
+	/* renameat2: a flag is done by its meaning or refused, never ignored
+	 * (0.22.4; until then both flags were read as none, and the second
+	 * name's file was lost). The kernel's numbers: RENAME_NOREPLACE 1,
+	 * RENAME_EXCHANGE 2. */
+	{
+		const int fa = open("okm-rn-a.tmp", O_CREAT | O_WRONLY | O_TRUNC, 0644);
+		const int fb = open("okm-rn-b.tmp", O_CREAT | O_WRONLY | O_TRUNC, 0644);
+		check(fa >= 0 && fb >= 0 && write(fa, "a", 1) == 1 && write(fb, "b", 1) == 1,
+		      "two files are written for renameat2");
+		close(fa); close(fb);
+		errno = 0;
+		long r = syscall(SYS_renameat2, AT_FDCWD, "okm-rn-a.tmp", AT_FDCWD, "okm-rn-b.tmp", 1);
+		check(r == -1 && (errno == EEXIST || errno == EINVAL),
+		      "renameat2 RENAME_NOREPLACE onto a name that exists is refused");
+		check(first_byte("okm-rn-a.tmp") == 'a' && first_byte("okm-rn-b.tmp") == 'b',
+		      "and each name keeps its file");
+		errno = 0;
+		r = syscall(SYS_renameat2, AT_FDCWD, "okm-rn-a.tmp", AT_FDCWD, "okm-rn-b.tmp", 2);
+		check(r == -1 && errno == EINVAL, "renameat2 RENAME_EXCHANGE is refused, not done as a rename");
+		check(first_byte("okm-rn-a.tmp") == 'a' && first_byte("okm-rn-b.tmp") == 'b',
+		      "and each name still keeps its file");
+		errno = 0;
+		r = syscall(SYS_renameat2, AT_FDCWD, "okm-rn-a.tmp", AT_FDCWD, "okm-rn-c.tmp", 1);
+		check(r == 0 ? first_byte("okm-rn-c.tmp") == 'a' && access("okm-rn-a.tmp", F_OK) != 0 : errno == EINVAL,
+		      "renameat2 RENAME_NOREPLACE onto a free name renames, or says the volume cannot");
+		unlink("okm-rn-a.tmp"); unlink("okm-rn-b.tmp"); unlink("okm-rn-c.tmp");
+	}
 
 	/* time */
 	struct timespec t0, t1;

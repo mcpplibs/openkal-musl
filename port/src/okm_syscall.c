@@ -1792,12 +1792,41 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_renameat2:
 #endif
 	{
+		/* A FLAG IS DONE BY ITS MEANING OR REFUSED, NEVER IGNORED.
+		 *
+		 * Until 0.22.4 the flags word of renameat2 was not read: a
+		 * RENAME_NOREPLACE rename replaced the name it was told to leave,
+		 * and a RENAME_EXCHANGE --- swap two names --- moved the first over
+		 * the second and lost the second's file. Both were reported as
+		 * success. (mcpplibs.os 0.2.1's audit found it; data was lost.)
+		 *
+		 * RENAME_NOREPLACE is kal_fs_rename_flags(KAL_RENAME_NO_REPLACE):
+		 * the test and the rename are one act, as the kernel's are. A volume
+		 * that cannot do it answers kal_err_not_supported, which is EINVAL
+		 * here, the kernel's answer for a flag the file system does not
+		 * support. openkal has no exchange, and the flag cannot be composed
+		 * above it without a moment in which one name is missing; it is
+		 * refused with EINVAL, as is every other bit and every combination
+		 * the kernel refuses. */
+		unsigned long flags = 0;
+#ifdef SYS_renameat2
+		if (n == SYS_renameat2) flags = (unsigned long)a5;
+#endif
+		enum { rename_noreplace = 1 };
+		if (flags & ~(unsigned long)rename_noreplace) return -EINVAL;
 		struct okm_at* const from = &scratch.two[0];
 		struct okm_at* const to   = &scratch.two[1];
 		syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, from, 0);
 		if (r) return r;
 		r = okm_resolve((int)a3, (const char*)a4, to, 0);
 		if (r) return r;
+		if (flags & rename_noreplace) {
+			const int e = okm_fs_rename_flags(from->base, from->rel, slen(from->rel),
+			                                  to->base, to->rel, slen(to->rel),
+			                                  KAL_RENAME_NO_REPLACE);
+			if (e == kal_err_not_supported) return -EINVAL;
+			return e == kal_ok ? 0 : -okm_errno(e);
+		}
 		const int e = okm_fs_rename(from->base, from->rel, slen(from->rel),
 		                            to->base, to->rel, slen(to->rel));
 		return e == kal_ok ? 0 : -okm_errno(e);
