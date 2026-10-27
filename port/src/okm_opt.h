@@ -57,6 +57,7 @@
 #define okm_fs_mkdir         kal_fs_mkdir
 #define okm_fs_remove        kal_fs_remove
 #define okm_fs_rename        kal_fs_rename
+#define okm_fs_rename_flags  kal_fs_rename_flags
 #define okm_fs_file_info     kal_fs_file_info
 #define okm_fs_set_modified  kal_fs_set_modified
 #define okm_fs_set_modified_at kal_fs_set_modified_at
@@ -151,6 +152,9 @@ static inline int okm_fs_remove(struct kal_dir, const char*,
 static inline int okm_fs_rename(struct kal_dir, const char*, kal_uintptr,
                                 struct kal_dir, const char*,
                                 kal_uintptr) { return kal_err_not_supported; }
+static inline int okm_fs_rename_flags(struct kal_dir, const char*, kal_uintptr,
+                                      struct kal_dir, const char*, kal_uintptr,
+                                      kal_uintptr) { return kal_err_not_supported; }
 static inline int okm_fs_file_info(struct kal_file, kal_u32,
                                    struct kal_node_info*) { return kal_err_not_supported; }
 static inline int okm_fs_set_modified(struct kal_file, kal_u64) { return kal_err_not_supported; }
