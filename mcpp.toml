@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.22.1"
+version     = "0.22.2"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 
@@ -262,7 +262,7 @@ sources = [
 ]
 
 [target.'cfg(windows)'.dependencies]
-openkal-windows = { version = "0.13.1", features = ["standalone"] }
+openkal-windows = { version = "0.13.2", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #
