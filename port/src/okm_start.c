@@ -117,7 +117,7 @@ static char* dup_counted(const char* s, size_t n)
  * the stack the program started on. It is the same information; the difference
  * is that every environment supplies it this way and only one supplies it the
  * other way. */
-void __okm_init_env(void)
+static void okm_take_args(void)
 {
 	/* EACH VALUE IS COPIED, AND THE LENGTH REPORTED IS THE VALUE'S OWN. It
 	 * was answered with a pointer into the implementation's storage, which is
@@ -125,6 +125,8 @@ void __okm_init_env(void)
 	 * this library is precisely the consumer that must not depend on which way
 	 * it was reached. A capacity of zero asks for the length; asking twice is
 	 * cheaper than a buffer that might be too small. */
+	/* What a first taking copied stays allocated: a constructor may hold a
+	 * pointer to it (`__progname' is one). */
 	const kal_uintptr argc = kal_env_arg_count();
 	g_argc = 0;
 	for (kal_uintptr i = 0; i < argc && g_argc < 255; i++) {
@@ -132,11 +134,19 @@ void __okm_init_env(void)
 		if (len < 0) break;
 		char* p = kal_alloc((kal_uintptr)len + 1, 1);
 		if (!p) break;
-		if (kal_env_arg(i, p, (kal_uintptr)len) != len) break;
+		if (kal_env_arg(i, p, (kal_uintptr)len) != len) { kal_free(p, (kal_uintptr)len + 1, 1); break; }
 		p[len] = 0;
 		g_argv_store[g_argc++] = p;
 	}
 	g_argv_store[g_argc] = 0;
+
+	__progname = __progname_full = g_argc ? g_argv_store[0] : (char*)"";
+	for (char* q = __progname_full; *q; q++) if (*q == '/') __progname = q + 1;
+}
+
+void __okm_init_env(void)
+{
+	okm_take_args();
 
 	/* Enumeration answers a NAME, and the value is then looked up by it. Two
 	 * small operations rather than one that answers both: the one that answered
@@ -166,9 +176,6 @@ void __okm_init_env(void)
 	}
 	g_envp_store[envc] = 0;
 	__environ = g_envp_store;
-
-	__progname = __progname_full = g_argc ? g_argv_store[0] : (char*)"";
-	for (char* q = __progname_full; *q; q++) if (*q == '/') __progname = q + 1;
 }
 
 char** __okm_argv(void) { return g_argv_store; }
@@ -342,6 +349,19 @@ int __libc_start_main(int (*main_fn)(int, char**, char**), int argc, char** argv
 	(void)argc; (void)argv; (void)init_dummy; (void)fini_dummy; (void)ldso_dummy;
 
 	__okm_libc_init();
+	/* THE ARGUMENTS, TAKEN AGAIN NOW THE PROGRAM IS ENTERED.
+	 *
+	 * Where the loader runs constructors before the entry (Mach-O), this
+	 * library is brought up from a constructor of its own
+	 * (port/src/mach/early_init.c), and the implementation records what the
+	 * program was started with from a constructor of ITS own --- and the order
+	 * among constructors is the order the linker loaded their objects in, which
+	 * neither package decides. Measured on aarch64-macos: in mcppls, whose link
+	 * loaded this library's object first, the arguments were taken before they
+	 * were recorded, and `main` received an argc of 0. The entry is reached
+	 * after the implementation recorded them. The named values are taken once:
+	 * a constructor may already have changed them. */
+	okm_take_args();
 
 	__libc_start_init();
 	exit(main_fn(g_argc, g_argv_store, __environ));
