@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.22.7"
+version     = "0.22.8"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 
@@ -229,7 +229,7 @@ defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
 # other. What the image form adds is libokld --- the loader the image format
 # defines --- for `dlopen', which places further images the same way.
 [target.'cfg(os = "openkal")'.dependencies]
-openkal-ld = "0.1.3"
+openkal-ld = "0.1.4"
 
 # The routines a compiler emits calls to and no C library defines --- on
 # AArch64, every arithmetic operation on a 128-bit `long double`, which
