@@ -97,6 +97,12 @@ int main(int argc, char **argv, char **envp) {
 	check(lseek(fd, 3, SEEK_SET) == 3, "the position is set");
 	char rb[8] = {0};
 	check(read(fd, rb, 4) == 4 && memcmp(rb, "3456", 4) == 0, "four bytes are read from the position");
+	/* At an offset, and the position stays where the read above left it. */
+	memset(rb, 0, sizeof rb);
+	check(pread(fd, rb, 3, 1) == 3 && memcmp(rb, "123", 3) == 0, "three bytes are read at an offset");
+	check(pwrite(fd, "x", 1, 0) == 1, "a byte is written at an offset");
+	check(lseek(fd, 0, SEEK_CUR) == 7, "neither moves the position");
+	check(pread(fd, rb, 2, 0) == 2 && memcmp(rb, "x1", 2) == 0, "the byte written at an offset is read back");
 	struct stat st;
 	check(fstat(fd, &st) == 0 && st.st_size == 10, "the open file reports its length");
 	check(ftruncate(fd, 4) == 0, "the length is set");
