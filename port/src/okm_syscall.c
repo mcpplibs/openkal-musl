@@ -247,6 +247,47 @@ static syscall_arg_t do_read(int fd, void* buf, size_t len)
 	return r;
 }
 
+/* A TRANSFER AT AN OFFSET, MADE OF THE POSITION.
+ *
+ * openkal reads and writes a file at its position and offers no transfer at
+ * an offset, so `pread' and `pwrite' are a seek, the transfer, and a seek back
+ * to the position the descriptor had. Until 0.22.9 they were answered ENOSYS,
+ * which no configure check can see: the functions link. LLVM reads every file
+ * through `pread', and clangd built as an ok image could open none (measured
+ * 2026-10-29).
+ *
+ * The three steps hold the descriptor table's lock, so two positional transfers
+ * do not interleave. What the lock does not give is POSIX's other promise: a
+ * plain `read' or `write' on the same descriptor, in another thread, between
+ * the two seeks, moves from the positional offset. Recorded in musl/PATCHES.md. */
+static syscall_arg_t do_transfer_at(int fd, const struct iovec* v, int count,
+                                    int64_t at, int writing)
+{
+	struct okm_desc* d = okm_desc_of(fd);
+	if (!d) return -EBADF;
+	if (d->kind != OKM_FILE) return -ESPIPE;
+	if (at < 0 || count < 0) return -EINVAL;
+
+	okm_lock();
+	kal_u64 keep = 0, now = 0;
+	int e = okm_fs_seek(d->file, 0, SEEK_CUR, &keep);
+	if (e == kal_ok) e = okm_fs_seek(d->file, at, SEEK_SET, &now);
+	if (e != kal_ok) { okm_unlock(); return -okm_errno(e); }
+
+	syscall_arg_t total = 0;
+	for (int i = 0; i < count; i++) {
+		if (v[i].iov_len == 0) continue;
+		const syscall_arg_t r = writing ? do_write(fd, v[i].iov_base, v[i].iov_len)
+		                                : do_read(fd, v[i].iov_base, v[i].iov_len);
+		if (r < 0) { if (!total) total = r; break; }
+		total += r;
+		if ((size_t)r < v[i].iov_len) break;
+	}
+	okm_fs_seek(d->file, (int64_t)keep, SEEK_SET, &now);
+	okm_unlock();
+	return total;
+}
+
 /* --- opening --------------------------------------------------------------- */
 
 static syscall_arg_t do_openat(int dirfd, const char* path, int flags, int mode)
@@ -1347,6 +1388,21 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		}
 		return total;
 	}
+
+	/* The offset is one argument on every target this library builds (LP64);
+	 * see do_transfer_at for how the transfer is made. */
+	case SYS_pread64: {
+		struct iovec one = { (void*)a2, (size_t)a3 };
+		return do_transfer_at((int)a1, &one, 1, (int64_t)a4, 0);
+	}
+	case SYS_pwrite64: {
+		struct iovec one = { (void*)a2, (size_t)a3 };
+		return do_transfer_at((int)a1, &one, 1, (int64_t)a4, 1);
+	}
+	case SYS_preadv:
+		return do_transfer_at((int)a1, (const struct iovec*)a2, (int)a3, (int64_t)a4, 0);
+	case SYS_pwritev:
+		return do_transfer_at((int)a1, (const struct iovec*)a2, (int)a3, (int64_t)a4, 1);
 
 	/* --- naming ----------------------------------------------------------- */
 	case SYS_openat: return do_openat((int)a1, (const char*)a2, (int)a3, (int)a4);

@@ -652,6 +652,21 @@ to a directory's time at all. A file still asks for exactly what is required,
 and an implementation that cannot open a directory returns an error that is
 passed on unchanged. Asked of the specification.
 
+## A transfer at an offset, made of the position (0.22.9)
+
+`pread`, `pwrite`, `preadv` and `pwritev` are a seek to the offset, the
+transfer, and a seek back to the descriptor's position, under the descriptor
+table's lock (`do_transfer_at` in `port/src/okm_syscall.c`). openkal reads and
+writes a file at its position and has no transfer at an offset. Before 0.22.9
+the four answered `ENOSYS`, which a configure check cannot see because the
+functions link; LLVM reads every file through `pread`.
+
+A caller can tell one difference. Two positional transfers on one descriptor do
+not interleave, but a plain `read` or `write` on the same descriptor in another
+thread, made between the two seeks, moves from the positional offset; POSIX
+leaves the position of such a call unaffected. A descriptor that is not a file
+answers `ESPIPE`, as POSIX states.
+
 ## What the architecture does not decide alone
 
 `long double`.
