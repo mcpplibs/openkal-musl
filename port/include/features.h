@@ -165,14 +165,18 @@
  * LONGER TREATED THE SAME. Reported as mcpplibs/openkal-musl#13: a program
  * above this library could not declare `static int hidden = 7;'.
  *
- *   `restrict' is written by musl's PUBLIC headers. <stdio.h> declares
- *   `fprintf(FILE *restrict, const char *restrict, ...)', so a C++ consumer
- *   needs the spelling whether or not the internal overlay is anywhere near
- *   its command line. It stays unconditional, and the name it costs a C++
- *   program is a property of musl's public headers rather than of this port.
+ *   `restrict' IS NOT WRITTEN BY musl's PUBLIC HEADERS (0.22.7). They spell
+ *   it `__restrict' --- <stdio.h> declares `fprintf(FILE *__restrict, const
+ *   char *__restrict, ...)' --- and `grep -w restrict' over musl/include finds
+ *   it in this file alone. The bare word is the internal overlay's, so a C++
+ *   unit needs it only where the overlay is on its line. Defining it for
+ *   every C++ consumer took the name from programs that use it: clang's own
+ *   sources pass `restrict' to a macro (`C99_KEYWORD(restrict, ...)' in
+ *   TokenKinds.def), where it expanded to `__restrict' and named another
+ *   token --- measured building clangd over this library, with LLVM 23.1.
  *
- *   `hidden', `weak' and `weak_alias' are written by the INTERNAL OVERLAY and
- *   by nothing else. Measured: `grep -w' over musl/include --- the whole of
+ *   `restrict' (in C++), `hidden', `weak' and `weak_alias' are written by the
+ *   INTERNAL OVERLAY and by nothing else. Measured: `grep -w' over musl/include --- the whole of
  *   what a consumer reads --- finds `hidden' zero times and `weak' zero times.
  *   Nothing a consumer includes needs any of the three to be defined at all.
  *
@@ -194,14 +198,11 @@
  *
  *     ordinary consumer   overlay absent   `hidden' is the program's to use
  *     compiler-rt         overlay present  `hidden' neutralised, as measured */
-#  ifdef __cplusplus
-#    if !defined(restrict)
-#      define restrict __restrict
-#    endif
-#  endif
-
 #  ifdef hidden
 #    ifdef __cplusplus
+#      if !defined(restrict)
+#        define restrict __restrict
+#      endif
 #      undef hidden
 #      define hidden extern "C"
 #    else

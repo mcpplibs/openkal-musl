@@ -760,8 +760,8 @@ jobs:
       #
       # Reported as openkal-musl#13. This one is a COMPILE-TIME criterion: the
       # source declares `hidden`, `weak` and `weak_alias` as ordinary
-      # identifiers, and if any of the three is a macro again the file does not
-      # compile. It is run as well as built so that something links afterwards,
+      # identifiers, and a C++ unit beside it `restrict` (0.22.7); if any of
+      # them is a macro again the program does not compile. It is run as well as built so that something links afterwards,
       # which is what distinguishes a source that compiles from a package that
       # works.
       # A THREAD CREATED FROM C++ IS THE THREAD THAT IS JOINED.
@@ -851,6 +851,7 @@ jobs:
         run: |
           bash tools/run-probe.sh examples/identifiers identifiers
           grep -q 'hidden+weak+weak_alias = 41' examples/identifiers/run.log
+          grep -q 'restrict (C++) = 4' examples/identifiers/run.log
 
       # WHAT `[c-abi]` CLAIMS, CHECKED ON EVERY ROW RATHER THAN ONLY ON THE
       # ONE THAT USED TO DISAGREE.
