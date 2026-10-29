@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.22.6"
+openkal-musl = "0.22.7"
 ```
 
 > **Engine floor (mcpp 2026.9.18.3):** this version of this package declares
