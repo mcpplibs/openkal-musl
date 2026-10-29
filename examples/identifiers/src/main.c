@@ -12,12 +12,9 @@
  * something LINKS and RUNS afterwards, which is what distinguishes a source
  * that compiles from a package that works.
  *
- * `restrict' IS NOT AMONG THEM, and its absence here is deliberate rather
- * than an oversight. musl's PUBLIC headers write it --- <stdio.h> declares
- * `fprintf(FILE *restrict, const char *restrict, ...)' --- so a C++ program
- * above this library needs the spelling defined and cannot have the name. That
- * is a property of musl's headers and would be one above a kernel too.
- * port/include/features.h records the division.
+ * `restrict' is a keyword in C and an identifier in C++, so it is checked
+ * from C++, in names.cpp (0.22.7): musl's public headers write `__restrict',
+ * and a C++ program above this library keeps the name.
  */
 #include <stdio.h>
 
@@ -28,6 +25,8 @@ static int weak_alias = 23;
 /* And as a function parameter and a member, which is where a macro that
  * survived would show differently. */
 struct holder { int hidden; int weak; };
+
+int cxx_restrict_name(void);
 
 static int sum(int hidden, int weak, int weak_alias)
 {
@@ -43,8 +42,10 @@ int main(void)
 	/* 41, and the value is printed rather than merely computed so that a
 	 * reader of the log sees the three names carried a value of the program's
 	 * own choosing rather than an attribute. */
-	const int failures = (total == 41) ? 0 : 1;
-	if (failures) printf("FAIL: the three names did not carry their values\n");
+	const int named = cxx_restrict_name();
+	printf("restrict (C++) = %d\n", named);
+	const int failures = (total == 41 && named == 4) ? 0 : 1;
+	if (failures) printf("FAIL: the names did not carry their values\n");
 	/* The same last line every probe in this repository prints, so that one
 	 * runner reads all four. tools/run-probe.sh asserts both directions of it. */
 	printf("-- failures: %d --\n", failures);
