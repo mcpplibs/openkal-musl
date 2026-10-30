@@ -821,6 +821,16 @@ jobs:
           grep -q -- 'another thread refused=1' examples/stack-bounds/run.log
           grep -q -- '-- failures: 0 --' examples/stack-bounds/run.log
 
+      # A FILE'S CONTENTS IN THE ADDRESS SPACE (openkal 0.18, openkal.map):
+      # mmap, munmap and msync of a file, the offsets and lengths POSIX allows
+      # and openkal does not, and the refusals. port/src/okm_map.c.
+      - name: A file is mapped, written through and released
+        env:
+          MCPP_TARGET: ${{ matrix.target }}
+        run: |
+          bash tools/run-probe.sh examples/mmap mmap
+          grep -q -- '-- failures: 0 --' examples/mmap/run.log
+
       # A LARGE ALLOCATION IS A MAPPING, AND A MAPPING IS WHOLE PAGES.
       #
       # musl's allocator uses a mapping up to the end of its last page; the port

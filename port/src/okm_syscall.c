@@ -863,6 +863,8 @@ static size_t okm_whole_pages(size_t len)
 
 static syscall_arg_t do_mmap(void* addr, size_t len, int prot, int flags, int fd, off_t off)
 {
+	/* A file's contents: openkal.map, through okm_map.c. */
+	if (fd >= 0 && !(flags & MAP_ANON)) return okm_map_file(addr, len, prot, flags, fd, off);
 	(void)prot;
 	if (addr != 0 || fd >= 0 || off != 0) return -ENOSYS;
 	if (!(flags & MAP_ANON) || !(flags & MAP_PRIVATE)) return -ENOSYS;
@@ -2173,9 +2175,19 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 
 	/* --- memory ----------------------------------------------------------- */
 	case SYS_mmap:   return do_mmap((void*)a1, (size_t)a2, (int)a3, (int)a4, (int)a5, (off_t)a6);
-	case SYS_munmap:
+	case SYS_munmap: {
+		long r = 0;
+		if (okm_map_unmap((void*)a1, (size_t)a2, &r)) return r;
 		kal_free((void*)a1, okm_whole_pages((size_t)a2), OKM_PAGE);
 		return 0;
+	}
+	case SYS_msync: {
+		/* A file region is written back through openkal.map; anonymous memory
+		 * has no file to reach, and there is nothing to do. */
+		long r = 0;
+		if (okm_map_sync((void*)a1, (size_t)a2, &r)) return r;
+		return 0;
+	}
 	case SYS_mprotect:
 		/* openkal has no operation upon the protection of a mapping. Reporting
 		 * success would be the one kind of entry this file does not contain:
