@@ -167,6 +167,13 @@ void okm_fd_release(int fd);
  * program that has already ended --- see the definition. */
 void __okm_close_all_for_exec(void);
 struct okm_desc* okm_desc_of(int fd);
+
+/* A part of a file in the address space (okm_map.c, openkal 0.18). The second
+ * and third answer whether the address was one of the file regions this
+ * library made, and if so put the system call's result in `result'. */
+long okm_map_file(void* addr, size_t len, int prot, int flags, int fd, long long off);
+int  okm_map_unmap(void* addr, size_t len, long* result);
+int  okm_map_sync(void* addr, size_t len, long* result);
 int  okm_fd_bind(int fd, int kind, kal_uintptr stream,
                  struct kal_file file, struct kal_dir dir, int flags);
 int  okm_fd_dup(int fd, int newfd, int cloexec); /* newfd < 0: lowest free     */
