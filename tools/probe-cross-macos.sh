@@ -154,15 +154,16 @@ set -e
 # the duplication primitive, part by part, which openkal-macos 0.14.1 calls so
 # that a program duplicated by `fork' can start a thread (#55). The sixteenth is
 # the calling thread's quality-of-service class (openkal-macos 0.17.0,
-# kal_task_set_priority).
-expected=$'__dyld_atfork_parent\n__dyld_atfork_prepare\n__dyld_fork_child\n__libc_fork_child\n__libc_fork_parent\n__libc_fork_prepare\n__mach_fork_child\n__malloc_fork_child\n__malloc_fork_parent\n__malloc_fork_prepare\n__pthread_atfork_child\n__pthread_atfork_parent\n__pthread_atfork_prepare\n_clock_gettime_nsec_np\n_pthread_create_from_mach_thread\n_pthread_set_qos_class_self_np'
+# kal_task_set_priority); the seventeenth the calling thread's identifier from
+# the record the system's library keeps (openkal-macos 0.17.1, kal_task_current).
+expected=$'__dyld_atfork_parent\n__dyld_atfork_prepare\n__dyld_fork_child\n__libc_fork_child\n__libc_fork_parent\n__libc_fork_prepare\n__mach_fork_child\n__malloc_fork_child\n__malloc_fork_parent\n__malloc_fork_prepare\n__pthread_atfork_child\n__pthread_atfork_parent\n__pthread_atfork_prepare\n_clock_gettime_nsec_np\n_pthread_create_from_mach_thread\n_pthread_set_qos_class_self_np\n_pthread_threadid_np'
 echo "probe: names this system supplies:"
 printf '  %s\n' $undef
 
 fail=0
 [ "$indirect" -eq 0 ] || { echo "FAIL: $indirect indirect symbols; recorded 0" >&2; fail=1; }
 [ "$undef" = "$expected" ] || {
-    echo "FAIL: the set of names differs from the recorded sixteen" >&2
+    echo "FAIL: the set of names differs from the recorded seventeen" >&2
     echo "  recorded:" >&2; printf '    %s\n' $expected >&2
     fail=1
 }
