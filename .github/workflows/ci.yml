@@ -83,7 +83,7 @@ jobs:
           # used to be.
           - { name: 'linux, gcc',    os: ubuntu-24.04, toolchain: 'gcc@16.1.0',  target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-signal', dirtime: '--dir-time'    }
           - { name: 'linux, llvm',   os: ubuntu-24.04, toolchain: 'llvm@22.1.8', target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-signal', dirtime: '--dir-time'    }
-          - { name: 'macos, llvm',   os: macos-14,     toolchain: 'llvm@20.1.7', target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-status', dirtime: '--dir-time'    }
+          - { name: 'macos, llvm',   os: macos-15,     toolchain: 'llvm@20.1.7', target: '',                   net: 'yes', fork: '--fork',    shell: '--shell',    abort: '--abort-status', dirtime: '--dir-time'    }
           # THE WINDOWS ROW WAS HERE, BUILT WITH GCC, AND IS GONE RATHER THAN
           # FIXED, BECAUSE IT COULD NOT BE.
           #
@@ -1189,7 +1189,7 @@ jobs:
   cross-macos-run:
     name: what was cross-built starts, on that system
     needs: cross-macos
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
