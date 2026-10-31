@@ -1,0 +1,13 @@
+[package]
+name    = "process-identity"
+version = "0.1.0"
+
+[dependencies]
+openkal-musl = { path = "../.." }
+
+[targets.process-identity]
+kind = "bin"
+main = "src/main.c"
+
+[build]
+cxx_runtime = "host-coupled"

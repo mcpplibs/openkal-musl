@@ -62,7 +62,7 @@ extern __typeof(kal_space_start) kal_space_start __attribute__((__weak__));
 int  __okm_child_record(struct kal_process h);   /* okm_syscall.c */
 void __okm_forget_children(void);               /* okm_syscall.c */
 int  __okm_child_reserve(int* pid_out);         /* okm_syscall.c --- lock held */
-void __okm_child_commit(int slot, struct kal_process h);
+int  __okm_child_commit(int slot, struct kal_process h);
 void __okm_child_release(int slot);
 void __okm_set_self_pid(int pid);
 
@@ -191,7 +191,9 @@ syscall_arg_t __okm_fork(void)
 	 * fails would exhaust the table and begin reporting EAGAIN for a reason
 	 * that has nothing to do with how many children it has. */
 	if (e != kal_ok) { __okm_child_release(slot); okm_unlock(); return -okm_errno(e); }
-	__okm_child_commit(slot, child);
+	/* The number the parent holds is the environment's for the copy where it
+	 * says (0.24.0), which the copy answers for itself; else the one reserved. */
+	const int pid = __okm_child_commit(slot, child);
 	okm_unlock();
-	return (syscall_arg_t)reserved_pid;
+	return (syscall_arg_t)(pid > 0 ? pid : reserved_pid);
 }

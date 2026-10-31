@@ -353,3 +353,15 @@ syscall_arg_t __syscall_cp_asm(volatile void* cancel, syscall_arg_t nr,
 	if (*(volatile int*)cancel) return __cancel();
 	return __okm_syscall(nr, a, b, c, d, e, f);
 }
+
+/* The identity musl records for the calling context, which the scheduling
+ * calls compare against: openkal sets the calling context's claim only. Read
+ * from the context's own record, as everything per-context here is (a
+ * `_Thread_local' would ask macOS's dyld for `__tlv_bootstrap', which a
+ * program that carries its own C library does not link). Zero in the initial
+ * context, whose identity okm_start.c settles. */
+int __okm_current_tid(void)
+{
+	const struct okm_thread* t = __okm_get_self();
+	return t ? t->tid : 0;
+}
