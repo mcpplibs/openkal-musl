@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.24.0"
+version     = "0.24.1"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 
@@ -188,7 +188,7 @@ openkal-linux = { version = "0.20.0", features = ["standalone"] }
 # is the shape of a check that silently does not run --- while the same
 # consumer was answered on Linux and Windows, whose implementations have
 # carried the array since openkal-linux 0.15.0 and openkal-windows 0.10.0.
-openkal-macos = { version = "0.17.0", features = ["standalone"] }
+openkal-macos = { version = "0.17.1", features = ["standalone"] }
 
 # FIRST STEP TOWARD A BARE MACHINE, AND NOT THE WHOLE OF IT.
 #
@@ -229,7 +229,7 @@ defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
 # other. What the image form adds is libokld --- the loader the image format
 # defines --- for `dlopen', which places further images the same way.
 [target.'cfg(os = "openkal")'.dependencies]
-openkal-ld = "0.1.8"
+openkal-ld = "0.1.9"
 
 # The routines a compiler emits calls to and no C library defines --- on
 # AArch64, every arithmetic operation on a 128-bit `long double`, which

@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.24.0"
+openkal-musl = "0.24.1"
 ```
 
 > **Engine floor (mcpp 2026.9.18.3):** this version of this package declares
@@ -652,6 +652,13 @@ openkal 0.19): `SCHED_OTHER`, `SCHED_BATCH` and `SCHED_IDLE` through
 `setpriority` (zero, positive, 19). A real-time policy is `EPERM`; another
 thread's policy is `EPERM`, because openkal sets the calling context's claim
 only; a raise the environment refuses is `EACCES`.
+
+**Each context's state is found through `kal_task_current`** --- `errno`, the
+thread pointer, thread-specific data, and in an ok image every thread-local
+variable, which is emulated --- so its cost is paid at every such access. 0.24.1
+is built over openkal-macos 0.17.1, whose answer no longer costs a system call
+(1.58 million calls in one `clangd --check`; clangd.okb on macOS arm64 had been
+1.25 to 1.9 times slower than the native clangd, and as fast on Linux).
 
 ## As the C library of an ok image (0.22.0)
 
