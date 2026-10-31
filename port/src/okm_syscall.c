@@ -74,6 +74,12 @@ extern __typeof(kal_timeout_wait_process) kal_timeout_wait_process __attribute__
 extern __typeof(kal_process_self)  kal_process_self  __attribute__((__weak__));
 extern __typeof(kal_process_info)  kal_process_info  __attribute__((__weak__));
 extern __typeof(kal_process_close) kal_process_close __attribute__((__weak__));
+/* Another program by its identifier (openkal 0.17), for `kill(pid, 0)',
+ * `getsid' and `getpgid' of a program this one did not start. */
+extern __typeof(kal_process_open_id) kal_process_open_id __attribute__((__weak__));
+/* A context's claim on the processors (openkal 0.19), for the scheduling
+ * policies and `setpriority'. */
+extern __typeof(kal_task_set_priority) kal_task_set_priority __attribute__((__weak__));
 
 /* This program's processor time in nanoseconds, or -1 where the interface
  * cannot say. */
@@ -93,6 +99,7 @@ static long long okm_self_cpu_ns(void) {
 #include <limits.h>
 #include <signal.h>
 #include <stdint.h>
+#include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -938,7 +945,54 @@ static int g_next_pid = 1000;
  * The original keeps 1. A copy is told the identifier its parent recorded for
  * it, which is the one number both sides already agree on --- the parent's
  * `fork' returned it. */
-static int g_self_pid = 1;
+static int g_self_pid = 0;   /* 0: not asked yet */
+static int g_told_pid = 1;   /* what a copy was told; the answer where the environment cannot say */
+
+/* THE ENVIRONMENT'S IDENTIFIER FOR THIS PROGRAM (openkal 0.24.0).
+ *
+ * It was the constant 1 in every program, so an identifier one program wrote
+ * where another would read it --- a lock file's owner, above all --- named the
+ * reader: every lock looked held by whoever asked, and a lock whose owner had
+ * died was never broken (LLVM's module cache, measured under clangd). The
+ * environment names each program (`kal_process_info', openkal 0.17), and that
+ * name is unique among the programs running, which is what POSIX asks of a
+ * process identifier. Asked once; a copy made by `fork' asks again, since it is
+ * another program. Where the environment cannot say, the number this library
+ * assigned is the answer, as before. */
+static int okm_self_pid(void)
+{
+	int pid = __atomic_load_n(&g_self_pid, __ATOMIC_RELAXED);
+	if (pid) return pid;
+	pid = g_told_pid;
+	if (kal_process_self && kal_process_info && kal_process_close) {
+		struct kal_process me;
+		if (kal_process_self(&me) == kal_ok) {
+			struct kal_program_info info = { .self_size = sizeof info };
+			if (kal_process_info(me, KAL_PINFO_ID, &info) == kal_ok && (info.present & KAL_PINFO_ID)
+			    && info.id > 0 && info.id <= INT_MAX)
+				pid = (int)info.id;
+			kal_process_close(me);
+		}
+	}
+	__atomic_store_n(&g_self_pid, pid, __ATOMIC_RELAXED);
+	return pid;
+}
+
+/* A program this one did not start, by the identifier the environment gives it:
+ * 1 running, 0 ended or unknown, -1 where the environment cannot say. */
+static int okm_other_runs(int pid)
+{
+	if (pid <= 0 || !kal_process_open_id || !kal_process_info || !kal_process_close) return -1;
+	struct kal_process other;
+	const int e = kal_process_open_id((kal_u64)pid, &other);
+	if (e == kal_err_not_found) return 0;
+	if (e != kal_ok) return -1;
+	struct kal_program_info info = { .self_size = sizeof info };
+	const int r = kal_process_info(other, KAL_PINFO_ENDED, &info);
+	kal_process_close(other);
+	if (r != kal_ok || !(info.present & KAL_PINFO_ENDED)) return 1;
+	return info.ended ? 0 : 1;
+}
 
 /* The unit this program formed, if it did. KEPT BECAUSE THE NUMBER A CALLER
  * WILL LATER USE IS NOT THE HANDLE: `kill(-n)' names a group by a POSIX
@@ -949,7 +1003,7 @@ static int g_self_pid = 1;
 static struct kal_job g_job;
 static int            g_job_held;
 
-void __okm_set_self_pid(int pid) { g_self_pid = pid; }
+void __okm_set_self_pid(int pid) { g_told_pid = pid; __atomic_store_n(&g_self_pid, 0, __ATOMIC_RELAXED); }
 
 /* Takes an entry and settles its identifier WITHOUT a resource to put in it.
  *
@@ -977,9 +1031,20 @@ int __okm_child_reserve(int* pid_out)
 	return -1;
 }
 
-void __okm_child_commit(int slot, struct kal_process h)
+/* The child's identifier becomes the environment's for it, where the
+ * environment says, so that the number its parent holds is the one the child
+ * answers for itself. Returns the identifier settled. */
+int __okm_child_commit(int slot, struct kal_process h)
 {
-	if (slot >= 0 && slot < OKM_MAX_CHILD) g_child[slot].h = h;
+	if (slot < 0 || slot >= OKM_MAX_CHILD) return -1;
+	g_child[slot].h = h;
+	if (kal_process_info) {
+		struct kal_program_info info = { .self_size = sizeof info };
+		if (kal_process_info(h, KAL_PINFO_ID, &info) == kal_ok && (info.present & KAL_PINFO_ID)
+		    && info.id > 0 && info.id <= INT_MAX)
+			g_child[slot].pid = (int)info.id;
+	}
+	return g_child[slot].pid;
 }
 
 /* The unit a start formed for this child, recorded so that a later `kill(-n)'
@@ -1014,7 +1079,7 @@ int __okm_child_record_job(struct kal_process h, struct kal_job j)
 	int pid = 0;
 	const int slot = __okm_child_reserve(&pid);
 	if (slot < 0) { okm_unlock(); return -EAGAIN; }
-	__okm_child_commit(slot, h);
+	pid = __okm_child_commit(slot, h);
 	__okm_child_job(slot, j);
 	okm_unlock();
 	return pid;
@@ -2052,7 +2117,12 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * openkal 0.10 IS THAT WORD. `kal_fs_lock' states the holder as the
 		 * open FILE and requires release when the program ends however it ends,
 		 * which is the half a caller could never have built for itself. */
-		case F_SETLK: case F_SETLKW: {
+		/* AND THE OPEN-FILE-DESCRIPTION FORMS ARE THE SAME CALL, because the
+		 * holder `kal_fs_lock' states IS the open file: the property Linux added
+		 * F_OFD_SETLK to obtain is the one openkal requires of every
+		 * implementation. They answered EINVAL, so a program that asked for the
+		 * semantics it would have got anyway was refused. */
+		case F_SETLK: case F_SETLKW: case F_OFD_SETLK: case F_OFD_SETLKW: {
 			if (d->kind != OKM_FILE) return -EBADF;
 			const struct flock* fl = (const struct flock*)a3;
 			if (!fl) return -EFAULT;
@@ -2083,7 +2153,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			}
 			kal_uintptr mode = (fl->l_type == F_RDLCK) ? KAL_LOCK_SHARED
 			                                           : KAL_LOCK_EXCLUSIVE;
-			if ((int)a2 == F_SETLKW) mode |= KAL_LOCK_WAIT;
+			if ((int)a2 == F_SETLKW || (int)a2 == F_OFD_SETLKW) mode |= KAL_LOCK_WAIT;
 			const int e = okm_fs_lock(d->file, start, len, mode);
 			return e == kal_ok ? 0 : -okm_errno(e);
 		}
@@ -2098,10 +2168,37 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 *
 		 * A refusal is what a caller can act upon; `F_SETLK' answers the
 		 * question `F_GETLK' is usually asked in order to answer. */
-		case F_GETLK: return -ENOSYS;
+		case F_GETLK: case F_OFD_GETLK: return -ENOSYS;
 		default: return -EINVAL;
 		}
 	}
+
+#ifdef SYS_flock
+	/* `flock' LOCKS THE WHOLE FILE, HELD BY THE OPEN FILE, which is exactly
+	 * `kal_fs_lock' over a length of zero: the BSD call whose holder is the open
+	 * file description, as openkal's is. It answered ENOSYS, so every program
+	 * that serialises on a lock file with it was refused outright. One
+	 * difference from Linux is stated rather than hidden: there `flock' and
+	 * `fcntl' locks are independent, and here both are the open file's one lock
+	 * --- a program that takes both on one file converts the first, which is
+	 * what `kal_fs_lock' does where two ranges meet. */
+	case SYS_flock: {
+		struct okm_desc* d = okm_desc_of((int)a1);
+		if (!d) return -EBADF;
+		if (d->kind != OKM_FILE) return -EINVAL;
+		const int op = (int)a2 & ~LOCK_NB;
+		if (op == LOCK_UN) {
+			const int e = okm_fs_unlock(d->file, 0, 0);
+			return e == kal_ok ? 0 : -okm_errno(e);
+		}
+		if (op != LOCK_SH && op != LOCK_EX) return -EINVAL;
+		kal_uintptr mode = op == LOCK_SH ? KAL_LOCK_SHARED : KAL_LOCK_EXCLUSIVE;
+		if (!((int)a2 & LOCK_NB)) mode |= KAL_LOCK_WAIT;
+		const int e = okm_fs_lock(d->file, 0, 0, mode);
+		/* EWOULDBLOCK is EAGAIN here, which is what `kal_err_again' maps to. */
+		return e == kal_ok ? 0 : -okm_errno(e);
+	}
+#endif
 
 	case SYS_ioctl: {
 		struct okm_desc* d = okm_desc_of((int)a1);
@@ -2320,8 +2417,51 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		return (syscall_arg_t)a2;
 	}
 	case SYS_sched_yield: okm_task_yield(); return 0;
+
+	/* A CONTEXT'S CLAIM ON THE PROCESSORS (openkal 0.19, kal_task_set_priority).
+	 *
+	 * musl's `pthread_setschedparam' issues this with the thread's identity.
+	 * The three policies an unprivileged program may choose are the three claims
+	 * openkal states: SCHED_OTHER the default, SCHED_BATCH the lower one,
+	 * SCHED_IDLE the background. A real-time policy is a privilege no program
+	 * here holds (EPERM), and openkal sets the CALLING context's claim only, so
+	 * another thread's is refused as one this program may not change. Where the
+	 * environment has no claims, ENOSYS, as before. */
+#ifdef SYS_sched_setscheduler
+	case SYS_sched_setscheduler: {
+		extern _Thread_local int __okm_tid;
+		const int self = __okm_tid ? __okm_tid : ((int)OKM_CONTEXT_ID() ? (int)OKM_CONTEXT_ID() : 1);
+		if (a1 != 0 && (int)a1 != self) return -EPERM;
+		kal_uintptr claim;
+		switch ((int)a2 & ~0x40000000 /* SCHED_RESET_ON_FORK */) {
+		case 0: claim = KAL_TASK_PRIORITY_DEFAULT; break;      /* SCHED_OTHER */
+		case 3: claim = KAL_TASK_PRIORITY_LOW; break;          /* SCHED_BATCH */
+		case 5: claim = KAL_TASK_PRIORITY_BACKGROUND; break;   /* SCHED_IDLE */
+		case 1: case 2: return -EPERM;                         /* SCHED_FIFO, SCHED_RR */
+		default: return -EINVAL;
+		}
+		if (!kal_task_set_priority) return -ENOSYS;
+		const int e = kal_task_set_priority(claim);
+		return e == kal_ok ? 0 : -okm_errno(e);
+	}
+#endif
+	/* The same claims by a nice value, of the calling program or context: zero
+	 * the default, a positive value the lower claim, the lowest (19) the
+	 * background; raising above the default is a privilege (EACCES). */
+#ifdef SYS_setpriority
+	case SYS_setpriority: {
+		if ((int)a1 != PRIO_PROCESS || (a2 != 0 && (int)a2 != okm_self_pid())) return -EPERM;
+		const int nice = (int)a3;
+		if (nice < 0) return -EACCES;
+		if (!kal_task_set_priority) return -ENOSYS;
+		const kal_uintptr claim = nice == 0 ? KAL_TASK_PRIORITY_DEFAULT
+		                        : nice >= 19 ? KAL_TASK_PRIORITY_BACKGROUND : KAL_TASK_PRIORITY_LOW;
+		const int e = kal_task_set_priority(claim);
+		return e == kal_ok ? 0 : -okm_errno(e);
+	}
+#endif
 	case SYS_gettid:      return (syscall_arg_t)OKM_CONTEXT_ID();
-	case SYS_getpid:      return (syscall_arg_t)g_self_pid;
+	case SYS_getpid:      return (syscall_arg_t)okm_self_pid();
 
 	/* THE SAME DEFECT `getpgrp' HAD, IN THE SAME FAMILY, MISSED ONCE.
 	 *
@@ -2465,7 +2605,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			 * `okm_opt.h' names: nothing here reports success having done
 			 * nothing, and nothing here acts on the wrong resource either.
 			 * README.md says plainly that the composition is not closed. */
-			if (g_job_held && -pid == g_self_pid) {
+			if (g_job_held && -pid == okm_self_pid()) {
 				if (sig == 0) return 0;
 				const int e = okm_process_job_terminate(g_job);
 				return e == kal_ok ? 0 : -okm_errno(e);
@@ -2482,16 +2622,19 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 			const int e = okm_process_terminate(g_child[i].h);
 			return e == kal_ok ? 0 : -okm_errno(e);
 		}
-		/* This program itself. `getpid' answers 1 here and child identifiers
-		 * begin at 1001, so `kill(getpid(), …)' reached neither branch and
-		 * reported ESRCH --- including for SIGABRT. Zero and minus one name
-		 * groups that contain this program, and it is the only member this
-		 * library can reach. */
-		/* AND IT IS `g_self_pid' RATHER THAN THE CONSTANT. A copy made by
-		 * `fork' answers the identifier its parent recorded, so comparing
-		 * against 1 would make `raise' and `abort' report ESRCH in every copy. */
-		if (pid == g_self_pid || pid == 0 || pid == -1) return signal_self(sig);
-		return -ESRCH;
+		/* This program itself, by the identifier `getpid' answers (the
+		 * environment's since 0.24.0). Zero and minus one name groups that
+		 * contain this program, and it is the only member this library can
+		 * reach. A copy made by `fork' answers its own, so `raise' and `abort'
+		 * reach the copy. */
+		if (pid == okm_self_pid() || pid == 0 || pid == -1) return signal_self(sig);
+		/* ANOTHER PROGRAM, by the environment's identifier: `kill(pid, 0)' asks
+		 * whether it is there, which openkal answers (kal_process_open_id); a
+		 * signal to a program this one did not start is not this library's to
+		 * send, and is refused as one without permission would be. */
+		const int runs = okm_other_runs(pid);
+		if (runs <= 0) return -ESRCH;
+		return sig == 0 ? 0 : -EPERM;
 	}
 #endif
 
@@ -2748,13 +2891,21 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * AND THE DIFFERENCE IS NOT COSMETIC. The `fork'-then-`setsid' dance
 	 * exists BECAUSE of EPERM, so every daemonising library handles it; not one
 	 * handles ENOSYS. A written-down failure is one a caller can act on. */
+	/* A PROGRAM THIS ONE DID NOT START is answered with its own identifier
+	 * while it runs and ESRCH once it has ended: openkal states no sessions or
+	 * groups of another program, and whether it is there is the question a
+	 * caller asks these with (LLVM's lock files ask `getsid' whether an owner
+	 * still runs). */
 	case SYS_getpgid:
-		return (a1 == 0 || a1 == g_self_pid) ? g_self_pid : -ESRCH;
+	case SYS_getsid: {
+		const int self = okm_self_pid();
+		if (a1 == 0 || a1 == (syscall_arg_t)self) return self;
+		if (child_index((int)a1) >= 0) return (syscall_arg_t)a1;
+		return okm_other_runs((int)a1) == 1 ? (syscall_arg_t)a1 : -ESRCH;
+	}
 #ifdef SYS_getpgrp
-	case SYS_getpgrp: return (syscall_arg_t)g_self_pid;
+	case SYS_getpgrp: return (syscall_arg_t)okm_self_pid();
 #endif
-	case SYS_getsid:
-		return (a1 == 0 || a1 == g_self_pid) ? g_self_pid : -ESRCH;
 
 	/* A REAL GROUP SINCE 0.12, AND IT IS THE CALL A SHELL RUNNER MAKES.
 	 *
@@ -2775,8 +2926,8 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * program into a unit it does not lead, and EPERM says the operation is here
 	 * while the group is not. */
 	case SYS_setpgid:
-		if (a1 != 0 && a1 != (syscall_arg_t)g_self_pid) return -EPERM;
-		if (a2 == 0 || a2 == (syscall_arg_t)g_self_pid) {
+		if (a1 != 0 && a1 != (syscall_arg_t)okm_self_pid()) return -EPERM;
+		if (a2 == 0 || a2 == (syscall_arg_t)okm_self_pid()) {
 			struct kal_job unit = { 0 };
 			const int e = okm_process_job_enter(&unit);
 			if (e == kal_ok) { g_job = unit; g_job_held = 1; return 0; }

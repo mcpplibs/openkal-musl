@@ -87,11 +87,17 @@ static void reap(void)
 	okm_unlock();
 }
 
+/* The identity musl records for the calling context, which the scheduling
+ * calls compare against: openkal sets the calling context's claim only. Zero in
+ * the initial context, whose identity okm_start.c settles. */
+_Thread_local int __okm_tid;
+
 static void entry(void* p)
 {
 	struct okm_thread* t = p;
 	__okm_set_tp((uintptr_t)t->tls);
 	__okm_set_self(t);
+	__okm_tid = t->tid;
 
 	/* musl ends a thread by issuing SYS_exit, which does not return. There is
 	 * no openkal operation that ends a context from within, and there does not
