@@ -87,17 +87,11 @@ static void reap(void)
 	okm_unlock();
 }
 
-/* The identity musl records for the calling context, which the scheduling
- * calls compare against: openkal sets the calling context's claim only. Zero in
- * the initial context, whose identity okm_start.c settles. */
-_Thread_local int __okm_tid;
-
 static void entry(void* p)
 {
 	struct okm_thread* t = p;
 	__okm_set_tp((uintptr_t)t->tls);
 	__okm_set_self(t);
-	__okm_tid = t->tid;
 
 	/* musl ends a thread by issuing SYS_exit, which does not return. There is
 	 * no openkal operation that ends a context from within, and there does not
@@ -358,4 +352,16 @@ syscall_arg_t __syscall_cp_asm(volatile void* cancel, syscall_arg_t nr,
 {
 	if (*(volatile int*)cancel) return __cancel();
 	return __okm_syscall(nr, a, b, c, d, e, f);
+}
+
+/* The identity musl records for the calling context, which the scheduling
+ * calls compare against: openkal sets the calling context's claim only. Read
+ * from the context's own record, as everything per-context here is (a
+ * `_Thread_local' would ask macOS's dyld for `__tlv_bootstrap', which a
+ * program that carries its own C library does not link). Zero in the initial
+ * context, whose identity okm_start.c settles. */
+int __okm_current_tid(void)
+{
+	const struct okm_thread* t = __okm_get_self();
+	return t ? t->tid : 0;
 }

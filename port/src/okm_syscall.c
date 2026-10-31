@@ -2429,8 +2429,9 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * environment has no claims, ENOSYS, as before. */
 #ifdef SYS_sched_setscheduler
 	case SYS_sched_setscheduler: {
-		extern _Thread_local int __okm_tid;
-		const int self = __okm_tid ? __okm_tid : ((int)OKM_CONTEXT_ID() ? (int)OKM_CONTEXT_ID() : 1);
+		extern int __okm_current_tid(void);   /* okm_thread.c */
+		const int created = __okm_current_tid();
+		const int self = created ? created : ((int)OKM_CONTEXT_ID() ? (int)OKM_CONTEXT_ID() : 1);
 		if (a1 != 0 && (int)a1 != self) return -EPERM;
 		kal_uintptr claim;
 		switch ((int)a2 & ~0x40000000 /* SCHED_RESET_ON_FORK */) {
