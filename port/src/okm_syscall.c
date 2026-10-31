@@ -948,7 +948,7 @@ static int g_next_pid = 1000;
 static int g_self_pid = 0;   /* 0: not asked yet */
 static int g_told_pid = 1;   /* what a copy was told; the answer where the environment cannot say */
 
-/* THE ENVIRONMENT'S IDENTIFIER FOR THIS PROGRAM (openkal 0.24.0).
+/* THE ENVIRONMENT'S IDENTIFIER FOR THIS PROGRAM (since 0.24.0).
  *
  * It was the constant 1 in every program, so an identifier one program wrote
  * where another would read it --- a lock file's owner, above all --- named the
