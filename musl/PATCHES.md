@@ -652,20 +652,23 @@ to a directory's time at all. A file still asks for exactly what is required,
 and an implementation that cannot open a directory returns an error that is
 passed on unchanged. Asked of the specification.
 
-## A transfer at an offset, made of the position (0.22.9)
+## A transfer at an offset (0.22.9; at the offset itself since 0.26.0)
 
-`pread`, `pwrite`, `preadv` and `pwritev` are a seek to the offset, the
-transfer, and a seek back to the descriptor's position, under the descriptor
-table's lock (`do_transfer_at` in `port/src/okm_syscall.c`). openkal reads and
-writes a file at its position and has no transfer at an offset. Before 0.22.9
-the four answered `ENOSYS`, which a configure check cannot see because the
-functions link; LLVM reads every file through `pread`.
+Since 0.26.0 `pread`, `pwrite`, `preadv` and `pwritev` are `kal_fs_read_at` and
+`kal_fs_write_at` (openkal 0.20), which neither use nor move the descriptor's
+position, and take no lock (`do_transfer_at` in `port/src/okm_syscall.c`). Where
+a write at an offset to a file opened for appending lands is the environment's,
+as openkal states it; on Linux it is the end, as `pwrite` there.
 
-A caller can tell one difference. Two positional transfers on one descriptor do
-not interleave, but a plain `read` or `write` on the same descriptor in another
-thread, made between the two seeks, moves from the positional offset; POSIX
-leaves the position of such a call unaffected. A descriptor that is not a file
-answers `ESPIPE`, as POSIX states.
+The names are referenced weakly. An image run by a loader whose implementation
+predates openkal 0.20 binds them to zero, and the transfer is then what it was
+from 0.22.9: a seek to the offset, the transfer, and a seek back, under the
+descriptor table's lock. That form has the one difference a caller can tell: a
+plain `read` or `write` on the same descriptor in another thread, made between
+the two seeks, moves from the positional offset, where POSIX leaves it
+unaffected. Before 0.22.9 the four answered `ENOSYS`, which a configure check
+cannot see because the functions link; LLVM reads every file through `pread`.
+A descriptor that is not a file answers `ESPIPE`, as POSIX states.
 
 ## What the architecture does not decide alone
 
@@ -708,7 +711,7 @@ an ok image on Linux x86_64 (release build, malloc and free of 16 to 528 bytes)
 the pair cost 38.5 ns on one thread, 194 ns on each of two and 521 ns on each of
 four; clangd.okb, whose workers allocate together, used less than one of four
 processors where the native clangd used three. With the cache the pair costs 31,
-41 and 61 ns. `port/src/okm_malloc_tc.c` holds the cache and says why each slot
+41 and 61 ns. `port/src/mallocng/okm_malloc_tc.c` holds the cache and says why each slot
 it keeps is one mallocng's own reuse would frame the same way; the lines below
 are where mallocng and the thread's record meet it.
 
@@ -755,3 +758,26 @@ implementation detail and not ABI, and the declaration of the call below.
 destructors and before `__block_app_sigs` and the thread list's lock: `fork`
 takes the allocator's lock before the thread list's, so giving the cache back
 under the thread list's lock would take the two in the other order.
+
+## The allocator embedded, and the sources it replaces (0.26.0)
+
+Under the default feature `malloc-mimalloc` five of musl's allocation sources are
+withheld, because the embedded allocator answers their names directly
+(`port/src/mimalloc/okm_mimalloc_glue.c`): `src/malloc/lite_malloc.c` (the weak
+`malloc` and `__libc_malloc`, which reached the allocator through a second
+call), `src/malloc/free.c`, `src/malloc/realloc.c`, and `src/malloc/calloc.c`
+with `src/malloc/libc_calloc.c`, which clear memory the allocator already knows
+to be zero. mallocng and `port/src/mallocng` are compiled only under
+`malloc-mallocng`. No line of musl changes for either: the thread record's field
+`malloc_tc` (0.25.0, below) is mallocng's, and `__pthread_exit`'s call to
+`__malloc_tc_flush` is answered by an empty function under mimalloc, which gives a
+thread's heap back through a key destructor instead.
+
+## Six more string functions, and the clock (0.26.0)
+
+`src/string/memcpy.c`, `memmove.c`, `memset.c`, `memchr.c`, `strchr.c` and
+`strcmp.c` are replaced by `port/src/okm_string.c`, as `memcmp.c` and `strlen.c`
+were in 0.25.0; `src/time/clock_gettime.c` by `port/src/okm_clock.c`. musl's
+are correct and are written a byte or a word at a time for every machine; the
+replacements use the processor's vectors, and the clock reads openkal without the
+system-call dispatcher. README.md states the measurements.

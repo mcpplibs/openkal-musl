@@ -149,10 +149,14 @@
  *                ___errno_location'. In C there is no linkage to restore, so it
  *                is emptied.
  *
- *   weak         an attribute musl spells as a bare word. Emptied. This is
- *                the one that bit compiler-rt: it writes
+ *   weak         an attribute musl spells as a bare word. REMOVED (0.26.0;
+ *                it was emptied). It bit compiler-rt first: it writes
  *                `__attribute__((weak))' of its own, which became
- *                `__attribute__((__attribute__((__weak__))))'.
+ *                `__attribute__((__attribute__((__weak__))))'. Emptied, it
+ *                then bit the allocator this library embeds, whose random
+ *                source has a member named `weak' (`ctx->weak = ...' read as
+ *                `ctx-> = ...'); no header of the overlay writes the word, so
+ *                nothing needs it defined.
  *
  *   weak_alias   REMOVED rather than emptied. It is used in musl's .c files and
  *                in no header, so nothing here needs it --- and leaving it
@@ -210,7 +214,6 @@
 #      define hidden
 #    endif
 #    undef weak
-#    define weak
 #    undef weak_alias
 #  endif  /* hidden --- the internal overlay is on this command line */
 

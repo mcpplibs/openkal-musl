@@ -1,5 +1,7 @@
-/* Allocation by several threads at once, with each thread's cache of small
- * slots in front of mallocng (port/src/okm_malloc_tc.c, 0.25.0).
+/* Allocation by several threads at once: under the default allocator,
+ * mimalloc embedded (0.26.0), whose heaps are per thread; under
+ * `malloc-mallocng', each thread's cache of small slots in front of mallocng
+ * (port/src/mallocng/okm_malloc_tc.c, 0.25.0). CI runs it with both.
  *
  * WHAT A CACHE COULD GET WRONG IS WHAT IS OBSERVED. Every allocation is filled
  * with a pattern that names it and is checked when it is freed, so a slot handed

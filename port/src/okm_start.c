@@ -28,6 +28,13 @@
 #include <string.h>
 #include "libc.h"
 #include "pthread_impl.h"
+#include "okm_stat.h"
+
+/* The allocator's start, where the allocator has one (port/src/mimalloc
+ * defines it); musl's own needs none. A weak definition rather than a weak
+ * reference, which one object format of the three resolves only from a
+ * library. */
+__attribute__((__weak__)) hidden void __okm_malloc_init(void) {}
 
 void __okm_set_tp(uintptr_t value);
 
@@ -341,6 +348,14 @@ void __okm_libc_init(void)
 	 * program's output, who cannot be sure the variable took effect if the
 	 * only evidence is a report that may never be produced. */
 	okm_trace_banner();
+
+	/* The cells a measurement reads (okm_stat.h), before anything is counted,
+	 * and then the allocator, if it is one that starts (port/src/mimalloc):
+	 * after the environment is readable, because it reads its options there,
+	 * and before any initialiser of the program can allocate on a second
+	 * context. */
+	__okm_prof_init();
+	__okm_malloc_init();
 }
 
 int __libc_start_main(int (*main_fn)(int, char**, char**), int argc, char** argv,

@@ -254,19 +254,34 @@ static syscall_arg_t do_read(int fd, void* buf, size_t len)
 	return r;
 }
 
-/* A TRANSFER AT AN OFFSET, MADE OF THE POSITION.
+/* A TRANSFER AT AN OFFSET.
  *
- * openkal reads and writes a file at its position and offers no transfer at
- * an offset, so `pread' and `pwrite' are a seek, the transfer, and a seek back
- * to the position the descriptor had. Until 0.22.9 they were answered ENOSYS,
- * which no configure check can see: the functions link. LLVM reads every file
- * through `pread', and clangd built as an ok image could open none (measured
- * 2026-10-29).
+ * openkal 0.20 transfers at an offset (`kal_fs_read_at', `kal_fs_write_at'),
+ * using and moving no position, so `pread' and `pwrite' are one call each and
+ * take no lock: four contexts reading one file read at once, and a plain `read'
+ * in another context is not moved by them, which is POSIX's promise.
  *
- * The three steps hold the descriptor table's lock, so two positional transfers
- * do not interleave. What the lock does not give is POSIX's other promise: a
- * plain `read' or `write' on the same descriptor, in another thread, between
- * the two seeks, moves from the positional offset. Recorded in musl/PATCHES.md. */
+ * WEAK, and where the names are null --- an image run by a loader whose
+ * implementation predates 0.20 --- the transfer is made of the position as
+ * before: a seek, the transfer, and a seek back, under the descriptor table's
+ * lock so that two positional transfers do not interleave. That form does not
+ * keep the second promise; musl/PATCHES.md records it. */
+static syscall_arg_t transfer_at(struct okm_desc* d, const struct iovec* v, int count,
+                                 int64_t at, int writing)
+{
+	syscall_arg_t total = 0;
+	for (int i = 0; i < count; i++) {
+		if (v[i].iov_len == 0) continue;
+		const kal_intptr r = writing
+			? okm_fs_write_at(d->file, v[i].iov_base, v[i].iov_len, (kal_u64)at + (kal_u64)total)
+			: okm_fs_read_at(d->file, v[i].iov_base, v[i].iov_len, (kal_u64)at + (kal_u64)total);
+		if (r < 0) { if (!total) total = -okm_errno((int)-r); break; }
+		total += (syscall_arg_t)r;
+		if ((size_t)r < v[i].iov_len) break;
+	}
+	return total;
+}
+
 static syscall_arg_t do_transfer_at(int fd, const struct iovec* v, int count,
                                     int64_t at, int writing)
 {
@@ -274,6 +289,7 @@ static syscall_arg_t do_transfer_at(int fd, const struct iovec* v, int count,
 	if (!d) return -EBADF;
 	if (d->kind != OKM_FILE) return -ESPIPE;
 	if (at < 0 || count < 0) return -EINVAL;
+	if (okm_fs_at_available()) return transfer_at(d, v, count, at, writing);
 
 	okm_lock();
 	kal_u64 keep = 0, now = 0;
@@ -337,43 +353,44 @@ static syscall_arg_t do_openat(int dirfd, const char* path, int flags, int mode)
 			return -ELOOP;
 	}
 
-	okm_lock();
-	const int fd = okm_fd_alloc(0);
-	if (fd < 0) { okm_unlock(); return fd; }
-
+	/* THE FILE IS OPENED WITH THE TABLE'S LOCK RELEASED (0.26.0), so that a
+	 * context opening a file on a slow volume does not hold every other
+	 * context's `open', `close' and `read' with it; the descriptor is taken and
+	 * given its description under the lock afterwards, in one holding. A
+	 * program with no descriptor to spare is told EMFILE after the file was
+	 * opened and released again, which is the order POSIX leaves unstated. */
+	struct kal_dir d;
+	int e;
 	if (flags & O_DIRECTORY) {
-		struct kal_dir d;
-		const int e = okm_fs_open_dir(at.base, at.rel, n, &d);
-		if (e != kal_ok) { okm_unlock(); return -okm_errno(e); }
-		struct kal_file nof = { 0 };
-		okm_fd_bind(fd, OKM_DIR, 0, nof, d, flags);
-		char abs[OKM_MAX_PATH];
-		if (okm_absolute(dirfd, path, abs, sizeof abs) == 0) okm_dir_remember(fd, abs);
-		okm_unlock();
-		return fd;
+		e = okm_fs_open_dir(at.base, at.rel, n, &d);
 	}
-
-	const kal_uintptr want = okm_open_flags(flags);
-
-	struct kal_file f;
-	const int e = okm_fs_open(at.base, at.rel, n, want, &f);
-	if (e == kal_err_is_directory) {
+	else {
+		struct kal_file f;
+		e = okm_fs_open(at.base, at.rel, n, okm_open_flags(flags), &f);
+		if (e == kal_ok) {
+			struct kal_dir nod = { 0 };
+			okm_lock();
+			int fd = okm_fd_alloc(0);
+			if (fd >= 0) fd = okm_fd_bind(fd, OKM_FILE, okm_fs_stream(f).h, f, nod, flags);
+			okm_unlock();
+			if (fd < 0) okm_fs_close_file(f);
+			return fd;
+		}
 		/* A program that opens a directory without saying so gets one, which
 		 * is what a Linux program expects of O_RDONLY on a directory. */
-		struct kal_dir d;
-		const int e2 = okm_fs_open_dir(at.base, at.rel, n, &d);
-		if (e2 != kal_ok) { okm_unlock(); return -okm_errno(e2); }
-		struct kal_file nof = { 0 };
-		okm_fd_bind(fd, OKM_DIR, 0, nof, d, flags);
-		char abs[OKM_MAX_PATH];
-		if (okm_absolute(dirfd, path, abs, sizeof abs) == 0) okm_dir_remember(fd, abs);
-		okm_unlock();
-		return fd;
+		if (e == kal_err_is_directory) e = okm_fs_open_dir(at.base, at.rel, n, &d);
 	}
-	if (e != kal_ok) { okm_unlock(); return -okm_errno(e); }
-	struct kal_dir nod = { 0 };
-	okm_fd_bind(fd, OKM_FILE, okm_fs_stream(f).h, f, nod, flags);
+	if (e != kal_ok) return -okm_errno(e);
+
+	char abs[OKM_MAX_PATH];
+	const int named = okm_absolute(dirfd, path, abs, sizeof abs) == 0;
+	struct kal_file nof = { 0 };
+	okm_lock();
+	int fd = okm_fd_alloc(0);
+	if (fd >= 0) fd = okm_fd_bind(fd, OKM_DIR, 0, nof, d, flags);
+	if (fd >= 0 && named) okm_dir_remember(fd, abs);
 	okm_unlock();
+	if (fd < 0) okm_fs_close_dir(d);
 	return fd;
 }
 
@@ -876,6 +893,10 @@ static syscall_arg_t do_mmap(void* addr, size_t len, int prot, int flags, int fd
 	if (addr != 0 || fd >= 0 || off != 0) return -ENOSYS;
 	if (!(flags & MAP_ANON) || !(flags & MAP_PRIVATE)) return -ENOSYS;
 	if (len == 0) return -EINVAL;
+	/* A range of the address space, backed at once and reading as zero
+	 * (okm_region.c, 0.26.0); below, where the implementation has no regions. */
+	const long r = okm_region_map(len);
+	if (r != -ENOSYS) return r;
 	if (len > (size_t)-1 - (OKM_PAGE - 1)) return -ENOMEM;
 	len = okm_whole_pages(len);
 	void* p = kal_alloc(len, OKM_PAGE);
@@ -1209,9 +1230,69 @@ static syscall_arg_t signal_self(int sig)
 	return 0;                          /* not reached */
 }
 
+/* WHAT A CHILD USED, FOR `wait4' AND `getrusage(RUSAGE_CHILDREN)' (0.26.0).
+ *
+ * An ended program's processor time and its peak memory stay readable until
+ * its handle is released (openkal 0.20, KAL_PINFO_MEMORY), and `wait4' is
+ * where this library releases it. So they are read there: into the caller's
+ * `struct rusage' when it gave one, and into the totals of every child waited
+ * for, which is what RUSAGE_CHILDREN reports. A worker's peak memory is what a
+ * program that supervises workers measures them by. openkal does not divide
+ * processor time into user and system time; it is reported as user time. */
+static kal_u64 g_children_cpu_ns;
+static kal_u64 g_children_peak;
+
+static void usage_of(kal_u64 cpu_ns, kal_u64 peak, struct rusage* ru)
+{
+	*ru = (struct rusage){ 0 };
+	ru->ru_utime.tv_sec  = (time_t)(cpu_ns / 1000000000u);
+	ru->ru_utime.tv_usec = (suseconds_t)(cpu_ns % 1000000000u / 1000u);
+	ru->ru_maxrss = (long)(peak / 1024u);
+}
+
+static void child_usage(struct kal_process h, struct rusage* ru)
+{
+	kal_u64 cpu = 0, peak = 0;
+	if (kal_process_info) {
+		struct kal_program_info info = { .self_size = sizeof info };
+		if (kal_process_info(h, KAL_PINFO_CPU | KAL_PINFO_MEMORY, &info) == kal_ok) {
+			if (info.present & KAL_PINFO_CPU)    cpu  = info.cpu_ns;
+			if (info.present & KAL_PINFO_MEMORY) peak = info.memory_peak_bytes;
+		}
+	}
+	__atomic_fetch_add(&g_children_cpu_ns, cpu, __ATOMIC_RELAXED);
+	kal_u64 seen = __atomic_load_n(&g_children_peak, __ATOMIC_RELAXED);
+	while (peak > seen && !__atomic_compare_exchange_n(&g_children_peak, &seen, peak, 1,
+	                                                   __ATOMIC_RELAXED, __ATOMIC_RELAXED));
+	if (ru) usage_of(cpu, peak, ru);
+}
+
+static syscall_arg_t do_getrusage(int who, struct rusage* ru)
+{
+	if (!ru) return -EFAULT;
+	if (who == RUSAGE_CHILDREN) {
+		usage_of(__atomic_load_n(&g_children_cpu_ns, __ATOMIC_RELAXED),
+		         __atomic_load_n(&g_children_peak, __ATOMIC_RELAXED), ru);
+		return 0;
+	}
+	/* One context's use is not something openkal reports. */
+	if (who != RUSAGE_SELF) return -EINVAL;
+	kal_u64 cpu = 0, peak = 0;
+	struct kal_process me;
+	if (kal_process_self && kal_process_info && kal_process_close && kal_process_self(&me) == kal_ok) {
+		struct kal_program_info info = { .self_size = sizeof info };
+		if (kal_process_info(me, KAL_PINFO_CPU | KAL_PINFO_MEMORY, &info) == kal_ok) {
+			if (info.present & KAL_PINFO_CPU)    cpu  = info.cpu_ns;
+			if (info.present & KAL_PINFO_MEMORY) peak = info.memory_peak_bytes;
+		}
+		kal_process_close(me);
+	}
+	usage_of(cpu, peak, ru);
+	return 0;
+}
+
 static syscall_arg_t do_wait4(int pid, int* status, int options, void* rusage)
 {
-	(void)rusage;
 	int i = -1;
 	if (pid > 0) i = child_index(pid);
 	else { for (int k = 0; k < OKM_MAX_CHILD; k++) if (g_child[k].used) { i = k; break; } }
@@ -1259,6 +1340,7 @@ static syscall_arg_t do_wait4(int pid, int* status, int options, void* rusage)
 		e = okm_process_wait(g_child[i].h, &st, &terminated);
 	}
 	if (e != kal_ok) return -okm_errno(e);
+	child_usage(g_child[i].h, (struct rusage*)rusage);
 	okm_process_close(g_child[i].h);
 	const int got = g_child[i].pid;
 	g_child[i].used = 0;
@@ -1476,6 +1558,8 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 #ifdef SYS_open
 	case SYS_open:   return do_openat(AT_FDCWD, (const char*)a1, (int)a2, (int)a3);
 #endif
+	/* What the description owned is closed after the lock is released, by this
+	 * context, before `close' returns (okm_fd.c, `settle'). */
 	case SYS_close: {
 		okm_lock();
 		struct okm_desc* d = okm_desc_of((int)a1);
@@ -2275,6 +2359,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_munmap: {
 		long r = 0;
 		if (okm_map_unmap((void*)a1, (size_t)a2, &r)) return r;
+		if (okm_region_unmap((void*)a1, (size_t)a2, &r)) return r;
 		kal_free((void*)a1, okm_whole_pages((size_t)a2), OKM_PAGE);
 		return 0;
 	}
@@ -2295,7 +2380,15 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * page when the call reports ENOSYS --- so the honest answer is also
 		 * the one the caller is prepared for. */
 		return -ENOSYS;
-	case SYS_madvise: return 0;   /* advice that is not taken is still advice */
+	/* MADV_FREE and MADV_DONTNEED of a mapping this library reserved are taken
+	 * (okm_region.c). Other advice, and advice about memory that is not such a
+	 * mapping, is accepted and not taken: advice that is not taken is still
+	 * advice. */
+	case SYS_madvise: {
+		long r = 0;
+		if (okm_region_advise((void*)a1, (size_t)a2, (int)a3, &r)) return r;
+		return 0;
+	}
 #ifdef SYS_mremap
 	case SYS_mremap:  return -ENOSYS;
 #endif
@@ -2314,6 +2407,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		struct timespec* ts = (struct timespec*)a2;
 		switch ((int)a1) {
 		case CLOCK_REALTIME:
+		case CLOCK_REALTIME_COARSE:
 			to_timespec(kal_time_wall(), ts);
 			return 0;
 		case CLOCK_PROCESS_CPUTIME_ID: {
@@ -2489,6 +2583,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 
 	/* --- programs ---------------------------------------------------------- */
 	case SYS_wait4: return do_wait4((int)a1, (int*)a2, (int)a3, (void*)a4);
+	case SYS_getrusage: return do_getrusage((int)a1, (struct rusage*)a2);
 
 	/* Replacing the calling program with another.
 	 *

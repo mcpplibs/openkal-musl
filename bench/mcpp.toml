@@ -1,0 +1,21 @@
+[package]
+name    = "bench"
+version = "0.1.0"
+
+[dependencies]
+openkal-musl = { path = ".." }
+
+[targets.bench]
+kind = "bin"
+main = "src/main.c"
+
+[build]
+cxx_runtime = "host-coupled"
+
+# The image form: the platform states everything an image needs but its C
+# library, which is this package, here by path. A C program has no C++
+# run-time, and this package's own feature `image-builtins' is the compiler's
+# run-time (mcpp 2026.10.27.1+ builds an ok image through openkal-platform).
+[target.'cfg(os = "openkal")'.layers]
+compiler-runtime = false
+"c++-abi"        = false

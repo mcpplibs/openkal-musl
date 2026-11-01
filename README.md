@@ -8,9 +8,15 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.25.0"
+openkal-musl = "0.26.0"
 ```
 
+> **Engine floor (mcpp 2026.11.2.1):** 0.26.0 embeds its allocator through a
+> dependency edge's `embed` and `exclude` (mcpp's design of 2026-11-02, part 3
+> §14.1), and states `mcpp = ">=2026.11.2.1"`: an older engine refuses the
+> package with the release that builds it, rather than building a C library
+> without an allocator.
+>
 > **Engine floor (mcpp 2026.9.18.3):** this version of this package declares
 > `[c-abi]` (presents, data-model, wchar, builtins) and the engine
 > realises it per compile unit. The probe that verifies the declaration
@@ -673,13 +679,93 @@ three. With the caches: 31 ns on one thread, 61 ns on each of four. A slot in a
 cache is one mallocng counts as in use and whose bytes are the ones its own
 `free` leaves, so taking it back is mallocng's reuse of a freed slot; a program
 with one thread is served exactly as before. `musl/PATCHES.md` records the lines
-this needs in mallocng and in the thread's record (`port/src/okm_malloc_tc.c`).
+this needs in mallocng and in the thread's record (`port/src/mallocng/okm_malloc_tc.c`).
 
 **`memcmp` compares eight bytes at a time and `strlen` sixteen** (SSE2 on
 x86_64; a word at a time, from the aligned word, elsewhere), where musl's own
 compare a byte at a time; the two took 14 % of clangd.okb's time, most of it
 matching command-line options. Every load is aligned to its size, so none
 reaches a page the string does not (`port/src/okm_string.c`).
+
+## The allocator is mimalloc, memory is a region, and nothing waits by spinning (0.26.0)
+
+**Two allocators, exactly one selected.** The default feature `malloc-mimalloc`
+is mimalloc 3.6.1, and `malloc-mallocng` is musl's own with 0.25.0's per-thread
+cache. mimalloc is not vendored: it is the index's `compat.mimalloc`, embedded
+(`embed = true`) --- its sources as its description selects them are compiled
+into this library with this library's flags, less `src/prim/prim.c`, the file
+that chooses an operating system's primitives. `port/src/mimalloc` supplies those
+primitives on openkal and the C library's allocation names over mimalloc. No
+patch is applied to mimalloc; its configuration is three macros in the manifest:
+
+| Macro | Why |
+|---|---|
+| `MI_TLS_MODEL_PTHREADS` | a thread's heap is found through a key of the thread's record, where this library keeps every per-thread value; the other models read a thread-local variable or a register this port does not own (`port/include/pthread_arch.h`) |
+| `MI_PRIM_THREAD_ID`, `MI_NO_THREAD_POINTER` | a thread's identity is its record, for the same reason |
+| `MI_PROFILE=0` | mimalloc's heap profiler writes files through a system's module list; a program on openkal is measured by okprof |
+
+A thread's heap is given back through a key destructor, which musl runs when the
+thread ends. A program that selects musl's allocator writes
+`openkal-musl = { version = "0.26.0", default-features = false, features = ["posix", "image-builtins", "malloc-mallocng"] }`;
+both selected, or neither, stops the build at `port/src/okm_malloc_choice.c` with
+that spelling. `openkal-llvm-runtime`, which depends on this package without its
+default features, names `malloc-mimalloc` itself.
+
+**Anonymous memory is a region** (`openkal.region`, openkal 0.20;
+`port/src/okm_region.c`). A mapping is a range reserved and backed at once,
+which reads as zero without this library writing to it --- 0.25.0 obtained it
+with `kal_alloc` and wrote a zero to every byte. `munmap` of a whole mapping
+releases it; `MADV_FREE` lets a part's contents go (`kal_region_discard`), and
+`MADV_DONTNEED` returns a part's backing and backs it again, after which it reads
+as zero. One environment releases a reservation only whole, so `munmap` of a part
+returns that part's backing and keeps its addresses until the whole is unmapped.
+mimalloc's own memory is regions as well, reserved at the alignment it asks for.
+Where the implementation provides no regions, memory is `kal_alloc`, as before.
+
+**Positional transfers take no lock.** `pread`, `pwrite`, `preadv` and `pwritev`
+are `kal_fs_read_at` and `kal_fs_write_at` (openkal 0.20): one call each, the
+position neither used nor moved. Under a loader whose implementation predates
+0.20 the names are null and the transfer is made of the position, as before.
+
+**The descriptor table's lock is waited for, not spun on, and the environment is
+asked outside it.** A context that finds the lock held sleeps on its word
+(`kal_task_wait`); `open` opens the file before it takes the lock to give it a
+descriptor, and what a `close` releases is closed after the lock is released, by
+the context that closed it.
+
+**Eight string and memory functions use the processor's vectors**: `memcpy`,
+`memmove`, `memset`, `memcmp`, `memchr`, `strlen`, `strchr` and `strcmp`
+(`port/src/okm_string.c`). On x86_64 the 32-byte (AVX2) or 16-byte (SSE2)
+functions are chosen once, at the first call; AArch64 uses 16-byte (NEON) ones;
+other processors go a word at a time. A short length is handled by overlapping
+loads and no loop; a long one by four vectors an iteration. No load reaches a
+page the arguments do not: `tools/check-strings.sh` compiles the file for the
+build machine and checks every function against byte-at-a-time answers with
+guard pages on both sides, for every variant.
+
+**The monotonic and the wall clock are read directly** (`port/src/okm_clock.c`),
+not through the system-call dispatcher.
+
+**A child's use is reported.** `wait4` fills `struct rusage` with the ended
+program's processor time and peak memory (`KAL_PINFO_MEMORY`, readable until the
+handle is released), and `getrusage(RUSAGE_CHILDREN)` reports the totals of every
+child waited for; `getrusage(RUSAGE_SELF)` reports this program's.
+
+**`<stdatomic.h>` is supplied.** This package is compiled with `-nostdinc` and
+publishes the flag, so the compiler's own copy was not on a C program's path; a
+C11 program --- and the embedded allocator --- found no such file.
+
+**What a measurement sees.** Where a loader profiles the program
+(`openkal.prof`), the library registers its counters: allocations and their
+bytes, releases, regions reserved, released, backed, returned and discarded,
+waits for a lock or a condition, and waits for the descriptor table
+(`port/src/okm_stat.h`). Nothing is registered, and nothing is counted, when
+nobody measures.
+
+**Measured against the system's own C library** with `bench/` --- the same
+source built with the system's compiler and C library, above this library, and
+as an ok image --- and divided by `tools/bench-compare.sh`, which is what
+continuous integration gates on.
 
 ## As the C library of an ok image (0.22.0)
 

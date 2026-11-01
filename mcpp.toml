@@ -1,7 +1,11 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.25.0"
+version     = "0.26.0"
+# `embed' and `exclude' on a dependency edge (the allocator, below) are mcpp
+# 2026.11.2.1's; an older engine refuses the edge rather than building a C
+# library without its allocator.
+mcpp        = ">=2026.11.2.1"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 
@@ -163,7 +167,7 @@ lchown    = { form = "enosys", note = "as chown" }
 tcsetattr = { form = "accepted-no-effect", note = "openkal names four positions of the terminal mode word, the fourth covering ICRNL, INLCR, IGNCR and ISTRIP together; a request that alters output post-processing, the line speed, the control characters or VMIN/VTIME is accepted and that part has no effect" }
 
 [dependencies]
-openkal = "0.19.0"
+openkal = "0.20.0"
 
 # An ordinary consumer of openkal declares the specification and leaves the
 # choice of implementation to whoever builds the program, which is what the
@@ -178,7 +182,7 @@ openkal = "0.19.0"
 #
 # The consequence for a program is that it names this package and nothing else.
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = { version = "0.20.0", features = ["standalone"] }
+openkal-linux = { version = "0.21.0", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
 # 0.12.0 is the first release of this implementation that declares which
@@ -188,7 +192,7 @@ openkal-linux = { version = "0.20.0", features = ["standalone"] }
 # is the shape of a check that silently does not run --- while the same
 # consumer was answered on Linux and Windows, whose implementations have
 # carried the array since openkal-linux 0.15.0 and openkal-windows 0.10.0.
-openkal-macos = { version = "0.17.1", features = ["standalone"] }
+openkal-macos = { version = "0.18.0", features = ["standalone"] }
 
 # FIRST STEP TOWARD A BARE MACHINE, AND NOT THE WHOLE OF IT.
 #
@@ -229,7 +233,7 @@ defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
 # other. What the image form adds is libokld --- the loader the image format
 # defines --- for `dlopen', which places further images the same way.
 [target.'cfg(os = "openkal")'.dependencies]
-openkal-ld = "0.1.9"
+openkal-ld = "0.2.0"
 
 # The routines a compiler emits calls to and no C library defines --- on
 # AArch64, every arithmetic operation on a 128-bit `long double`, which
@@ -262,7 +266,7 @@ sources = [
 ]
 
 [target.'cfg(windows)'.dependencies]
-openkal-windows = { version = "0.15.0", features = ["standalone"] }
+openkal-windows = { version = "0.16.0", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #
@@ -281,11 +285,54 @@ openkal-windows = { version = "0.15.0", features = ["standalone"] }
 # own sources has a static variable of that name. The macro musl's features.h
 # would have inferred is therefore not the macro musl is built with.
 [features]
-default = ["posix", "image-builtins"]
+default = ["posix", "image-builtins", "malloc-mimalloc"]
 posix = { defines = ["_XOPEN_SOURCE=700"] }
 # The compiler-rt builtins of an ok image (`<arch>-openkal'); nothing on any
 # other target. See the image form's feature-deps below.
 image-builtins = []
+
+# THE ALLOCATOR, AND EXACTLY ONE OF THE TWO (0.26.0).
+#
+# `malloc-mimalloc' is mimalloc 3.6.1, embedded: `compat.mimalloc's sources as
+# its description selects them, compiled into this library with this library's
+# flags (mcpp's `embed', below), less the one file that chooses an operating
+# system (`src/prim/prim.c'). Its operating-system layer is port/src/mimalloc,
+# written on openkal: regions where the implementation provides them
+# (`openkal.region'), and `kal_alloc' where it does not. The C library and the
+# allocator are one library, so neither depends on the other being built first.
+#
+# `malloc-mallocng' is musl's own allocator with 0.25.0's per-thread cache, as
+# 0.25.0 shipped it. A program selects it with `default-features = false' and
+# the features it keeps, `malloc-mallocng' among them.
+#
+# Selecting both, or neither, stops the build at port/src/okm_malloc_choice.c
+# with the spelling that selects one.
+#
+# musl's own entry points that the embedded allocator answers directly are
+# withheld under it: `malloc' (lite_malloc.c, whose weak `malloc' and
+# `__libc_malloc' reach the allocator through a second call), `free',
+# `realloc', and `calloc' with its internal twin (which clear what the
+# allocator already knows to be zero).
+malloc-mimalloc = { sources = [
+  "port/src/mimalloc/*.c",
+  "!musl/src/malloc/lite_malloc.c",
+  "!musl/src/malloc/free.c",
+  "!musl/src/malloc/realloc.c",
+  "!musl/src/malloc/calloc.c",
+  "!musl/src/malloc/libc_calloc.c",
+] }
+malloc-mallocng = { sources = [
+  "musl/src/malloc/mallocng/*.c",
+  "port/src/mallocng/*.c",
+] }
+
+# The embedded allocator. `exclude' names the upstream file that selects an
+# operating system's primitives by the preprocessor; port/src/mimalloc supplies
+# them instead. No patch is applied: mimalloc's own extension points --- the
+# primitive layer and its configuration macros (`[build] defines', below) ---
+# are enough.
+[feature-deps.malloc-mimalloc]
+compat.mimalloc = { version = "3.6.1", embed = true, exclude = ["*/src/prim/prim.c"] }
 
 [build]
 c_standard = "c99"
@@ -306,13 +353,22 @@ c_standard = "c99"
 # this port builds for.
 sources = [
   "musl/src/*/*.c",
-  "musl/src/malloc/mallocng/*.c",
-  # Replaced in port/src/okm_string.c (0.25.0): musl compares a byte at a time,
-  # and walks a byte at a time to the first aligned word; the replacements
-  # compare a word or a vector at a time, and load nothing a page boundary
-  # separates from the bytes the caller passed.
+  # Replaced in port/src/okm_string.c (memcmp and strlen since 0.25.0, the
+  # other six since 0.26.0): musl's are written a byte or a word at a time for
+  # every machine; the replacements use the processor's vectors --- the wider
+  # ones where it has them --- and load nothing a page boundary separates from
+  # the bytes the caller passed.
   "!musl/src/string/memcmp.c",
   "!musl/src/string/strlen.c",
+  "!musl/src/string/memcpy.c",
+  "!musl/src/string/memmove.c",
+  "!musl/src/string/memset.c",
+  "!musl/src/string/memchr.c",
+  "!musl/src/string/strchr.c",
+  "!musl/src/string/strcmp.c",
+  # Replaced in port/src/okm_clock.c (0.26.0): the monotonic and the wall
+  # clock read without the system call dispatcher.
+  "!musl/src/time/clock_gettime.c",
   "!musl/src/env/__libc_start_main.c",
   "!musl/src/env/__init_tls.c",
   "!musl/src/thread/__set_thread_area.c",
@@ -471,7 +527,37 @@ sources = [
 # up at once. So a change to a path dependency's MANIFEST does not invalidate
 # the consumer's plan, and the way that shows is a change that appears to have
 # had no effect. Reported; nothing here works around it.
-defines = ["OKM_MUSL_INTERNAL=1"]
+#
+# AND AUTHORSHIP IS STATED BY PATH SINCE 0.26.0, because this package now
+# compiles sources that are not musl's. An embedded allocator's units are this
+# package's units (`malloc-mimalloc', above), compiled with this package's
+# include directories, and the internal overlay's `weak' turned
+# `ctx->weak' in mimalloc's random.c into an attribute. So the macro reaches
+# musl's sources and this port's, and not mimalloc's or the port's own layer
+# beneath it (port/src/mimalloc), which are written against the public headers.
+flags = [
+  { glob = "musl/**",                               defines = ["OKM_MUSL_INTERNAL=1"] },
+  { glob = "port/src/*",                            defines = ["OKM_MUSL_INTERNAL=1"] },
+  { glob = "port/src/{image,mach,win,mallocng}/**", defines = ["OKM_MUSL_INTERNAL=1"] },
+]
+
+# THE EMBEDDED ALLOCATOR'S CONFIGURATION, which no unit but its own reads.
+#
+# MI_TLS_MODEL_PTHREADS: a thread's heap is found through a key of the thread's
+# record, which is how this library keeps every per-thread value; the other
+# models read a thread-local variable or a register this port does not own
+# (pthread_arch.h). MI_PRIM_THREAD_ID: a thread's identity is its record, for
+# the same reason, and MI_NO_THREAD_POINTER says there is no register to read
+# instead (spelled as mimalloc spells it, `(1)'). MI_PROFILE=0: mimalloc's own
+# heap profiler writes files through a system's loader and module list, and a
+# program measured on openkal is measured by okprof (openkal-image).
+# `defines' is not carried to a consumer.
+defines = [
+  "MI_TLS_MODEL_PTHREADS=1",
+  "MI_NO_THREAD_POINTER=(1)",
+  "MI_PRIM_THREAD_ID()=((mi_thread_id_t)pthread_self())",
+  "MI_PROFILE=0",
+]
 
 include_dirs = [
   "port/include",

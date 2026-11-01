@@ -33,6 +33,7 @@
 #include <openkal/process.h>
 extern __typeof(kal_process_channel_close) kal_process_channel_close __attribute__((__weak__));
 #include "okm_opt.h"
+#include "okm_stat.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -96,15 +97,77 @@ kal_uintptr okm_open_flags(int flags)
 
 /* --- the lock ------------------------------------------------------------- */
 
-static volatile int g_lock;
-
-void okm_lock(void)
+/* A WAITER SLEEPS ON THE WORD, AND NOTHING SLOW IS DONE WHILE IT IS HELD (0.26.0).
+ *
+ * The lock was a word a context exchanged and, finding it held, yielded and
+ * exchanged again; `open', `close' and a positional transfer held it across
+ * the environment's own call. Measured in clangd.okb on Linux x86_64, workers
+ * opening and reading the module files of a warm start spent their time in
+ * `sched_yield' around a lock whose holder was in the kernel. Two changes,
+ * each by itself insufficient:
+ *
+ *   the wait is `kal_task_wait' on the word, in the three-state form (free,
+ *   held, held and waited for), so a holder that releases an uncontended lock
+ *   makes no call and one that releases a waited-for lock wakes one waiter;
+ *
+ *   the environment is asked with the lock released: a file is opened and
+ *   then given a descriptor under the lock (okm_syscall.c, `do_openat'); a
+ *   description whose last descriptor goes is closed as the lock is released,
+ *   by the context that let it go (`okm_unlock'); a positional transfer takes
+ *   no lock at all where the implementation transfers at an offset.
+ *
+ * Where the implementation has no second context the wait answers
+ * `kal_err_not_supported'; the lock cannot be contended there, and the loop
+ * below yields and tries again, which is what it did before. */
+void okm_mutex_lock(volatile kal_u32* word, int stat)
 {
-	while (__atomic_exchange_n(&g_lock, 1, __ATOMIC_ACQUIRE))
-		okm_task_yield();
+	kal_u32 c = 0;
+	if (__atomic_compare_exchange_n(word, &c, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+		return;
+	/* A holder is usually about to let go: a few looks before sleeping. */
+	for (int i = 0; i < 64; i++) {
+		c = 0;
+		if (__atomic_load_n(word, __ATOMIC_RELAXED) == 0
+		    && __atomic_compare_exchange_n(word, &c, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+			return;
+#if defined(__x86_64__) || defined(__i386__)
+		__builtin_ia32_pause();
+#elif defined(__aarch64__)
+		__asm__ __volatile__("yield");
+#endif
+	}
+	c = __atomic_exchange_n(word, 2, __ATOMIC_ACQUIRE);
+	while (c != 0) {
+		okm_stat_add((enum okm_stat)stat, 1);
+		if (okm_task_wait((const kal_u32*)word, 2, 0) == kal_err_not_supported)
+			okm_task_yield();
+		c = __atomic_exchange_n(word, 2, __ATOMIC_ACQUIRE);
+	}
 }
 
-void okm_unlock(void) { __atomic_store_n(&g_lock, 0, __ATOMIC_RELEASE); }
+void okm_mutex_unlock(volatile kal_u32* word)
+{
+	if (__atomic_exchange_n(word, 0, __ATOMIC_RELEASE) == 2)
+		okm_task_wake((const kal_u32*)word, 1, 0);
+}
+
+static volatile kal_u32 g_lock;
+
+#define OKM_SETTLING_MAX 32   /* see `desc_release' */
+static int take_settling(struct okm_desc* mine);
+static void close_owned(const struct okm_desc* p);
+
+void okm_lock(void) { okm_mutex_lock(&g_lock, OKM_STAT_FD_LOCK_WAITS); }
+
+/* Releases the lock and then closes what this context let go of while it held
+ * it (`desc_release' below). */
+void okm_unlock(void)
+{
+	struct okm_desc mine[OKM_SETTLING_MAX];
+	const int n = take_settling(mine);
+	okm_mutex_unlock(&g_lock);
+	for (int i = 0; i < n; i++) close_owned(&mine[i]);
+}
 
 /* --- the table ------------------------------------------------------------ */
 
@@ -149,11 +212,21 @@ static int path_slot_alloc(void)
 	return -1;
 }
 
-static void desc_release(int d)
+/* WHAT A DESCRIPTION OWNS, CLOSED AFTER THE LOCK IS RELEASED.
+ *
+ * A description whose last descriptor goes is copied here, under the lock, and
+ * its slot is free at once; what it owned is closed by the context that let it
+ * go, as that context releases the lock (`okm_unlock'). By that context and not
+ * by whichever next releases the lock: a `close' that has returned has
+ * released what it closed, and a writer that closed its end of a pipe is one
+ * whose reader sees the end. A context that lets more go at once than there
+ * are places here closes the rest under the lock, as every close was made
+ * before 0.26.0. */
+static struct { kal_uintptr owner; struct okm_desc d; } g_settling[OKM_SETTLING_MAX];
+static int g_settling_n;
+
+static void close_owned(const struct okm_desc* p)
 {
-	if (d < 0 || d >= OKM_MAX_DESC) return;
-	if (--g_desc[d].refs > 0) return;
-	struct okm_desc* p = &g_desc[d];
 	if (p->kind == OKM_FILE) okm_fs_close_file(p->file);
 	else if (p->kind == OKM_DIR) okm_fs_close_dir(p->dir);
 	/* A CHANNEL END IS OWNED AND A STREAM IS NOT, WHICH IS WHY THEY ARE TWO
@@ -173,31 +246,72 @@ static void desc_release(int d)
 	 * of the four states it reached, so it is performed where those states are
 	 * known rather than reproduced here. */
 	else if (p->kind == OKM_SOCKET) okm_sock_release(p->sock);
+}
+
+/* What this context let go of, taken out under the lock. */
+static int take_settling(struct okm_desc* mine)
+{
+	if (!g_settling_n) return 0;
+	const kal_uintptr me = (kal_uintptr)OKM_CONTEXT_ID();
+	int n = 0;
+	for (int i = 0; i < g_settling_n; ) {
+		if (g_settling[i].owner != me) { i++; continue; }
+		mine[n++] = g_settling[i].d;
+		g_settling[i] = g_settling[--g_settling_n];
+	}
+	return n;
+}
+
+static void desc_release(int d)
+{
+	if (d < 0 || d >= OKM_MAX_DESC) return;
+	if (--g_desc[d].refs > 0) return;
+	struct okm_desc* p = &g_desc[d];
+	/* A socket's release reads and writes okm_net.c's table, which this lock
+	 * guards; it is made here, as before. */
+	if (p->kind == OKM_SOCKET) close_owned(p);
+	else if (p->kind != OKM_STREAM && p->kind != OKM_FREE) {
+		if (g_settling_n < OKM_SETTLING_MAX) {
+			g_settling[g_settling_n].owner = (kal_uintptr)OKM_CONTEXT_ID();
+			g_settling[g_settling_n].d = *p;
+			g_settling_n++;
+		}
+		else close_owned(p);
+	}
 	if (p->path_slot >= 0) g_dirpath_used[p->path_slot] = 0;
 	p->kind = OKM_FREE; p->iter = 0; p->iter_open = 0; p->path_slot = -1;
 	p->pending = 0; p->sock = -1; p->ahead = 0; p->ahead_eof = 0;
 }
 
+/* Slots: a description's index, or OKM_FD_FREE. */
+#define OKM_FD_FREE (-1)
+
 int okm_fd_alloc(int from)
 {
 	if (from < 0) from = 0;
 	for (int i = from; i < OKM_MAX_FD; i++)
-		if (g_fd[i].desc < 0) return i;
+		if (g_fd[i].desc == OKM_FD_FREE) return i;
 	return -EMFILE;
 }
+
 
 void okm_fd_release(int fd)
 {
 	if (fd < 0 || fd >= OKM_MAX_FD) return;
 	const int d = g_fd[fd].desc;
-	g_fd[fd].desc = -1; g_fd[fd].cloexec = 0;
+	if (d < 0) return;
+	__atomic_store_n(&g_fd[fd].desc, OKM_FD_FREE, __ATOMIC_RELAXED);
+	g_fd[fd].cloexec = 0;
 	desc_release(d);
 }
 
 struct okm_desc* okm_desc_of(int fd)
 {
 	if (fd < 0 || fd >= OKM_MAX_FD) return 0;
-	const int d = g_fd[fd].desc;
+	/* Read without the lock, as it always was: a descriptor another context
+	 * is closing at this moment is one POSIX leaves the program to have
+	 * arranged not to use. */
+	const int d = __atomic_load_n(&g_fd[fd].desc, __ATOMIC_RELAXED);
 	if (d < 0) return 0;
 	return &g_desc[d];
 }
@@ -214,8 +328,8 @@ int okm_fd_bind(int fd, int kind, kal_uintptr stream,
 	p->path_slot = -1; p->pending = 0;
 	p->sock = -1; p->ahead = 0; p->ahead_eof = 0;
 	if (g_fd[fd].desc >= 0) desc_release(g_fd[fd].desc);
-	g_fd[fd].desc = d;
 	g_fd[fd].cloexec = (flags & O_CLOEXEC) ? 1 : 0;
+	__atomic_store_n(&g_fd[fd].desc, d, __ATOMIC_RELEASE);
 	return fd;
 }
 
@@ -230,8 +344,8 @@ int okm_fd_dup(int fd, int newfd, int cloexec)
 	if (newfd == fd) return newfd;
 	if (g_fd[newfd].desc >= 0) desc_release(g_fd[newfd].desc);
 	g_desc[g_fd[fd].desc].refs++;
-	g_fd[newfd].desc = g_fd[fd].desc;
 	g_fd[newfd].cloexec = cloexec;
+	__atomic_store_n(&g_fd[newfd].desc, g_fd[fd].desc, __ATOMIC_RELEASE);
 	return newfd;
 }
 
@@ -411,27 +525,51 @@ static int join(const char* prefix, const char* rel, char* out, size_t cap)
 	return normalise(tmp, out + keep, cap - keep);
 }
 
+/* Whether an absolute name is already in the form `normalise' produces: one
+ * leading separator, and no empty, `.' or `..' component. Most names a program
+ * passes are, and they are resolved without being copied twice first. */
+static int already_normal(const char* path)
+{
+	if (path[0] != '/') return 0;
+	const char* p = path + 1;
+	size_t n = 1;
+	while (*p) {
+		const char* s = p;
+		while (*p && *p != '/') p++;
+		const size_t len = (size_t)(p - s);
+		if (len == 0) return 0;
+		if (s[0] == '.' && (len == 1 || (len == 2 && s[1] == '.'))) return 0;
+		n += len;
+		if (*p) { p++; n++; if (!*p) return 0; }
+	}
+	return n < OKM_MAX_PATH;
+}
+
 int okm_resolve(int dirfd, const char* path, struct okm_at* at, int empty_ok)
 {
 	if (!path) return -EFAULT;
 	if (!*path && !empty_ok) return -ENOENT;
 
-	char abs[OKM_MAX_PATH];
+	char buf[OKM_MAX_PATH];
+	const char* abs = buf;
 	int have_abs = 0;
 
-	if (root_length(path)) {
-		const int r = join("", path, abs, sizeof abs);
+	if (already_normal(path)) {
+		abs = path;
+		have_abs = 1;
+	} else if (root_length(path)) {
+		const int r = join("", path, buf, sizeof buf);
 		if (r) return r;
 		have_abs = 1;
 	} else if (dirfd == AT_FDCWD) {
-		const int r = join(g_cwd, path, abs, sizeof abs);
+		const int r = join(g_cwd, path, buf, sizeof buf);
 		if (r) return r;
 		have_abs = 1;
 	} else {
 		struct okm_desc* d = okm_desc_of(dirfd);
 		if (!d || d->kind != OKM_DIR) return -ENOTDIR;
 		if (d->path_slot >= 0 && g_dirpath[d->path_slot][0]) {
-			const int r = join(g_dirpath[d->path_slot], path, abs, sizeof abs);
+			const int r = join(g_dirpath[d->path_slot], path, buf, sizeof buf);
 			if (r) return r;
 			have_abs = 1;
 		} else {

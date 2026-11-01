@@ -8,6 +8,12 @@
  * The offsets POSIX allows and openkal does not are the port's to reconstruct:
  * a page-aligned offset inside a 64 KiB alignment, and a length past the end
  * of the file. A request for an executable file mapping is refused (EACCES).
+ *
+ * AND ANONYMOUS MEMORY, OVER openkal.region (0.26.0, port/src/okm_region.c):
+ * it reads as zero; MADV_DONTNEED returns a part's backing and the part reads
+ * as zero again, as POSIX's private memory does; MADV_FREE lets the contents
+ * go and the part may be written at once; a part is unmapped, and so is the
+ * rest by the address and length the mapping was made with.
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -99,6 +105,35 @@ int main(void)
 
 	close(fd);
 	unlink(name);
+
+	/* Anonymous memory. */
+	const size_t page = (size_t)sysconf(_SC_PAGESIZE);
+	const size_t len = 16 * page;
+	unsigned char* a = mmap(0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	check(a != MAP_FAILED, "anonymous memory is mapped");
+	if (a != MAP_FAILED) {
+		int zero = 1;
+		for (size_t i = 0; i < len && zero; i++) zero = a[i] == 0;
+		check(zero, "anonymous memory reads as zero");
+		memset(a, 0xab, len);
+		check(madvise(a + 4 * page, 4 * page, MADV_DONTNEED) == 0, "MADV_DONTNEED of a part succeeds");
+		zero = 1;
+		for (size_t i = 4 * page; i < 8 * page && zero; i++) zero = a[i] == 0;
+		check(zero, "the part reads as zero after MADV_DONTNEED");
+		check(a[4 * page - 1] == 0xab && a[8 * page] == 0xab, "the bytes beside the part are kept");
+		check(madvise(a + 8 * page, 4 * page, MADV_FREE) == 0, "MADV_FREE of a part succeeds");
+		a[8 * page] = 0x5c;
+		check(a[8 * page] == 0x5c, "a part let go with MADV_FREE is written and read at once");
+		errno = 0;
+		check(madvise(a + 1, page, MADV_DONTNEED) == -1 && errno == EINVAL,
+		      "advice at an address that is not a page's start is refused with EINVAL");
+		check(munmap(a + 12 * page, 4 * page) == 0, "a part of the mapping is unmapped");
+		check(munmap(a, len) == 0, "the mapping is unmapped by the address and length it was made with");
+	}
+	errno = 0;
+	check(mmap(0, 0, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) == MAP_FAILED && errno == EINVAL,
+	      "a mapping of no length is refused with EINVAL");
+
 	printf("-- failures: %d --\n", failures);
 	return failures != 0;
 }

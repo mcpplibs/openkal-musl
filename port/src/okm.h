@@ -150,17 +150,23 @@ struct okm_desc {
 	unsigned char ahead_byte;
 };
 
-/* The lock. Every operation upon the table is short, and contention is between
- * execution contexts of one program rather than between programs, so a lock
- * that spins and yields is adequate; using openkal.task's suspension primitive
- * here would make the table depend upon an interface an implementation may not
- * provide, and a program with one execution context would then not run on it. */
+/* The lock of the table (0.26.0: a context that finds it held waits on the word
+ * through `openkal.task' rather than yielding in a loop, and nothing the
+ * environment does is done while it is held --- see okm_fd.c). Where the
+ * implementation has no second context, nobody can hold it while another asks,
+ * and the wait is never reached. */
 void okm_lock(void);
 void okm_unlock(void);
+
+/* The same lock on another word: 0 free, 1 held, 2 held and waited for. `stat'
+ * is the okm_stat.h cell a wait is counted in. */
+void okm_mutex_lock(volatile kal_u32* word, int stat);
+void okm_mutex_unlock(volatile kal_u32* word);
 
 /* The table. */
 int  okm_fd_alloc(int from);                     /* the lowest free descriptor */
 void okm_fd_release(int fd);
+
 
 /* Every stream this image holds, released. The one caller is the `execve'
  * composition, whose waiting image must not keep a pipe open on behalf of a
@@ -174,6 +180,15 @@ struct okm_desc* okm_desc_of(int fd);
 long okm_map_file(void* addr, size_t len, int prot, int flags, int fd, long long off);
 int  okm_map_unmap(void* addr, size_t len, long* result);
 int  okm_map_sync(void* addr, size_t len, long* result);
+
+/* Anonymous memory over `openkal.region' (okm_region.c, 0.26.0). The first
+ * answers ENOSYS where the implementation provides no regions, and the caller
+ * then obtains the memory as before; the others answer whether the address was
+ * in one of the ranges this library reserved, and if so put the call's result
+ * in `result'. */
+long okm_region_map(size_t len);
+int  okm_region_unmap(void* addr, size_t len, long* result);
+int  okm_region_advise(void* addr, size_t len, int advice, long* result);
 int  okm_fd_bind(int fd, int kind, kal_uintptr stream,
                  struct kal_file file, struct kal_dir dir, int flags);
 int  okm_fd_dup(int fd, int newfd, int cloexec); /* newfd < 0: lowest free     */

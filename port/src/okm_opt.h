@@ -68,6 +68,17 @@
 #define okm_fs_list_begin    kal_fs_list_begin
 #define okm_fs_list_next     kal_fs_list_next
 
+/* TRANSFERS AT AN OFFSET (openkal 0.20). Required of an implementation that
+ * provides `openkal.fs' from that version, and weak here all the same: an image
+ * built on this library and run by a loader whose implementation predates 0.20
+ * binds them to zero (SPEC 12.2), and `pread' is then made of the position, as
+ * it was (okm_syscall.c). */
+extern __typeof(kal_fs_read_at)  kal_fs_read_at  __attribute__((__weak__));
+extern __typeof(kal_fs_write_at) kal_fs_write_at __attribute__((__weak__));
+static inline int okm_fs_at_available(void) { return kal_fs_read_at && kal_fs_write_at; }
+#define okm_fs_read_at  kal_fs_read_at
+#define okm_fs_write_at kal_fs_write_at
+
 /* WEAK, BECAUSE A VOLUME MAY HAVE NO SUCH NODES AND AN IMPLEMENTATION MAY
  * NOT BE ABLE TO MAKE ONE. These are operations of `openkal.fs' and are present
  * wherever it is, so the weakness is not about the interface --- it is about a
@@ -171,6 +182,11 @@ static inline int okm_fs_capacity(struct kal_dir, kal_u64*,
 static inline int okm_fs_list_begin(struct kal_dir, kal_uintptr*) { return kal_err_not_supported; }
 static inline int okm_fs_list_next(struct kal_dir, kal_uintptr*, char*, kal_uintptr,
                                    kal_uintptr*, int*) { return kal_err_not_supported; }
+static inline int okm_fs_at_available(void) { return 0; }
+static inline kal_intptr okm_fs_read_at(struct kal_file, void*, kal_uintptr,
+                                        kal_u64) { return -kal_err_not_supported; }
+static inline kal_intptr okm_fs_write_at(struct kal_file, const void*, kal_uintptr,
+                                         kal_u64) { return -kal_err_not_supported; }
 
 #endif  /* OKM_HAS_FS */
 
