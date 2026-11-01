@@ -4,6 +4,9 @@
 
 #include "meta.h"
 
+hidden int __malloc_tc_give(struct meta *, int);
+hidden void __malloc_release_slot(struct meta *, int);
+
 struct mapinfo {
 	void *base;
 	size_t len;
@@ -108,7 +111,6 @@ void free(void *p)
 	unsigned char *start = g->mem->storage + stride*idx;
 	unsigned char *end = start + stride - IB;
 	get_nominal_size(p, end);
-	uint32_t self = 1u<<idx, all = (2u<<g->last_idx)-1;
 	((unsigned char *)p)[-3] = 255;
 	// invalidate offset to group header, and cycle offset of
 	// used region within slot if current offset is zero.
@@ -125,6 +127,14 @@ void free(void *p)
 			errno = e;
 		}
 	}
+
+	if (MT && __malloc_tc_give(g, idx)) return;
+	__malloc_release_slot(g, idx);
+}
+
+hidden void __malloc_release_slot(struct meta *g, int idx)
+{
+	uint32_t self = 1u<<idx, all = (2u<<g->last_idx)-1;
 
 	// atomic free without locking if this is neither first or last slot
 	for (;;) {

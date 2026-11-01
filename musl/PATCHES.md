@@ -699,3 +699,59 @@ the field rather than a program that formats a number wrongly.
 musl already supports a 53-bit long double --- it is what its own arm and
 riscv64 configurations use, and every conditional in `src/math` and `src/stdio`
 is written for it. Nothing beyond the one header is involved.
+
+## A thread's small allocations from its own cache (0.25.0)
+
+mallocng serves every allocation under its one lock, and this configuration's
+`rdlock` is exclusive, so threads that allocate together run one at a time. In
+an ok image on Linux x86_64 (release build, malloc and free of 16 to 528 bytes)
+the pair cost 38.5 ns on one thread, 194 ns on each of two and 521 ns on each of
+four; clangd.okb, whose workers allocate together, used less than one of four
+processors where the native clangd used three. With the cache the pair costs 31,
+41 and 61 ns. `port/src/okm_malloc_tc.c` holds the cache and says why each slot
+it keeps is one mallocng's own reuse would frame the same way; the lines below
+are where mallocng and the thread's record meet it.
+
+### `src/malloc/mallocng/malloc.c`, seven lines
+
+```diff
++hidden void *__malloc_tc_take(size_t, int);
++hidden void __malloc_tc_fill(int);
+...
+ 	sc = size_to_class(n);
+ 
++	if (MT) {
++		void *p = __malloc_tc_take(n, sc);
++		if (p) return p;
++	}
++
+ 	rdlock();
+...
+ success:
+ 	ctr = ctx.mmap_counter;
++	if (MT) __malloc_tc_fill(g->sizeclass);
+ 	unlock();
+```
+
+A program with one thread is served as before. The refill runs under the lock
+the call already holds, and takes the class of the group that served it, so the
+mapped path (class 63) is never cached.
+
+### `src/malloc/mallocng/free.c`, the end of `free` made a function
+
+`free` validates and invalidates the slot as before, then offers it to the
+thread's cache; what the cache does not keep goes through the rest of `free`,
+unchanged, now `__malloc_release_slot`, which the cache also calls when a thread
+gives its slots back. The two locals that only that rest used moved with it.
+
+### `src/internal/pthread_impl.h`, two lines
+
+A pointer to the thread's cache in the record's second part, which musl marks as
+implementation detail and not ABI, and the declaration of the call below.
+
+### `src/thread/pthread_create.c`, one line
+
+`__pthread_exit` gives the thread's cache back after the thread-specific
+destructors and before `__block_app_sigs` and the thread list's lock: `fork`
+takes the allocator's lock before the thread list's, so giving the cache back
+under the thread list's lock would take the two in the other order.

@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.24.1"
+openkal-musl = "0.25.0"
 ```
 
 > **Engine floor (mcpp 2026.9.18.3):** this version of this package declares
@@ -660,6 +660,27 @@ is built over openkal-macos 0.17.1, whose answer no longer costs a system call
 (1.58 million calls in one `clangd --check`; clangd.okb on macOS arm64 had been
 1.25 to 1.9 times slower than the native clangd, and as fast on Linux).
 
+## Threads allocate together, and strings are compared a word at a time (0.25.0)
+
+**Each thread keeps the small slots it frees** (the size classes up to 2032
+bytes, at most sixteen of each) and takes them back without mallocng's lock; a
+thread with none claims eight at once under one acquisition of the lock, and an
+ending thread gives its slots back. mallocng served every allocation under its
+one lock, so threads that allocate together ran one at a time: in an ok image a
+malloc and free cost 38.5 ns on one thread and 521 ns on each of four, and
+clangd.okb used less than one of four processors where the native clangd used
+three. With the caches: 31 ns on one thread, 61 ns on each of four. A slot in a
+cache is one mallocng counts as in use and whose bytes are the ones its own
+`free` leaves, so taking it back is mallocng's reuse of a freed slot; a program
+with one thread is served exactly as before. `musl/PATCHES.md` records the lines
+this needs in mallocng and in the thread's record (`port/src/okm_malloc_tc.c`).
+
+**`memcmp` compares eight bytes at a time and `strlen` sixteen** (SSE2 on
+x86_64; a word at a time, from the aligned word, elsewhere), where musl's own
+compare a byte at a time; the two took 14 % of clangd.okb's time, most of it
+matching command-line options. Every load is aligned to its size, so none
+reaches a page the string does not (`port/src/okm_string.c`).
+
 ## As the C library of an ok image (0.22.0)
 
 For the target `<arch>-openkal` (openkal SPEC clause 12) this library is built
@@ -694,6 +715,8 @@ architectures and run through `okrun` on four systems in CI.
 | `examples/identifiers` | three names a program above this library may use, asserted by compiling |
 | `examples/process-identity` | 13 observations: `getpid` is the environment's identifier, another program finds a running one by it (`kill(pid, 0)`, `getsid`) and an ended one gone, and the scheduling policies and nice values reach a context's claim on the processors (0.24.0) |
 | `examples/locks` | 13 observations: `flock` and `F_OFD_SETLK` exclude another open of the same file and are released by closing it (0.24.0) |
+| `examples/malloc-threads` | 3 observations: every block four threads make, pass between them and free keeps its bytes over three generations of threads, `realloc` keeps them across classes, and the cost of an allocation at one, two and four threads (0.25.0) |
+| `examples/strings` | 6 observations: `memcmp` and `strlen` agree with the byte-at-a-time answer at every alignment and length, and a string ending before an unmapped page is read without a fault (0.25.0) |
 | `examples/wordcount` | the same three counts as the system's own `wc` |
 | [`mcpplibs/sbase`](https://github.com/mcpplibs/sbase) | all 97 suckless base utilities, sources unmodified, 50 comparisons against the system's own tools |
 

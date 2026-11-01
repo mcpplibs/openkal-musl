@@ -69,6 +69,8 @@ _Noreturn void __pthread_exit(void *result)
 
 	__pthread_tsd_run_dtors();
 
+	__malloc_tc_flush();
+
 	__block_app_sigs(&set);
 
 	/* This atomic potentially competes with a concurrent pthread_detach
