@@ -58,6 +58,7 @@ struct pthread {
 	volatile int killlock[1];
 	char *dlerror_buf;
 	void *stdio_locks;
+	void *malloc_tc;
 
 	/* Part 3 -- the positions of these fields relative to
 	 * the end of the structure is external and internal ABI. */
@@ -149,6 +150,7 @@ hidden void __testcancel();
 hidden void __do_cleanup_push(struct __ptcb *);
 hidden void __do_cleanup_pop(struct __ptcb *);
 hidden void __pthread_tsd_run_dtors();
+hidden void __malloc_tc_flush(void);
 
 hidden void __pthread_key_delete_synccall(void (*)(void *), void *);
 hidden int __pthread_key_delete_impl(pthread_key_t);

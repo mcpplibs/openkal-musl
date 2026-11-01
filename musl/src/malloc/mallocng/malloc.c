@@ -7,6 +7,9 @@
 
 #include "meta.h"
 
+hidden void *__malloc_tc_take(size_t, int);
+hidden void __malloc_tc_fill(int);
+
 LOCK_OBJ_DEF;
 
 const uint16_t size_classes[] = {
@@ -334,6 +337,11 @@ void *malloc(size_t n)
 
 	sc = size_to_class(n);
 
+	if (MT) {
+		void *p = __malloc_tc_take(n, sc);
+		if (p) return p;
+	}
+
 	rdlock();
 	g = ctx.active[sc];
 
@@ -375,6 +383,7 @@ void *malloc(size_t n)
 
 success:
 	ctr = ctx.mmap_counter;
+	if (MT) __malloc_tc_fill(g->sizeclass);
 	unlock();
 	return enframe(g, idx, n, ctr);
 }

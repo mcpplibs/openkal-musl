@@ -72,7 +72,7 @@ cd "$here"
 # list learned late; the compile below globs the directory, so a manifest
 # exclusion that does not arrive here is a duplicate symbol rather than a
 # mistake about which source runs. probe-cross-macos.sh states the rest.
-skip='__libc_start_main|__init_tls|__set_thread_area|__unmapself|clone|pthread_getattr_np|posix_spawn|posix_spawnp|mmap|syscall_ret|getcwd|fcntl|dl_iterate_phdr|okm_phdr|cache'
+skip='__libc_start_main|__init_tls|__set_thread_area|__unmapself|clone|pthread_getattr_np|posix_spawn|posix_spawnp|mmap|syscall_ret|getcwd|fcntl|dl_iterate_phdr|okm_phdr|cache|memcmp|strlen'
 for f in musl/src/*/*.c musl/src/malloc/mallocng/*.c port/src/*.c port/src/*.S; do
     base=$(basename "$f"); base=${base%.*}
     [[ "$base" =~ ^($skip)$ ]] && continue

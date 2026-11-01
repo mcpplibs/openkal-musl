@@ -1,0 +1,17 @@
+[package]
+name    = "malloc-threads"
+version = "0.1.0"
+
+[dependencies]
+openkal-musl = { path = "../.." }
+
+[targets.malloc-threads]
+kind = "bin"
+main = "src/main.c"
+
+[build]
+cxx_runtime = "host-coupled"
+
+# The image form, which CI builds once and runs under okrun on four systems.
+[target.'cfg(os = "openkal")'.build-dependencies]
+openkal-tools = { version = "0.1.3", tools = ["okld", "okrun"] }

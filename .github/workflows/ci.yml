@@ -851,6 +851,29 @@ jobs:
           bash tools/run-probe.sh examples/process-identity process-identity
           grep -q -- '-- failures: 0 --' examples/process-identity/run.log
 
+      # THREADS ALLOCATE TOGETHER (0.25.0): each thread's cache of small slots in
+      # front of mallocng, observed by the bytes of every block four threads make,
+      # pass between them and free, over three generations of threads; the cost
+      # of an allocation at one, two and four threads is printed for the record.
+      # port/src/okm_malloc_tc.c.
+      - name: Four threads allocate and free together, each from its own cache
+        env:
+          MCPP_TARGET: ${{ matrix.target }}
+        run: |
+          bash tools/run-probe.sh examples/malloc-threads malloc-threads
+          grep -q -- '-- failures: 0 --' examples/malloc-threads/run.log
+          grep -- '^time' examples/malloc-threads/run.log
+
+      # memcmp AND strlen A WORD OR A VECTOR AT A TIME (0.25.0), against the
+      # byte-at-a-time answer at every alignment, and a string that ends at the
+      # last byte before an unmapped page. port/src/okm_string.c.
+      - name: memcmp and strlen agree with the bytes at every alignment
+        env:
+          MCPP_TARGET: ${{ matrix.target }}
+        run: |
+          bash tools/run-probe.sh examples/strings strings
+          grep -q -- '-- failures: 0 --' examples/strings/run.log
+
       # A LARGE ALLOCATION IS A MAPPING, AND A MAPPING IS WHOLE PAGES.
       #
       # musl's allocator uses a mapping up to the end of its last page; the port
@@ -1260,9 +1283,13 @@ jobs:
             ( cd examples/image-dlopen/plugin && mcpp build --target "$arch-openkal" )
             ( cd examples/image-dlopen && mcpp build --target "$arch-openkal" )
             ( cd examples/image-early-constructor && mcpp build --target "$arch-openkal" )
+            ( cd examples/malloc-threads && mcpp build --release --target "$arch-openkal" )
+            ( cd examples/strings && mcpp build --target "$arch-openkal" )
             cp examples/image-dlopen/plugin/target/"$arch"-openkal/*/bin/libplug.okso "out/$arch/"
             cp examples/image-dlopen/target/"$arch"-openkal/*/bin/image-dlopen.oke "out/$arch/"
             cp examples/image-early-constructor/target/"$arch"-openkal/*/bin/image-early-constructor.oke "out/$arch/"
+            cp examples/malloc-threads/target/"$arch"-openkal/*/bin/malloc-threads.oke "out/$arch/"
+            cp examples/strings/target/"$arch"-openkal/*/bin/strings.oke "out/$arch/"
           done
           (cd out && sha256sum */* | tee SHA256SUMS)
       - uses: actions/upload-artifact@v4
@@ -1322,4 +1349,8 @@ jobs:
           "$OKRUN" "out/$a/image-dlopen.oke" "out/$a/libplug.okso" | tr -d '\r' | tee dlopen.log
           grep -q -- '-- failures: 0 --' dlopen.log || { echo "::error::image-dlopen"; exit 1; }
           "$OKRUN" "out/$a/image-early-constructor.oke" | tr -d '\r' | tee early.log
+          "$OKRUN" "out/$a/malloc-threads.oke" | tr -d '\r' | tee malloc-threads.log
+          grep -q -- '-- failures: 0 --' malloc-threads.log || { echo "::error::malloc-threads"; exit 1; }
+          "$OKRUN" "out/$a/strings.oke" | tr -d '\r' | tee strings.log
+          grep -q -- '-- failures: 0 --' strings.log || { echo "::error::strings"; exit 1; }
           grep -q 'the C library was up before the constructor' early.log || { echo "::error::image-early-constructor"; exit 1; }

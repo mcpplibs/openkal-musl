@@ -99,7 +99,7 @@ cd "$here"
 # `pthread_getattr_np', with the same line in the log and that name in it. A
 # reader who adds an exclusion to mcpp.toml adds the basename here in the same
 # commit; the compiler below globs the directory, so nothing else will tell them.
-skip='__libc_start_main|__init_tls|__set_thread_area|__unmapself|clone|pthread_getattr_np|posix_spawn|posix_spawnp|mmap|syscall_ret|getcwd|fcntl|dl_iterate_phdr|okm_phdr|cache'
+skip='__libc_start_main|__init_tls|__set_thread_area|__unmapself|clone|pthread_getattr_np|posix_spawn|posix_spawnp|mmap|syscall_ret|getcwd|fcntl|dl_iterate_phdr|okm_phdr|cache|memcmp|strlen'
 units=0
 for f in musl/src/*/*.c musl/src/malloc/mallocng/*.c port/src/*.c port/src/*.S; do
     base=$(basename "$f"); base=${base%.*}
