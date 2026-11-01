@@ -751,6 +751,14 @@ program's processor time and peak memory (`KAL_PINFO_MEMORY`, readable until the
 handle is released), and `getrusage(RUSAGE_CHILDREN)` reports the totals of every
 child waited for; `getrusage(RUSAGE_SELF)` reports this program's.
 
+**A thread's emulated variable outlives the destructors that read it** (an ok
+image, `port/src/image/okm_image.c`). Each variable is a key whose destructor
+gave its storage back when the thread ended, and the C++ runtime's key that
+runs `thread_local` destructors is created after the variable's, so musl, which
+runs key destructors in key order, freed the storage first; under mimalloc,
+which writes its free list into a freed block, the destructor read garbage. The
+storage is now kept until the last round of destructors.
+
 **`<stdatomic.h>` is supplied.** This package is compiled with `-nostdinc` and
 publishes the flag, so the compiler's own copy was not on a C program's path; a
 C11 program --- and the embedded allocator --- found no such file.
