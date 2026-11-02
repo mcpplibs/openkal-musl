@@ -324,8 +324,28 @@ void _mi_allocator_done(void) {}
  * format initialisers run before the program's entry and in the order their
  * objects were linked (port/src/mach), so a constructor could run before the
  * C library it calls is up. The end is a destructor, which runs from `exit'. */
+/* WHAT THE ALLOCATOR KEEPS, BY THE PROGRAM'S RESOURCE PREFERENCE (0.27.0;
+ * openkal 0.23, mcpp design 2026-11-03 part 4 §16): memory a heap no longer
+ * uses is given back after mimalloc's own delay (10 ms) when balanced, after a
+ * second for performance, and at once for economy. A default, which
+ * MIMALLOC_PURGE_DELAY states otherwise. Weak: a runner of openkal 0.22 has
+ * no preference to tell. */
+extern __typeof(kal_env_resources) kal_env_resources __attribute__((__weak__));
+
+static void okm_malloc_preference(void)
+{
+	if (!kal_env_resources) return;
+	switch (kal_env_resources()) {
+	case KAL_RESOURCES_PERFORMANCE: mi_option_set_default(mi_option_purge_delay, 1000); break;
+	case KAL_RESOURCES_ECONOMY:     mi_option_set_default(mi_option_purge_delay, 0); break;
+	default: break;
+	}
+}
+
 __attribute__((__visibility__("hidden"))) void __okm_malloc_init(void)
 {
+	/* Not while a snapshot's initialisers run: the start supplies it (below). */
+	if (!sealing()) okm_malloc_preference();
 	/* A SNAPSHOT'S ARENA HOLDS WHAT IS RESERVED WHILE ITS INITIALISERS RUN, and a
 	 * program started from it reserves all of it again: mimalloc reserves a
 	 * gibibyte at a time, so it is asked for little while they run. */
@@ -339,6 +359,7 @@ __attribute__((__visibility__("hidden"))) void __okm_malloc_init(void)
 __attribute__((__visibility__("hidden"))) void __okm_malloc_start(void)
 {
 	mi_option_set(mi_option_arena_reserve, 1024 * 1024);   /* KiB: mimalloc's own, a gibibyte */
+	okm_malloc_preference();
 	mi_theap_t* theap = _mi_theap_default();
 	if (theap != NULL) {
 		_mi_random_reinit_if_weak(&theap->random);

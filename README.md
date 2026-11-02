@@ -758,6 +758,11 @@ read-only directories started programs that could write anywhere.
 name; the named values are now searched once for any `MIMALLOC_` name, and a
 program that sets none is answered without a pass for each option.
 
+**What the allocator keeps follows the program's resource preference** (openkal
+0.23, `kal_env_resources`): memory a heap no longer uses is given back after
+mimalloc's own delay (10 ms) when balanced, after a second for performance, and
+at once for economy --- a default, which `MIMALLOC_PURGE_DELAY` states otherwise.
+
 **The descriptor table is not written at the start.** A description's fields are
 set when it is bound; writing all 1 024 at the start made the table's 340 KiB
 resident before the first instruction, 85 of a language server's worker's 530
