@@ -81,7 +81,10 @@
 #endif
 
 #define OKM_MAX_FD    1024
-#define OKM_MAX_DESC  512
+/* A description for each descriptor: a program refused an open is refused at
+ * the number getrlimit(RLIMIT_NOFILE) states (SYS_prlimit64), not at half of
+ * it. */
+#define OKM_MAX_DESC  OKM_MAX_FD
 #define OKM_MAX_SOCK  128
 #define OKM_MAX_PATH  4096
 #define OKM_MAX_DIRS  64
@@ -215,6 +218,7 @@ kal_uintptr okm_std_stream(int fd);
  * relative, without a leading separator and without a component that ascends. */
 struct okm_at {
 	struct kal_dir base;
+	size_t         len;              /* of `rel', which okm_resolve also ends with a zero */
 	char           rel[OKM_MAX_PATH];
 };
 

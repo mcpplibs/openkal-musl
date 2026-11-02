@@ -417,8 +417,30 @@ AVX2_INLINE void set32(uc* d, uc c, size_t n)
 /* n > 32. */
 AVX2_INLINE int cmp32(const uc* l, const uc* r, size_t n)
 {
-	if (n <= 64) { DIFF32(l, r, 0); DIFF32(l, r, n - 32); return 0; }
-	if (n <= 128) { DIFF32(l, r, 0); DIFF32(l, r, 32); DIFF32(l, r, n - 64); DIFF32(l, r, n - 32); return 0; }
+	/* Up to four vectors are compared together and tested once; the vector
+	 * that differs is found afterwards. */
+	if (n <= 64) {
+		const v32 e = EQ32(ld32(l), ld32(r)) & EQ32(ld32(l + n - 32), ld32(r + n - 32));
+		if (LIKELY(mask32(e) == 0xffffffffu)) return 0;
+		DIFF32(l, r, 0); DIFF32(l, r, n - 32); return 0;
+	}
+	if (n <= 128) {
+		const v32 e = EQ32(ld32(l), ld32(r)) & EQ32(ld32(l + 32), ld32(r + 32))
+		            & EQ32(ld32(l + n - 64), ld32(r + n - 64)) & EQ32(ld32(l + n - 32), ld32(r + n - 32));
+		if (LIKELY(mask32(e) == 0xffffffffu)) return 0;
+		DIFF32(l, r, 0); DIFF32(l, r, 32); DIFF32(l, r, n - 64); DIFF32(l, r, n - 32); return 0;
+	}
+	if (n <= 256) {
+		const uc* lt = l + n - 128; const uc* rt = r + n - 128;
+		const v32 e = EQ32(ld32(l), ld32(r)) & EQ32(ld32(l + 32), ld32(r + 32))
+		            & EQ32(ld32(l + 64), ld32(r + 64)) & EQ32(ld32(l + 96), ld32(r + 96))
+		            & EQ32(ld32(lt), ld32(rt)) & EQ32(ld32(lt + 32), ld32(rt + 32))
+		            & EQ32(ld32(lt + 64), ld32(rt + 64)) & EQ32(ld32(lt + 96), ld32(rt + 96));
+		if (LIKELY(mask32(e) == 0xffffffffu)) return 0;
+		DIFF32(l, r, 0); DIFF32(l, r, 32); DIFF32(l, r, 64); DIFF32(l, r, 96);
+		DIFF32(l, r, n - 128); DIFF32(l, r, n - 96); DIFF32(l, r, n - 64); DIFF32(l, r, n - 32);
+		return 0;
+	}
 	size_t i = 0;
 	for (; i + 128 <= n; i += 128) {
 		const v32 e = EQ32(ld32(l + i), ld32(r + i)) & EQ32(ld32(l + i + 32), ld32(r + i + 32))
@@ -473,15 +495,25 @@ AVX2_INLINE const uc* scan32(const uc* s, uc c, const int nul, uintptr_t end)
 	return 0;
 }
 
+/* A lane of min(a, a == b) is zero where the strings differ or `l' ends: one
+ * test rather than two. */
 #define STEP32(l, r, i) do { \
 	const v32 a_ = ld32((l) + (i)); \
-	const unsigned m_ = ~mask32(EQ32(a_, ld32((r) + (i)))) | mask32(EQ32(a_, z)); \
+	const unsigned m_ = mask32(EQ32(MIN32(a_, EQ32(a_, ld32((r) + (i)))), z)); \
 	if (m_) { const size_t k_ = (i) + (size_t)__builtin_ctz(m_); return (l)[k_] - (r)[k_]; } \
 } while (0)
 
 AVX2_INLINE int strcmp32(const uc* l, const uc* r)
 {
 	const v32 z = { 0 };
+	/* `l' to a multiple of the vector, one vector first: a load of `l' then
+	 * never spans two cache lines, and neither does one of `r' where the two
+	 * are misaligned alike, the common case. */
+	if (((uintptr_t)l & 31) && TO_PAGE_END(l) >= 32 && TO_PAGE_END(r) >= 32) {
+		STEP32(l, r, 0);
+		const size_t k = 32 - ((uintptr_t)l & 31);
+		l += k; r += k;
+	}
 	for (;;) {
 		size_t room = TO_PAGE_END(l) < TO_PAGE_END(r) ? TO_PAGE_END(l) : TO_PAGE_END(r);
 		for (; room >= 128; room -= 128, l += 128, r += 128) {
@@ -491,6 +523,12 @@ AVX2_INLINE int strcmp32(const uc* l, const uc* r)
 			if (UNLIKELY(mask32(EQ32(t, z)))) { STEP32(l, r, 0); STEP32(l, r, 32); STEP32(l, r, 64); STEP32(l, r, 96); }
 		}
 		for (; room >= 32; room -= 32, l += 32, r += 32) STEP32(l, r, 0);
+		/* Toward the nearer page's end a word at a time, and the last bytes,
+		 * or the word that differs or ends, a byte at a time. */
+		for (; room >= 8; room -= 8, l += 8, r += 8) {
+			const uint64_t a = *(const okm_u64u*)l;
+			if (a != *(const okm_u64u*)r || HASZERO(a)) break;
+		}
 		for (; room; room--, l++, r++)
 			if (*l != *r || !*l) return *l - *r;
 	}
@@ -688,15 +726,31 @@ AVX2_INLINE char* strchr32(const uc* s, uc c)
 	return (q && *q == c) ? (char*)q : 0;
 }
 
+/* The first vector alone, which is where most strings end; the next three
+ * together; then blocks of four from the block boundary at or before the
+ * fourth vector's end, which reads a few bytes again rather than aligning a
+ * vector at a time (0.26.0: a 256-byte string is four tests, not nine). */
 AVX2_INLINE size_t strlen32(const uc* s)
 {
 	if (LIKELY(TO_PAGE_END(s) >= 128)) {
 		const v32 z = { 0 };
-		for (size_t k = 0; k < 128; k += 32) {
-			const unsigned m = mask32(EQ32(ld32(s + k), z));
-			if (m) return k + (size_t)__builtin_ctz(m);
+		unsigned m = mask32(EQ32(ld32(s), z));
+		if (m) return (size_t)__builtin_ctz(m);
+		const v32 b = ld32(s + 32), c = ld32(s + 64), d = ld32(s + 96);
+		if (mask32(EQ32(MIN32(b, MIN32(c, d)), z))) {
+			if ((m = mask32(EQ32(b, z)))) return 32 + (size_t)__builtin_ctz(m);
+			if ((m = mask32(EQ32(c, z)))) return 64 + (size_t)__builtin_ctz(m);
+			return 96 + (size_t)__builtin_ctz(mask32(EQ32(d, z)));
 		}
-		return (size_t)(scan32(s + 128, 0, 0, UINTPTR_MAX) - s);
+		for (const uc* p = (const uc*)(((uintptr_t)s + 128) & ~(uintptr_t)127);; p += 128) {
+			const v32 x0 = lda32(p), x1 = lda32(p + 32), x2 = lda32(p + 64), x3 = lda32(p + 96);
+			if (UNLIKELY(mask32(EQ32(MIN32(MIN32(x0, x1), MIN32(x2, x3)), z)))) {
+				if ((m = mask32(EQ32(x0, z)))) return (size_t)(p - s) + (size_t)__builtin_ctz(m);
+				if ((m = mask32(EQ32(x1, z)))) return (size_t)(p - s) + 32 + (size_t)__builtin_ctz(m);
+				if ((m = mask32(EQ32(x2, z)))) return (size_t)(p - s) + 64 + (size_t)__builtin_ctz(m);
+				return (size_t)(p - s) + 96 + (size_t)__builtin_ctz(mask32(EQ32(x3, z)));
+			}
+		}
 	}
 	return (size_t)(scan32(s, 0, 0, UINTPTR_MAX) - s);
 }

@@ -525,24 +525,25 @@ static int join(const char* prefix, const char* rel, char* out, size_t cap)
 	return normalise(tmp, out + keep, cap - keep);
 }
 
-/* Whether an absolute name is already in the form `normalise' produces: one
- * leading separator, and no empty, `.' or `..' component. Most names a program
- * passes are, and they are resolved without being copied twice first. */
-static int already_normal(const char* path)
+/* The length of an absolute name that is already in the form `normalise'
+ * produces --- one leading separator, and no empty, `.' or `..' component ---
+ * and zero for any other. Most names a program passes are, and they are
+ * resolved without being copied twice first; the length is what the rest of
+ * the resolution and the enquiry then use, so the name is read once. */
+static size_t already_normal(const char* path)
 {
 	if (path[0] != '/') return 0;
 	const char* p = path + 1;
-	size_t n = 1;
 	while (*p) {
 		const char* s = p;
 		while (*p && *p != '/') p++;
 		const size_t len = (size_t)(p - s);
 		if (len == 0) return 0;
 		if (s[0] == '.' && (len == 1 || (len == 2 && s[1] == '.'))) return 0;
-		n += len;
-		if (*p) { p++; n++; if (!*p) return 0; }
+		if (*p) { p++; if (!*p) return 0; }
 	}
-	return n < OKM_MAX_PATH;
+	const size_t n = (size_t)(p - path);
+	return n < OKM_MAX_PATH ? n : 0;
 }
 
 int okm_resolve(int dirfd, const char* path, struct okm_at* at, int empty_ok)
@@ -552,9 +553,10 @@ int okm_resolve(int dirfd, const char* path, struct okm_at* at, int empty_ok)
 
 	char buf[OKM_MAX_PATH];
 	const char* abs = buf;
+	size_t abs_len = 0;          /* known when the name was taken as it stands */
 	int have_abs = 0;
 
-	if (already_normal(path)) {
+	if ((abs_len = already_normal(path)) != 0) {
 		abs = path;
 		have_abs = 1;
 	} else if (root_length(path)) {
@@ -585,8 +587,8 @@ int okm_resolve(int dirfd, const char* path, struct okm_at* at, int empty_ok)
 				while (*p == '/') p++;
 			}
 			at->base = d->dir;
-			copy_str(at->rel, norm, __builtin_strlen(norm), sizeof at->rel);
-			if (!at->rel[0]) copy_str(at->rel, ".", 1, sizeof at->rel);
+			at->len = copy_str(at->rel, norm, __builtin_strlen(norm), sizeof at->rel);
+			if (!at->rel[0]) at->len = copy_str(at->rel, ".", 1, sizeof at->rel);
 			return 0;
 		}
 	}
@@ -608,8 +610,9 @@ int okm_resolve(int dirfd, const char* path, struct okm_at* at, int empty_ok)
 	const char* rest = abs + best_len;
 	while (*rest == '/') rest++;
 	at->base = g_pre[best].dir;
-	if (!*rest) copy_str(at->rel, ".", 1, sizeof at->rel);
-	else        copy_str(at->rel, rest, __builtin_strlen(rest), sizeof at->rel);
+	const size_t rest_len = abs_len ? abs_len - (size_t)(rest - abs) : __builtin_strlen(rest);
+	if (!*rest) at->len = copy_str(at->rel, ".", 1, sizeof at->rel);
+	else        at->len = copy_str(at->rel, rest, rest_len, sizeof at->rel);
 	return 0;
 }
 

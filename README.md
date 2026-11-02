@@ -759,6 +759,33 @@ runs key destructors in key order, freed the storage first; under mimalloc,
 which writes its free list into a freed block, the destructor read garbage. The
 storage is now kept until the last round of destructors.
 
+**An open directory has the identity of its name.** `fstat` of a directory asks
+openkal about the directory's own name, `"."` (clause 7.12), and reports its kind,
+times and identity; it reported a kind alone, so `st_dev` and `st_ino` were zero
+and a program comparing the directory it holds with the one its name refers to
+found them different.
+
+**A normal mutex is waited for as the system's library waits for one.** A
+contended lock marks the mutex and sleeps until it was free when marked, and an
+unlock that finds the mark wakes one waiter; musl spun a hundred times first and
+counted its waiters. Four contexts on one mutex took 383 ns a round against the
+system's 177, and take 160 (`musl/PATCHES.md`).
+
+**A name is read once on its way to an enquiry.** `stat` and `open` resolve an
+absolute name that is already in its plain form without copying it twice and
+pass its length on, and the structure is cleared in one store.
+
+**A string of a few hundred bytes takes fewer tests.** `strlen` tests the first
+vector alone, the next three together, and then blocks of four from the block
+boundary behind the fourth; `strcmp` tests a vector once (the lanes of
+`min(a, a == b)` that are zero), aligns the first string to its vector, and
+crosses a page a word at a time; `memcmp` tests up to eight vectors together
+below 256 bytes.
+
+**A program opens as many files as `getrlimit` states.** The table of open files
+holds one for each descriptor (`OKM_MAX_DESC` is `OKM_MAX_FD`, 1024); it held 512,
+and the opens past it were refused while `getrlimit(RLIMIT_NOFILE)` stated 1024.
+
 **`<stdatomic.h>` is supplied.** This package is compiled with `-nostdinc` and
 publishes the flag, so the compiler's own copy was not on a C program's path; a
 C11 program --- and the embedded allocator --- found no such file.

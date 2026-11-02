@@ -781,3 +781,15 @@ were in 0.25.0; `src/time/clock_gettime.c` by `port/src/okm_clock.c`. musl's
 are correct and are written a byte or a word at a time for every machine; the
 replacements use the processor's vectors, and the clock reads openkal without the
 system-call dispatcher. README.md states the measurements.
+
+## A normal mutex waited for as the system's library waits (0.26.0)
+
+### `src/thread/pthread_mutex_timedlock.c`, eight lines
+
+A normal mutex locked without a deadline marks its word contended and sleeps
+while it was held when marked, and the unlock that finds the mark wakes one
+waiter, as the system's C library does; neither musl's hundred spins nor its
+waiter count is used on that path. The mark is the high bit musl's unlock and
+condition variables already read, so a requeued waiter and a timed lock work
+with it unchanged. Four contexts locking one mutex took 383 ns a round against
+the system's 177; they take 160.

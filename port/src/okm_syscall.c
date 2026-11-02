@@ -319,7 +319,7 @@ static syscall_arg_t do_openat(int dirfd, const char* path, int flags, int mode)
 	struct okm_at at;
 	syscall_arg_t r = okm_resolve(dirfd, path, &at, 0);
 	if (r) return r;
-	const size_t n = slen(at.rel);
+	const size_t n = at.len;
 
 	/* O_NOFOLLOW ON A LINK IS `ELOOP', AND ANSWERING `ENOENT' MADE A
 	 * DIRECTORY UNREMOVABLE.
@@ -398,7 +398,7 @@ static syscall_arg_t do_openat(int dirfd, const char* path, int flags, int mode)
 
 static void fill_kstat(const struct kal_node_info* in, struct kstat* out)
 {
-	for (unsigned i = 0; i < sizeof *out; i++) ((char*)out)[i] = 0;
+	*out = (struct kstat){ 0 };
 	out->st_size = (off_t)in->size;
 	out->st_nlink = 1;
 	out->st_blksize = OKM_PAGE;
@@ -473,11 +473,23 @@ static syscall_arg_t do_fstat(int fd, struct kstat* st)
 		const int e = okm_fs_file_info(d->file, KAL_INFO_ALL, &info);
 		if (e != kal_ok) return -okm_errno(e);
 	} else if (d->kind == OKM_DIR) {
-		for (unsigned i = 0; i < sizeof info; i++) ((char*)&info)[i] = 0;
-		info.self_size = sizeof info;
-		info.present   = KAL_INFO_KIND | KAL_INFO_WRITABLE;
-		info.kind = kal_node_directory;
-		info.writable = 1;
+		/* A DIRECTORY IS ASKED ABOUT BY ITS OWN NAME, ".", which openkal
+		 * reserves for the directory itself (clause 7.12): what it is, when it
+		 * changed and, since 0.9, its identity. It was answered with a kind
+		 * alone, so `st_dev' and `st_ino' were zero, and a program that compares
+		 * the directory it holds with the one a name refers to --- a cache that
+		 * trusts a directory only while its name still refers to it --- found
+		 * the two different every time (measured: clangd's owned module cache
+		 * refused every directory of an ok image). An implementation that does
+		 * not answer the name is answered as before. */
+		const int e = okm_fs_info(d->dir, ".", 1, 0, KAL_INFO_ALL, &info);
+		if (e != kal_ok || info.kind != kal_node_directory) {
+			for (unsigned i = 0; i < sizeof info; i++) ((char*)&info)[i] = 0;
+			info.self_size = sizeof info;
+			info.present   = KAL_INFO_KIND | KAL_INFO_WRITABLE;
+			info.kind = kal_node_directory;
+			info.writable = 1;
+		}
 	} else {
 		/* A stream that is not a file: a program asks in order to choose a
 		 * buffering discipline, and what decides that is whether the stream is
@@ -565,7 +577,7 @@ static syscall_arg_t do_fstatat(int dirfd, const char* path, struct kstat* st, i
 	 * `kal_fs_info' takes the choice. */
 	struct kal_node_info info = { .self_size = sizeof info };
 	const kal_uintptr how = (flag & AT_SYMLINK_NOFOLLOW) ? KAL_FS_NO_RESOLVE : 0;
-	const int e = okm_fs_info(at.base, at.rel, slen(at.rel), how, KAL_INFO_ALL, &info);
+	const int e = okm_fs_info(at.base, at.rel, at.len, how, KAL_INFO_ALL, &info);
 	if (e != kal_ok) return -okm_errno(e);
 	if (info.kind == kal_node_absent) return -ENOENT;
 	fill_kstat(&info, st);
