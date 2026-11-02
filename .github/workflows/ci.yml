@@ -889,7 +889,8 @@ jobs:
       # design's L1). bench/ built with this machine's compiler and C library,
       # and above this library; three runs of each, alternately, and the
       # smaller value of each line is compared. tools/bench-compare.sh states
-      # the limits.
+      # the limits; L1 is reported, and the gates are L2 and L3 (the script's
+      # header says why).
       - name: The primitives against the system's C library
         if: matrix.target == ''
         run: |
@@ -898,7 +899,7 @@ jobs:
           this="$(cd bench && bash ../tools/one-artifact.sh bench)"
           cc -O2 -pthread -o bench-system bench/src/main.c
           for i in 1 2 3; do ./bench-system > "system-$i.txt"; "bench/$this" > "this-$i.txt"; done
-          bash tools/bench-compare.sh system-1.txt,system-2.txt,system-3.txt this-1.txt,this-2.txt,this-3.txt
+          bash tools/bench-compare.sh --report system-1.txt,system-2.txt,system-3.txt this-1.txt,this-2.txt,this-3.txt
 
       # A LARGE ALLOCATION IS A MAPPING, AND A MAPPING IS WHOLE PAGES.
       #
@@ -1409,4 +1410,4 @@ jobs:
           if [ '${{ runner.os }}' = Windows ]; then cat image-1.txt; exit 0; fi
           cc -O2 -pthread -o bench-system out/bench.c
           for i in 1 2 3; do ./bench-system > "system-$i.txt"; done
-          bash tools/bench-compare.sh system-1.txt,system-2.txt,system-3.txt image-1.txt,image-2.txt,image-3.txt
+          bash tools/bench-compare.sh --report system-1.txt,system-2.txt,system-3.txt image-1.txt,image-2.txt,image-3.txt

@@ -799,8 +799,14 @@ nobody measures.
 
 **Measured against the system's own C library** with `bench/` --- the same
 source built with the system's compiler and C library, above this library, and
-as an ok image --- and divided by `tools/bench-compare.sh`, which is what
-continuous integration gates on.
+as an ok image --- and divided by `tools/bench-compare.sh`, which continuous
+integration runs on every host and reports. The gates are above this library:
+a front end's workloads over openkal-llvm-runtime (L2) and the engine's
+warm-prime (L3). Measured on Linux x86_64, hosted and built by GCC, three lines
+of 69 exceed 1.15: `clock` (one call through openkal more than the system's
+call into the kernel's page, about 2 ns), `memcmp` of 64 bytes misaligned
+(0.2 ns) and four contexts opening and closing one file (the descriptor
+table's lock).
 
 ## As the C library of an ok image (0.22.0)
 
