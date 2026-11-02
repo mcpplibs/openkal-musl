@@ -235,6 +235,9 @@ int main(int argc, char **argv, char **envp) {
 		clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &c1);
 		const long long slept = (long long)(c1.tv_sec - c0.tv_sec) * 1000000000 + (c1.tv_nsec - c0.tv_nsec);
 		check(had && slept < 100000000, "time asleep is not processor time");
+		if (!(had && slept < 100000000))
+			printf("   asleep 200 ms, the processor clock moved %lld ns (%lld.%09ld to %lld.%09ld)\n", slept,
+			       (long long)c0.tv_sec, c0.tv_nsec, (long long)c1.tv_sec, c1.tv_nsec);
 		clock_gettime(CLOCK_MONOTONIC, &s0);
 		volatile unsigned long long sink = 0;
 		do {
