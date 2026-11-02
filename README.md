@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.26.0"
+openkal-musl = "0.26.1"
 ```
 
 > **Engine floor (mcpp 2026.11.2.1):** 0.26.0 embeds its allocator through a
@@ -686,6 +686,11 @@ x86_64; a word at a time, from the aligned word, elsewhere), where musl's own
 compare a byte at a time; the two took 14 % of clangd.okb's time, most of it
 matching command-line options. Every load is aligned to its size, so none
 reaches a page the string does not (`port/src/okm_string.c`).
+
+## The image loader of openkal-image 0.3.1 (0.26.1)
+
+An image's `dlopen` uses libokld of openkal-image 0.3.1, the release openkal-platform 0.21.1 names
+(an okb member whose admission was remembered is admitted without reading it); nothing else changes.
 
 ## The allocator is mimalloc, memory is a region, and nothing waits by spinning (0.26.0)
 
