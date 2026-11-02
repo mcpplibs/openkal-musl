@@ -28,6 +28,12 @@ char *realpath(const char *restrict filename, char *restrict resolved)
 		return 0;
 	}
 	if (l >= PATH_MAX) goto toolong;
+	{
+		long __okm_realpath(const char *, char *, size_t);
+		const long r = __okm_realpath(filename, output, sizeof output);
+		if (r < 0) { errno = -r; return 0; }
+		if (r > 0) return resolved ? memcpy(resolved, output, r+1) : strdup(output);
+	}
 	p = sizeof stack - l - 1;
 	q = 0;
 	memcpy(stack+p, filename, l+1);

@@ -1021,6 +1021,10 @@ jobs:
         run: |
           set -euo pipefail
           test -s run.log || { echo "::error::no run.log — nothing to read"; exit 1; }
+          if grep -q 'discarded-bytes' run.log; then
+            echo "::error::a started program given /dev/null wrote onto the caller's own stream"
+            exit 1
+          fi
           if grep -q 'redirected-bytes' run.log; then
             echo "::error::a started program's output arrived on the caller's own stream"
             grep -n 'redirected-bytes' run.log | sed 's/^/        /'

@@ -196,9 +196,14 @@ static int startable_name(struct okm_at* at)
  * remove. A refusal is one the caller can act upon. Recorded in
  * musl/PATCHES.md, and reported upstream: the specification reserves a value in
  * one interface that another interface may hand out. */
+/* The positions given the null device, one bit each (OKM_NULL). A stream
+ * placed at a position afterwards takes it back, as a later action decides. */
+static unsigned g_null_at;
+
 static int place(struct kal_spawn_streams* s, int pos, kal_uintptr stream,
                  int* placed)
 {
+	g_null_at &= ~(1u << pos);
 	if (stream == okm_std_stream(pos)) stream = 0;
 	else if (stream == 0)              return ENOSYS;
 	else                               *placed = 1;
@@ -221,6 +226,15 @@ static int place(struct kal_spawn_streams* s, int pos, kal_uintptr stream,
  * The classification is the one okm_syscall.c's `stream_of' makes for reading
  * and writing, and the two agree deliberately: a descriptor a program can write
  * to is a descriptor a started program can be given. */
+/* The null device at a position: no stream, and the position remembered. */
+static void place_null(struct kal_spawn_streams* s, int pos)
+{
+	if      (pos == 0) s->in.h  = 0;
+	else if (pos == 1) s->out.h = 0;
+	else               s->err.h = 0;
+	g_null_at |= 1u << pos;
+}
+
 static int stream_for_spawn(int fd, kal_uintptr* out)
 {
 	struct okm_desc* d = okm_desc_of(fd);
@@ -249,7 +263,10 @@ static int stream_for_spawn(int fd, kal_uintptr* out)
  * one that names nothing is refused. */
 static int seed(struct kal_spawn_streams* s, int* placed)
 {
+	g_null_at = 0;
 	for (int fd = 0; fd < 3; fd++) {
+		const struct okm_desc* d = okm_desc_of(fd);
+		if (d && d->kind == OKM_NULL) { place_null(s, fd); continue; }
 		kal_uintptr stream = 0;
 		int e = stream_for_spawn(fd, &stream);
 		if (!e) e = place(s, fd, stream, placed);
@@ -277,7 +294,7 @@ static int seed(struct kal_spawn_streams* s, int* placed)
  * `execve' that gets an unbound program is where this port has always been; a
  * caller that gets no program is worse. The difference is recorded in
  * musl/PATCHES.md and is what `KAL_PROCESS_PROP_BOUND_LIFETIME' is for. */
-static int start_program(int bound, struct kal_job* unit, struct kal_dir work,
+static int start_program(int bound, kal_uintptr nulls, struct kal_job* unit, struct kal_dir work,
                          struct okm_at* at,
                          const char** a_ptr, const kal_uintptr* a_len, int argc,
                          const char** e_ptr, const kal_uintptr* e_len, int envc,
@@ -303,7 +320,7 @@ static int start_program(int bound, struct kal_job* unit, struct kal_dir work,
 	how.job         = (unit && (props & KAL_PROCESS_PROP_JOB)) ? unit : 0;
 	how.grants      = 0;
 	how.grant_count = 0;
-	how.flags       = 0;
+	how.flags       = nulls;
 
 	/* ASKED FOR ONLY WHERE IT IS MEANT, AND ONLY WHERE IT IS ANSWERED.
 	 *
@@ -446,6 +463,10 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 			switch (op->cmd) {
 			case FDOP_DUP2: {
 				if (op->fd > 2 || op->fd < 0) { refused = ENOSYS; break; }
+				{
+					const struct okm_desc* src = okm_desc_of(op->srcfd);
+					if (src && src->kind == OKM_NULL) { place_null(&streams, op->fd); break; }
+				}
 				kal_uintptr s = 0;
 				refused = stream_for_spawn(op->srcfd, &s);
 				if (refused) break;
@@ -460,6 +481,7 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 				 * a file through `dup2' --- which is the route openkal-linux#13
 				 * reported as not working. */
 				if (op->fd > 2 || op->fd < 0) { refused = ENOSYS; break; }
+				if (okm_null_name(AT_FDCWD, op->path)) { place_null(&streams, op->fd); break; }
 				if (opened_n >= OKM_SPAWN_MAX_OPEN) { refused = ENOSYS; break; }
 				const long r = okm_resolve(AT_FDCWD, op->path, &fa_at, 0);
 				if (r) { refused = (int)-r; break; }
@@ -547,6 +569,37 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 	 * zero, so a program that redirects nothing asks for nothing, and only a
 	 * caller that did redirect meets the refusal --- which is the answer it can
 	 * act upon rather than a program started somewhere it did not ask for. */
+	/* THE NULL DEVICE IS THE ENVIRONMENT'S AT A STARTED PROGRAM'S POSITION
+	 * (openkal 0.22, clause 7.15), and asked for by the flag where the
+	 * implementation claims it. An implementation before 0.22 is given the
+	 * environment's file of that name where one is reachable, which is what
+	 * this function did before; where none is (preopens that are volumes), the
+	 * start is refused with the answer the name received, as it was. */
+	kal_uintptr nulls = 0;
+	if (!refused && g_null_at) {
+		if (okm_process_props() & KAL_PROCESS_PROP_NULL_STREAMS) {
+			if (g_null_at & 1u) nulls |= KAL_SPAWN_NULL_IN;
+			if (g_null_at & 2u) nulls |= KAL_SPAWN_NULL_OUT;
+			if (g_null_at & 4u) nulls |= KAL_SPAWN_NULL_ERR;
+		} else if (opened_n >= OKM_SPAWN_MAX_OPEN) {
+			refused = ENOSYS;
+		} else {
+			const long r = okm_resolve(AT_FDCWD, "/dev/null", &fa_at, 0);
+			struct kal_file f;
+			const int oe = r ? kal_err_not_found
+			                 : okm_fs_open(fa_at.base, fa_at.rel, slen(fa_at.rel),
+			                               okm_open_flags(O_RDWR), &f);
+			if (r) refused = (int)-r;
+			else if (oe != kal_ok) refused = okm_errno(oe);
+			else {
+				opened[opened_n++] = f;
+				const unsigned at = g_null_at;
+				for (int pos = 0; pos < 3 && !refused; pos++)
+					if (at & (1u << pos)) refused = place(&streams, pos, okm_fs_stream(f).h, &placed);
+			}
+		}
+	}
+
 	if (!refused && placed
 	    && !(okm_process_props() & KAL_PROCESS_PROP_STREAM_PASSING))
 		refused = ENOSYS;
@@ -576,7 +629,7 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 	 * else entirely. Passing it now closes that, and it closes the `fork' route
 	 * as well: a copy that chdir'd has its own `okm_cwd_dir', and the `execve'
 	 * it then performs reaches this line. */
-	int e = start_program(bound, want_unit, where_held ? where : okm_cwd_dir,
+	int e = start_program(bound, nulls, want_unit, where_held ? where : okm_cwd_dir,
 	                      &at, a_ptr, a_len, argc,
 	                      e_ptr, e_len, envc, &streams, &child);
 

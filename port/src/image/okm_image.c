@@ -133,6 +133,16 @@ char *dlerror(void)
 void *__okm_kal_resolve(const char *name);   /* okm_kal_table.c */
 
 static void *host_reserve(okld_size n, void *ctx) { (void)ctx; return kal_exec_alloc(n); }
+/* At the base an image states (openkal 0.23, SPEC 12.3). Weak, so that an image
+ * of this library runs on a runner of openkal 0.22, where it is zero and every
+ * image is placed anywhere. */
+extern __typeof(kal_exec_alloc_at) kal_exec_alloc_at __attribute__((__weak__));
+static void *host_reserve_at(void *at, okld_size n, void *ctx)
+{
+	(void)ctx;
+	if (!kal_exec_alloc_at || !(kal_exec_props() & KAL_EXEC_PROP_PLACE)) return 0;
+	return kal_exec_alloc_at(at, n);
+}
 static int host_publish(void *r, okld_size off, okld_size n, void *ctx) { (void)ctx; return kal_exec_publish_part(r, off, n); }
 static void host_release(void *r, okld_size n, void *ctx) { (void)ctx; kal_exec_free(r, n); }
 static okld_size host_granularity(void *ctx) { (void)ctx; return kal_exec_granularity(); }
@@ -221,8 +231,10 @@ void *dlopen(const char *path, int flags)
 	/* Static: the loader keeps the pointer for the module's life and calls
 	 * through it again when the module is unloaded. */
 	static const struct okld_host host = {
-		host_reserve, host_publish, host_release, host_granularity, host_resolve,
-		host_find_needed, host_release_bytes, host_alloc, host_free, 0, 0,
+		.reserve = host_reserve, .publish = host_publish, .release = host_release,
+		.granularity = host_granularity, .resolve = host_resolve,
+		.find_needed = host_find_needed, .release_bytes = host_release_bytes,
+		.alloc = host_alloc, .free = host_free, .reserve_at = host_reserve_at,
 	};
 	struct okld_module *m = 0;
 	struct okld_why why;

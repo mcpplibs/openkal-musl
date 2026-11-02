@@ -149,6 +149,31 @@ shape twice before: `mprotect` reports `ENOSYS` rather than claim a guard it did
 not place, and `sigaltstack` was changed in 0.10.0 from reporting success and
 installing nothing to reporting `ENOSYS`.
 
+## `src/misc/realpath.c`, six lines (0.27.0)
+
+```diff
+ 	if (l >= PATH_MAX) goto toolong;
++	{
++		long __okm_realpath(const char *, char *, size_t);
++		const long r = __okm_realpath(filename, output, sizeof output);
++		if (r < 0) { errno = -r; return 0; }
++		if (r > 0) return resolved ? memcpy(resolved, output, r+1) : strdup(output);
++	}
+```
+
+**The environment answers for the whole name, where it can.** musl resolves a
+name one component at a time, asking of each whether it is a link; each
+question is a `readlink`, here an enquiry of the environment. A language server
+resolves the name of every header it reads, and in one session of one made
+872 000 such enquiries where the program of the environment made 353 000, and
+99 000 reads of `/proc/self/fd`, one for each file it opened: the kernel holds
+the answer for an open file, and only it can give it in one question.
+openkal 0.23 asks it (`kal_fs_resolved_name`). `port/src/okm_realpath.c`
+answers a name with no `.` or `..` component and no separator at the end ---
+for those, resolving lexically and following links agree --- on a volume that
+states `KAL_FS_PROP_RESOLVED_NAME`, and the null device's name with itself;
+for anything else it answers zero, and the walk below runs unchanged.
+
 ## Not changed: the five excluded sources
 
 `src/env/__libc_start_main.c`, `src/env/__init_tls.c`,

@@ -183,8 +183,9 @@ long okm_poll(void* p, unsigned long n, int timeout_ms)
 			if (!d) { fds[i].revents = POLLNVAL; ready++; continue; }
 
 			/* A file and a directory are always ready, which is what every
-			 * environment reports for them: a read from a file does not wait. */
-			if (d->kind == OKM_FILE || d->kind == OKM_DIR) {
+			 * environment reports for them: a read from a file does not wait.
+			 * The null device neither: a read reports the end at once. */
+			if (d->kind == OKM_FILE || d->kind == OKM_DIR || d->kind == OKM_NULL) {
 				if (fds[i].events & POLLIN)  fds[i].revents |= POLLIN;
 				if (fds[i].events & POLLOUT) fds[i].revents |= POLLOUT;
 				if (fds[i].revents) ready++;

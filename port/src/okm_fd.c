@@ -270,7 +270,7 @@ static void desc_release(int d)
 	/* A socket's release reads and writes okm_net.c's table, which this lock
 	 * guards; it is made here, as before. */
 	if (p->kind == OKM_SOCKET) close_owned(p);
-	else if (p->kind != OKM_STREAM && p->kind != OKM_FREE) {
+	else if (p->kind != OKM_STREAM && p->kind != OKM_FREE && p->kind != OKM_NULL) {
 		if (g_settling_n < OKM_SETTLING_MAX) {
 			g_settling[g_settling_n].owner = (kal_uintptr)OKM_CONTEXT_ID();
 			g_settling[g_settling_n].d = *p;
@@ -670,6 +670,16 @@ int okm_absolute(int dirfd, const char* path, char* out, size_t cap)
 	if (!d || d->kind != OKM_DIR) return -ENOTDIR;
 	if (d->path_slot < 0 || !g_dirpath[d->path_slot][0]) return -ENOENT;
 	return join(g_dirpath[d->path_slot], path, out, cap);
+}
+
+int okm_null_name(int dirfd, const char* path)
+{
+	static const char name[] = "/dev/null";
+	if (!path || !*path) return 0;
+	char abs[OKM_MAX_PATH];
+	if (okm_absolute(dirfd, path, abs, sizeof abs) != 0) return 0;
+	for (size_t i = 0; i < sizeof name; i++) if (abs[i] != name[i]) return 0;
+	return 1;
 }
 
 /* Every stream this image holds, released --- used by the one place that has an

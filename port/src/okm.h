@@ -107,6 +107,13 @@ enum okm_kind {
 	 * and carries two endpoints that no other descriptor needs. `sock' below is
 	 * the index. */
 	OKM_SOCKET,
+	/* THE NULL DEVICE, WHICH IS THIS LIBRARY'S AND HAS NO STREAM. A read
+	 * reports the end of input and a write is accepted in full, with nothing
+	 * beneath either. POSIX names it `/dev/null'; the name is resolved here on
+	 * every environment, including one whose preopens are volumes and hold no
+	 * such file. A started program is given the environment's own device at
+	 * the position (openkal 0.22, `KAL_SPAWN_NULL_*'; okm_spawn.c). */
+	OKM_NULL,
 };
 
 /* An open file description, in the POSIX sense: what a descriptor refers to,
@@ -235,6 +242,9 @@ void okm_dir_remember(int fd, const char* abs);
 /* The absolute form of a name, for the callers that need it before the
  * directory it resolves against is known. Returns 0 or a negated error. */
 int okm_absolute(int dirfd, const char* path, char* out, size_t cap);
+/* Whether `path', resolved lexically against `dirfd', is the null device's
+ * name, `/dev/null'. */
+int okm_null_name(int dirfd, const char* path);
 
 /* The working directory, which POSIX has and openkal does not: openkal names
  * every operation relative to a directory the program holds, so the notion of

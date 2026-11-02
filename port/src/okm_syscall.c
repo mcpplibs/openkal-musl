@@ -152,8 +152,25 @@ static syscall_arg_t stream_of(int fd, kal_uintptr* out)
 	return -EISDIR;
 }
 
+/* What the null device reports about itself: a character device every
+ * environment's spelling of it is, under Linux's numbers (1, 3), so that a
+ * program that checks it has the device it expects is answered the same way on
+ * each (OKM_NULL). */
+static void null_kstat(struct kstat* st)
+{
+	*st = (struct kstat){ 0 };
+	st->st_mode = S_IFCHR | 0666u;
+	st->st_nlink = 1;
+	st->st_rdev = (dev_t)((1u << 8) | 3u);
+	st->st_blksize = OKM_PAGE;
+}
+
 static syscall_arg_t do_write(int fd, const void* buf, size_t len)
 {
+	{
+		const struct okm_desc* n = okm_desc_of(fd);
+		if (n && n->kind == OKM_NULL) return (syscall_arg_t)len;
+	}
 	kal_uintptr s;
 	const syscall_arg_t r = stream_of(fd, &s);
 	if (r) return r;
@@ -171,6 +188,10 @@ static syscall_arg_t do_write(int fd, const void* buf, size_t len)
 
 static syscall_arg_t do_read_stream(int fd, void* buf, size_t len)
 {
+	{
+		const struct okm_desc* n = okm_desc_of(fd);
+		if (n && n->kind == OKM_NULL) return 0;
+	}
 	kal_uintptr s;
 	const syscall_arg_t r = stream_of(fd, &s);
 	if (r) return r;
@@ -287,6 +308,12 @@ static syscall_arg_t do_transfer_at(int fd, const struct iovec* v, int count,
 {
 	struct okm_desc* d = okm_desc_of(fd);
 	if (!d) return -EBADF;
+	if (d->kind == OKM_NULL) {
+		if (at < 0 || count < 0) return -EINVAL;
+		syscall_arg_t total = 0;
+		if (writing) for (int i = 0; i < count; i++) total += (syscall_arg_t)v[i].iov_len;
+		return total;
+	}
 	if (d->kind != OKM_FILE) return -ESPIPE;
 	if (at < 0 || count < 0) return -EINVAL;
 	if (okm_fs_at_available()) return transfer_at(d, v, count, at, writing);
@@ -316,6 +343,20 @@ static syscall_arg_t do_transfer_at(int fd, const struct iovec* v, int count,
 static syscall_arg_t do_openat(int dirfd, const char* path, int flags, int mode)
 {
 	(void)mode;   /* openkal has no permission bits; see the README */
+	/* THE NULL DEVICE'S NAME IS THIS LIBRARY'S (OKM_NULL), on every
+	 * environment: one whose preopens are volumes holds no such file, and one
+	 * whose program was granted only some directories may hold none either. */
+	if (okm_null_name(dirfd, path)) {
+		if (flags & O_DIRECTORY) return -ENOTDIR;
+		if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) return -EEXIST;
+		const struct kal_file nof = { 0 };
+		const struct kal_dir nod = { 0 };
+		okm_lock();
+		int fd = okm_fd_alloc(0);
+		if (fd >= 0) fd = okm_fd_bind(fd, OKM_NULL, 0, nof, nod, flags);
+		okm_unlock();
+		return fd;
+	}
 	struct okm_at at;
 	syscall_arg_t r = okm_resolve(dirfd, path, &at, 0);
 	if (r) return r;
@@ -468,6 +509,7 @@ static syscall_arg_t do_fstat(int fd, struct kstat* st)
 {
 	struct okm_desc* d = okm_desc_of(fd);
 	if (!d) return -EBADF;
+	if (d->kind == OKM_NULL) { null_kstat(st); return 0; }
 	struct kal_node_info info = { .self_size = sizeof info };
 	if (d->kind == OKM_FILE) {
 		const int e = okm_fs_file_info(d->file, KAL_INFO_ALL, &info);
@@ -522,6 +564,7 @@ static syscall_arg_t do_fstat(int fd, struct kstat* st)
  * where the difference belongs: a caller of `readlink' expects the first. */
 static syscall_arg_t do_readlink(int dirfd, const char* path, char* out, size_t cap)
 {
+	if (okm_null_name(dirfd, path)) return -EINVAL;   /* a device, not a link */
 	struct okm_at at;
 	const syscall_arg_t r = okm_resolve(dirfd, path, &at, 0);
 	if (r) return r;
@@ -562,6 +605,7 @@ static syscall_arg_t do_symlink(const char* target, int dirfd, const char* path)
 static syscall_arg_t do_fstatat(int dirfd, const char* path, struct kstat* st, int flag)
 {
 	if ((flag & AT_EMPTY_PATH) && path && !*path) return do_fstat(dirfd, st);
+	if (okm_null_name(dirfd, path)) { null_kstat(st); return 0; }
 	struct okm_at at;
 	const syscall_arg_t r = okm_resolve(dirfd, path, &at, 0);
 	if (r) return r;
@@ -1759,6 +1803,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_lseek: {
 		struct okm_desc* d = okm_desc_of((int)a1);
 		if (!d) return -EBADF;
+		if (d->kind == OKM_NULL) return 0;
 		if (d->kind != OKM_FILE) return -ESPIPE;
 		kal_u64 at = 0;
 		const int e = okm_fs_seek(d->file, (int64_t)a2, (int)a3, &at);
@@ -1894,6 +1939,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 
 	case SYS_ftruncate: {
 		struct okm_desc* d = okm_desc_of((int)a1);
+		if (d && d->kind == OKM_NULL) return -EINVAL;
 		if (!d || d->kind != OKM_FILE) return -EBADF;
 		const int e = okm_fs_truncate(d->file, (uint64_t)a2);
 		return e == kal_ok ? 0 : -okm_errno(e);
@@ -2068,6 +2114,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_faccessat2:
 #endif
 	{
+		if (okm_null_name((int)a1, (const char*)a2)) return ((int)a3 & X_OK) ? -EACCES : 0;
 		struct okm_at* const at = &scratch.one;
 		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, at, 0);
 		if (r) return r;
@@ -2090,6 +2137,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	}
 #ifdef SYS_access
 	case SYS_access: {
+		if (okm_null_name(AT_FDCWD, (const char*)a1)) return ((int)a2 & X_OK) ? -EACCES : 0;
 		struct okm_at* const at = &scratch.one;
 		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
 		if (r) return r;
