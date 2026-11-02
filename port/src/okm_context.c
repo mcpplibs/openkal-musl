@@ -160,3 +160,26 @@ void __okm_release_context(void)
 	s->self = 0;
 	__atomic_store_n(&s->key, OKM_RETIRED, __ATOMIC_RELEASE);
 }
+
+/* THE CONTEXT OF A SNAPSHOT'S INITIALISERS, BECOME THE CALLING ONE (0.27.0).
+ * The initialisers ran on a context the runner named, and what they recorded
+ * of it --- its thread record --- is the snapshot's; the program that starts
+ * from it runs that record on its own first context. */
+void __okm_rebind_context(kal_uintptr from)
+{
+	struct okm_slot* was = find(key_of(from), 0);
+	if (!was) return;
+	const uintptr_t tp = was->tp;
+	void* const self = was->self;
+	was->tp = 0;
+	was->self = 0;
+	__atomic_store_n(&was->key, OKM_RETIRED, __ATOMIC_RELEASE);
+	struct okm_slot* now = find(key_of(OKM_CONTEXT_ID()), 1);
+	if (!now) {
+		static const char m[] = "openkal-musl: more execution contexts than this port can record\n";
+		kal_abort(m, sizeof m - 1);
+	}
+	now->tp = tp;
+	now->self = self;
+	__atomic_store_n(&g_recorded, 1, __ATOMIC_RELEASE);
+}

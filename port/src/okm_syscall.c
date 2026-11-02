@@ -2420,7 +2420,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		long r = 0;
 		if (okm_map_unmap((void*)a1, (size_t)a2, &r)) return r;
 		if (okm_region_unmap((void*)a1, (size_t)a2, &r)) return r;
-		kal_free((void*)a1, okm_whole_pages((size_t)a2), OKM_PAGE);
+		okm_kal_free((void*)a1, okm_whole_pages((size_t)a2), OKM_PAGE);
 		return 0;
 	}
 	case SYS_msync: {

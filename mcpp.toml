@@ -382,6 +382,10 @@ sources = [
   "!musl/src/time/clock_gettime.c",
   "!musl/src/env/__libc_start_main.c",
   "!musl/src/env/__init_tls.c",
+  # Replaced in port/src/okm_start.c (0.27.0): while a snapshot's initialisers
+  # run, a named value is a question for the start, which the runner making the
+  # snapshot refuses (port/src/okm.h).
+  "!musl/src/env/getenv.c",
   "!musl/src/thread/__set_thread_area.c",
   "!musl/src/thread/clone.c",
   # Replaced in port/src/okm_thread.c: musl leaves for a 256-byte shared stack

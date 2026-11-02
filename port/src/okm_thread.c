@@ -81,7 +81,7 @@ static void reap(void)
 		*p = t->next;
 		okm_unlock();
 		okm_task_join(t->task);
-		kal_free(t, sizeof *t, _Alignof(struct okm_thread));
+		okm_kal_free(t, sizeof *t, _Alignof(struct okm_thread));
 		okm_lock();
 		p = &okm_done;
 	}
@@ -154,7 +154,7 @@ int __clone(int (*fn)(void*), void* stack, int flags, void* arg, ...)
 	const struct pthread* p = tls;
 #endif
 	if (okm_task_start_sized(entry, t, p ? p->stack_size : 0, &t->task) != kal_ok) {
-		kal_free(t, sizeof *t, _Alignof(struct okm_thread));
+		okm_kal_free(t, sizeof *t, _Alignof(struct okm_thread));
 		return -EAGAIN;
 	}
 

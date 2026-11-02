@@ -397,8 +397,22 @@ static size_t copy_str(char* dst, const char* src, size_t n, size_t cap)
 
 void okm_table_init(void)
 {
+	okm_table_init_memory();
+	okm_table_init_streams();
+}
+
+void okm_table_init_memory(void)
+{
 	for (int i = 0; i < OKM_MAX_FD; i++) { g_fd[i].desc = -1; g_fd[i].cloexec = 0; }
-	for (int i = 0; i < OKM_MAX_DESC; i++) { g_desc[i].path_slot = -1; g_desc[i].sock = -1; }
+}
+
+void okm_table_init_streams(void)
+{
+	/* A description's fields are set when it is bound (okm_fd_bind) and reset
+	 * when it is released; one never bound is read by nothing but its count.
+	 * Writing every one here made the whole table --- 1 024 descriptions, 340
+	 * KiB --- resident in every program before its first instruction: 85 page
+	 * faults of a language server's worker's 530 (0.27.0). */
 
 	/* The program's own three streams are descriptors 0, 1 and 2, which is
 	 * what every program above this library assumes without saying so. They

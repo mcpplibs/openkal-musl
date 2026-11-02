@@ -850,6 +850,16 @@ jobs:
       # A PROGRAM'S IDENTIFIER IS THE ENVIRONMENT'S, and another program is
       # asked about by it; the scheduling policies are a context's claim (openkal
       # 0.19). port/src/okm_syscall.c, okm_self_pid and SYS_sched_setscheduler.
+      # A PROGRAM GIVES ON THE DIRECTORIES IT HOLDS (0.27.0): started with two
+      # read-only directories, it starts a program through posix_spawn, which
+      # creates nothing in the one it runs in. port/src/okm_spawn.c.
+      - name: posix_spawn gives on the directories a program holds, and their rights
+        env:
+          MCPP_TARGET: ${{ matrix.target }}
+        run: |
+          bash tools/run-probe.sh examples/grants grants
+          grep -q -- '-- failures: 0 --' examples/grants/run.log
+
       - name: getpid names this program, kill(pid, 0) finds another, and a thread lowers its claim
         env:
           MCPP_TARGET: ${{ matrix.target }}
