@@ -396,7 +396,9 @@ char* getenv(const char* name)
 	return 0;
 }
 
-void __okm_libc_init(void)
+/* THE STACK'S GUARD CHANGES HERE (__init_ssp), so this function keeps none: a
+ * guard placed on entry would be compared with another on return. */
+__attribute__((__no_stack_protector__)) void __okm_libc_init(void)
 {
 	if (g_libc_up) return;
 	g_libc_up = 1;

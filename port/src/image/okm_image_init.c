@@ -18,7 +18,7 @@ void __okm_libc_init(void);
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wprio-ctor-dtor"
-__attribute__((constructor(1))) static void okm_image_init(void)
+__attribute__((constructor(1), __no_stack_protector__)) static void okm_image_init(void)
 {
 	__okm_libc_init();
 }

@@ -48,7 +48,8 @@ void __stdio_exit(void) __attribute__((__weak__));
 
 int main(int, char**, char**);
 
-int ok_main(void)
+/* No stack guard: the library may come up here, and the guard with it. */
+__attribute__((__no_stack_protector__)) int ok_main(void)
 {
 	__okm_libc_init();
 	const int status = main(__okm_argc(), __okm_argv(), __environ);
