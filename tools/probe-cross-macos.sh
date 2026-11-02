@@ -102,7 +102,7 @@ cd "$here"
 # `pthread_getattr_np', with the same line in the log and that name in it. A
 # reader who adds an exclusion to mcpp.toml adds the basename here in the same
 # commit; the compiler below globs the directory, so nothing else will tell them.
-skip='__libc_start_main|__init_tls|__set_thread_area|__unmapself|clone|pthread_getattr_np|posix_spawn|posix_spawnp|mmap|syscall_ret|getcwd|fcntl|dl_iterate_phdr|okm_phdr|cache|memcmp|strlen|memcpy|memmove|memset|memchr|strchr|strcmp|clock_gettime|timerfd|eventfd|signalfd|inotify|epoll'
+skip='__libc_start_main|__init_tls|getenv|__set_thread_area|__unmapself|clone|pthread_getattr_np|posix_spawn|posix_spawnp|mmap|syscall_ret|getcwd|fcntl|dl_iterate_phdr|okm_phdr|cache|memcmp|strlen|memcpy|memmove|memset|memchr|strchr|strcmp|clock_gettime|timerfd|eventfd|signalfd|inotify|epoll'
 units=0
 for f in musl/src/*/*.c musl/src/malloc/mallocng/*.c port/src/*.c port/src/mallocng/*.c port/src/*.S; do
     base=$(basename "$f"); base=${base%.*}
@@ -144,7 +144,7 @@ printf 'int main(void){return 0;}\n' > "$out/probe_main.c"
 
 set +e
 undef=$("$LD64" -arch "${triple%%-*}" -platform_version macos 14.0 14.0 \
-        -o /dev/null "$out"/*.o -e _okm_start -dead_strip 2>&1 \
+        -o /dev/null "$out"/*.o -e _okm_start -dead_strip --error-limit=0 2>&1 \
         | sed -n 's/.*undefined symbol: //p' | sort -u \
         | grep -vx 'dyld_stub_binder' || true)
 set -e
@@ -159,14 +159,18 @@ set -e
 # the calling thread's quality-of-service class (openkal-macos 0.17.0,
 # kal_task_set_priority); the seventeenth the calling thread's identifier from
 # the record the system's library keeps (openkal-macos 0.17.1, kal_task_current).
-expected=$'__dyld_atfork_parent\n__dyld_atfork_prepare\n__dyld_fork_child\n__libc_fork_child\n__libc_fork_parent\n__libc_fork_prepare\n__mach_fork_child\n__malloc_fork_child\n__malloc_fork_parent\n__malloc_fork_prepare\n__pthread_atfork_child\n__pthread_atfork_parent\n__pthread_atfork_prepare\n_clock_gettime_nsec_np\n_pthread_create_from_mach_thread\n_pthread_set_qos_class_self_np\n_pthread_threadid_np'
+# openkal-macos 0.21.0 adds four: the calling thread's record and its stack's
+# bounds, which a fault report and a sample walk the frames within, and the
+# sandbox a confined program is started in (openkal 0.23). The linker stops
+# naming undefined symbols at twenty unless told otherwise, so it is told.
+expected=$'__dyld_atfork_parent\n__dyld_atfork_prepare\n__dyld_fork_child\n__libc_fork_child\n__libc_fork_parent\n__libc_fork_prepare\n__mach_fork_child\n__malloc_fork_child\n__malloc_fork_parent\n__malloc_fork_prepare\n__pthread_atfork_child\n__pthread_atfork_parent\n__pthread_atfork_prepare\n__pthread_self\n_clock_gettime_nsec_np\n_pthread_create_from_mach_thread\n_pthread_get_stackaddr_np\n_pthread_get_stacksize_np\n_pthread_set_qos_class_self_np\n_pthread_threadid_np\n_sandbox_init_with_parameters'
 echo "probe: names this system supplies:"
 printf '  %s\n' $undef
 
 fail=0
 [ "$indirect" -eq 0 ] || { echo "FAIL: $indirect indirect symbols; recorded 0" >&2; fail=1; }
 [ "$undef" = "$expected" ] || {
-    echo "FAIL: the set of names differs from the recorded seventeen" >&2
+    echo "FAIL: the set of names differs from the recorded twenty-one" >&2
     echo "  recorded:" >&2; printf '    %s\n' $expected >&2
     fail=1
 }
