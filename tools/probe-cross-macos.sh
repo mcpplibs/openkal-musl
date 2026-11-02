@@ -74,7 +74,10 @@ inc=(-Iport/include -Imusl/src/include -Imusl/src/internal
 # out of step the first time the manifest gained a flag, and continuous
 # integration is what said so. Two places for one decision, and this is the
 # other one.
-cflags=(-std=c99 -D_XOPEN_SOURCE=700 -DOKM_MUSL_INTERNAL=1
+# THE ALLOCATOR IS musl's OWN HERE (0.26.0): the default, mimalloc, is
+# `compat.mimalloc's sources embedded by mcpp, which this script has no means to
+# fetch, and the objects and names asked about are the C library's either way.
+cflags=(-std=c99 -D_XOPEN_SOURCE=700 -DOKM_MUSL_INTERNAL=1 -DMCPP_FEATURE_MALLOC_MALLOCNG=1
         -ffreestanding -nostdinc
         -fno-stack-protector -fno-strict-aliasing -frounding-math -w
         -ffunction-sections -fdata-sections)
@@ -99,9 +102,9 @@ cd "$here"
 # `pthread_getattr_np', with the same line in the log and that name in it. A
 # reader who adds an exclusion to mcpp.toml adds the basename here in the same
 # commit; the compiler below globs the directory, so nothing else will tell them.
-skip='__libc_start_main|__init_tls|__set_thread_area|__unmapself|clone|pthread_getattr_np|posix_spawn|posix_spawnp|mmap|syscall_ret|getcwd|fcntl|dl_iterate_phdr|okm_phdr|cache|memcmp|strlen'
+skip='__libc_start_main|__init_tls|__set_thread_area|__unmapself|clone|pthread_getattr_np|posix_spawn|posix_spawnp|mmap|syscall_ret|getcwd|fcntl|dl_iterate_phdr|okm_phdr|cache|memcmp|strlen|memcpy|memmove|memset|memchr|strchr|strcmp|clock_gettime|timerfd|eventfd|signalfd|inotify|epoll'
 units=0
-for f in musl/src/*/*.c musl/src/malloc/mallocng/*.c port/src/*.c port/src/*.S; do
+for f in musl/src/*/*.c musl/src/malloc/mallocng/*.c port/src/*.c port/src/mallocng/*.c port/src/*.S; do
     base=$(basename "$f"); base=${base%.*}
     [[ "$base" =~ ^($skip)$ ]] && continue
     "$CC" --target="$triple" "${cflags[@]}" "${inc[@]}" -c "$f" \

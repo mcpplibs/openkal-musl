@@ -29,6 +29,7 @@
  */
 #include "okm.h"
 #include "okm_opt.h"
+#include "okm_stat.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -266,6 +267,7 @@ syscall_arg_t __okm_futex(const int* addr, int op, int val, const struct timespe
 		const kal_u64 ns = t
 			? (kal_u64)t->tv_sec * 1000000000u + (kal_u64)t->tv_nsec
 			: 0;
+		okm_stat_add(OKM_STAT_FUTEX_WAITS, 1);
 		const int e = okm_task_wait((const kal_u32*)addr, (kal_u32)val, ns);
 		if (e == kal_ok) return 0;
 		if (e == kal_err_again) return -ETIMEDOUT;

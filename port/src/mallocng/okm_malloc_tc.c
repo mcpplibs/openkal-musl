@@ -22,7 +22,7 @@
  * A program with one thread is served exactly as before, and so is every
  * allocation of a larger class. musl/PATCHES.md records the lines this needs in
  * mallocng and in the thread's record. */
-#include "../../musl/src/malloc/mallocng/meta.h"
+#include "../../../musl/src/malloc/mallocng/meta.h"
 #include "pthread_impl.h"
 
 hidden void __malloc_release_slot(struct meta *, int);

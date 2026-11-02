@@ -29,6 +29,7 @@
 
 #include <dlfcn.h>
 #include <link.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -369,6 +370,39 @@ struct __emutls_control {
 
 static pthread_mutex_t g_emutls_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/* A THREAD'S VARIABLE OUTLIVES THE DESTRUCTORS THAT READ IT (0.26.0).
+ *
+ * Each variable is the value of a key whose destructor gives its storage back
+ * when the thread ends. A C++ `thread_local' with a destructor is destroyed by
+ * the C++ runtime's own key (libc++abi's `__cxa_thread_atexit'), created when
+ * the first such variable is registered --- after the variable's own key, so
+ * musl, which runs the destructors in the order of the keys, gave the storage
+ * back first and the C++ destructor then ran on freed memory. Nothing showed it
+ * under mallocng, which leaves a freed block's bytes alone; mimalloc writes its
+ * free list into them, and examples/image-cxx in openkal-llvm-runtime read a
+ * destructor's member as garbage.
+ *
+ * So the storage is kept until the last round of destructors: the destructor
+ * sets the value again (musl runs another round for a key whose value is set
+ * during one) until the rounds are spent, as compiler-rt's own emutls skips
+ * rounds. A header before the variable holds what the destructor needs. */
+struct okm_tls_header {
+	void *base;
+	pthread_key_t key;
+	unsigned rounds;
+};
+
+static void tls_release(void *object)
+{
+	struct okm_tls_header *h = (struct okm_tls_header *)object - 1;
+	if (h->rounds) {
+		h->rounds--;
+		pthread_setspecific(h->key, object);
+		return;
+	}
+	free(h->base);
+}
+
 void *__emutls_get_address(struct __emutls_control *c)
 {
 	uintptr_t key = __atomic_load_n(&c->object.index, __ATOMIC_ACQUIRE);
@@ -376,7 +410,7 @@ void *__emutls_get_address(struct __emutls_control *c)
 		pthread_mutex_lock(&g_emutls_lock);
 		if (!c->object.index) {
 			pthread_key_t k;
-			if (pthread_key_create(&k, free) != 0) abort();
+			if (pthread_key_create(&k, tls_release) != 0) abort();
 			__atomic_store_n(&c->object.index, (uintptr_t)k + 1, __ATOMIC_RELEASE);
 		}
 		key = c->object.index;
@@ -385,8 +419,14 @@ void *__emutls_get_address(struct __emutls_control *c)
 	void *p = pthread_getspecific((pthread_key_t)(key - 1));
 	if (!p) {
 		const size_t align = c->align < sizeof(void *) ? sizeof(void *) : c->align;
-		p = aligned_alloc(align, (c->size + align - 1) / align * align);
-		if (!p) abort();
+		const size_t lead = (sizeof(struct okm_tls_header) + align - 1) / align * align;
+		unsigned char *base = aligned_alloc(align, (lead + c->size + align - 1) / align * align);
+		if (!base) abort();
+		p = base + lead;
+		struct okm_tls_header *h = (struct okm_tls_header *)p - 1;
+		h->base = base;
+		h->key = (pthread_key_t)(key - 1);
+		h->rounds = PTHREAD_DESTRUCTOR_ITERATIONS - 1;
 		if (c->value) memcpy(p, c->value, c->size);
 		else memset(p, 0, c->size);
 		pthread_setspecific((pthread_key_t)(key - 1), p);

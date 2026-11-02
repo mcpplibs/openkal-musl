@@ -9,6 +9,7 @@
 #include <dirent.h>
 #include <pthread.h>
 #include <time.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
@@ -461,6 +462,39 @@ int main(int argc, char **argv, char **envp) {
 		      "two different files have different identities");
 		unlink("okm-probe-x.tmp");
 		unlink("okm-probe-y.tmp");
+	}
+
+	/* An open directory is the node its name refers to: `fstat' upon it
+	 * reports the identity `stat' reports for the name (0.26.0; it reported
+	 * none, and a program comparing the two found them different). */
+	{
+		struct stat named, opened;
+		mkdir("okm-probe-dir.tmp", 0700);
+		const int dir = open("okm-probe-dir.tmp", O_RDONLY | O_DIRECTORY);
+		check(dir >= 0 && stat("okm-probe-dir.tmp", &named) == 0 && fstat(dir, &opened) == 0
+		          && S_ISDIR(opened.st_mode) && (named.st_ino != 0 || named.st_dev != 0)
+		          && named.st_dev == opened.st_dev && named.st_ino == opened.st_ino,
+		      "an open directory has the identity of its name");
+		if (dir >= 0) close(dir);
+		rmdir("okm-probe-dir.tmp");
+	}
+
+	/* A program may hold open as many files as getrlimit states, each opened
+	 * on its own (0.26.0; the table of open files held half as many as the
+	 * table of descriptors, and the opens past it were refused). */
+	{
+		struct rlimit limit;
+		static int fds[1024];
+		int opened = 0;
+		const int fd = open("okm-probe-many.tmp", O_RDWR | O_CREAT | O_TRUNC, 0600);
+		if (getrlimit(RLIMIT_NOFILE, &limit) == 0 && fd >= 0) {
+			const int want = limit.rlim_cur > 700 ? 700 : (int)limit.rlim_cur - 16;
+			while (opened < want && (fds[opened] = open("okm-probe-many.tmp", O_RDONLY)) >= 0) opened++;
+			check(opened == want, "a program opens a file as many times as getrlimit allows");
+			while (opened) close(fds[--opened]);
+		}
+		if (fd >= 0) close(fd);
+		unlink("okm-probe-many.tmp");
 	}
 
 	/* A value POSIX says cannot fail is not a negated error. */

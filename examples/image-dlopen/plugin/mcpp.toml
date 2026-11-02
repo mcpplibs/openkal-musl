@@ -4,8 +4,11 @@
 name    = "plug"
 version = "0.1.0"
 
-[build-dependencies]
-openkal-tools = { git = "https://github.com/mcpplibs/openkal-image.git", branch = "openkal-0.17.0", tools = ["okld", "okrun"] }
-
 [targets.plug]
 kind = "shared"
+
+# No C library and no run-time: the platform's three layers are declined.
+[target.'cfg(os = "openkal")'.layers]
+compiler-runtime = false
+"c++-abi"        = false
+c-abi            = false

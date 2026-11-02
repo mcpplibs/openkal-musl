@@ -59,6 +59,17 @@ int __pthread_mutex_timedlock(pthread_mutex_t *restrict m, const struct timespec
 	    && !a_cas(&m->_m_lock, 0, EBUSY))
 		return 0;
 
+	/* openkal-musl: a normal mutex waited for without a deadline is taken as
+	 * the system's C library takes it. The word is marked contended and the
+	 * context sleeps until it was free when marked; the unlock that finds the
+	 * mark wakes one. Neither the spin nor the waiter count below is used. */
+	if ((m->_m_type&15) == PTHREAD_MUTEX_NORMAL && !at) {
+		int priv = (m->_m_type & 128) ^ 128;
+		while (a_swap(&m->_m_lock, EBUSY|0x80000000))
+			__futexwait(&m->_m_lock, EBUSY|0x80000000, priv);
+		return 0;
+	}
+
 	int type = m->_m_type;
 	int r, t, priv = (type & 128) ^ 128;
 
