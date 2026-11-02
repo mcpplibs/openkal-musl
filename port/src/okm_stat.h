@@ -36,6 +36,7 @@ __attribute__((__visibility__("hidden"))) extern int __okm_prof_on;
 __attribute__((__visibility__("hidden"))) extern volatile kal_u64 __okm_stat[OKM_STAT_COUNT];
 
 /* Registers the cells where a measurement records this program. */
+__attribute__((__visibility__("hidden"))) extern const char* const __okm_stat_names[OKM_STAT_COUNT];
 __attribute__((__visibility__("hidden"))) void __okm_prof_init(void);
 
 static inline void okm_stat_add(enum okm_stat i, kal_u64 n)

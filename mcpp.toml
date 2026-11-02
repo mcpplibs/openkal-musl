@@ -255,6 +255,7 @@ llvm.compiler-rt-builtins = "22.1.8.6"
 [target.'cfg(os = "openkal")'.build]
 sources = [
   "!port/src/okm_phdr.c",
+  "!port/src/okm_prof_hosted.c",
   "!musl/src/ldso/dlopen.c",
   "!musl/src/ldso/dlsym.c",
   "!musl/src/ldso/__dlsym.c",
