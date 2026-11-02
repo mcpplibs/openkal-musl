@@ -17,8 +17,12 @@
  * gave mallocng's per-thread cache back when a thread ended; mimalloc gives a
  * thread's heap back through a key of the thread's record (okm_mimalloc_prim.c),
  * so the name is defined and does nothing. `__malloc_atfork' kept mallocng's
- * lock across a duplication; mimalloc registers its own handlers with
- * `pthread_atfork', and musl's default for the name (fork.c) stands. */
+ * lock across a duplication, and `__bump_lockptr' named the bump allocator's
+ * (lite_malloc.c, withheld); mimalloc registers its own handlers with
+ * `pthread_atfork' and has no bump allocator. Both are defined here as musl's
+ * defaults in fork.c are, a function that does nothing and no lock: on Mach-O
+ * and PE this port makes no name from a placeholder (port/include/features.h),
+ * and the source that supplies the allocator defines them. */
 #include <stddef.h>
 #include "mimalloc.h"
 #include "../okm_stat.h"
@@ -59,3 +63,5 @@ void* aligned_alloc(size_t align, size_t n) { count_malloc(n); return mi_aligned
 size_t malloc_usable_size(void* p) { return p ? mi_usable_size(p) : 0; }
 
 OKM_HIDDEN void __malloc_tc_flush(void) {}
+OKM_HIDDEN void __malloc_atfork(int who) { (void)who; }
+OKM_HIDDEN volatile int* const __bump_lockptr = 0;
