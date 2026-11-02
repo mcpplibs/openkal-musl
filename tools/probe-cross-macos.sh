@@ -159,18 +159,22 @@ set -e
 # the calling thread's quality-of-service class (openkal-macos 0.17.0,
 # kal_task_set_priority); the seventeenth the calling thread's identifier from
 # the record the system's library keeps (openkal-macos 0.17.1, kal_task_current).
-# openkal-macos 0.21.0 adds four: the calling thread's record and its stack's
-# bounds, which a fault report and a sample walk the frames within, and the
-# sandbox a confined program is started in (openkal 0.23). The linker stops
-# naming undefined symbols at twenty unless told otherwise, so it is told.
-expected=$'__dyld_atfork_parent\n__dyld_atfork_prepare\n__dyld_fork_child\n__libc_fork_child\n__libc_fork_parent\n__libc_fork_prepare\n__mach_fork_child\n__malloc_fork_child\n__malloc_fork_parent\n__malloc_fork_prepare\n__pthread_atfork_child\n__pthread_atfork_parent\n__pthread_atfork_prepare\n__pthread_self\n_clock_gettime_nsec_np\n_pthread_create_from_mach_thread\n_pthread_get_stackaddr_np\n_pthread_get_stacksize_np\n_pthread_set_qos_class_self_np\n_pthread_threadid_np\n_sandbox_init_with_parameters'
+# openkal-macos 0.21.0 adds the sandbox a confined program is started in
+# (openkal 0.23) and, on 64-bit ARM, the calling thread's record and its
+# stack's bounds, which a fault report and a sample walk the frames within there.
+# The linker stops naming undefined symbols at twenty unless told otherwise, so
+# it is told.
+expected=$'__dyld_atfork_parent\n__dyld_atfork_prepare\n__dyld_fork_child\n__libc_fork_child\n__libc_fork_parent\n__libc_fork_prepare\n__mach_fork_child\n__malloc_fork_child\n__malloc_fork_parent\n__malloc_fork_prepare\n__pthread_atfork_child\n__pthread_atfork_parent\n__pthread_atfork_prepare\n_clock_gettime_nsec_np\n_pthread_create_from_mach_thread\n_pthread_set_qos_class_self_np\n_pthread_threadid_np\n_sandbox_init_with_parameters'
+if [ "${triple%%-*}" = arm64 ]; then
+    expected=$'__dyld_atfork_parent\n__dyld_atfork_prepare\n__dyld_fork_child\n__libc_fork_child\n__libc_fork_parent\n__libc_fork_prepare\n__mach_fork_child\n__malloc_fork_child\n__malloc_fork_parent\n__malloc_fork_prepare\n__pthread_atfork_child\n__pthread_atfork_parent\n__pthread_atfork_prepare\n__pthread_self\n_clock_gettime_nsec_np\n_pthread_create_from_mach_thread\n_pthread_get_stackaddr_np\n_pthread_get_stacksize_np\n_pthread_set_qos_class_self_np\n_pthread_threadid_np\n_sandbox_init_with_parameters'
+fi
 echo "probe: names this system supplies:"
 printf '  %s\n' $undef
 
 fail=0
 [ "$indirect" -eq 0 ] || { echo "FAIL: $indirect indirect symbols; recorded 0" >&2; fail=1; }
 [ "$undef" = "$expected" ] || {
-    echo "FAIL: the set of names differs from the recorded twenty-one" >&2
+    echo "FAIL: the set of names differs from the recorded set for ${triple%%-*}" >&2
     echo "  recorded:" >&2; printf '    %s\n' $expected >&2
     fail=1
 }
