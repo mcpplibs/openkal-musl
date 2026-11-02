@@ -571,7 +571,9 @@ jobs:
         run: |
           extra=''
           [ -n '${{ matrix.target }}' ] && extra='--target ${{ matrix.target }}'
-          mcpp build --toolchain '${{ matrix.toolchain }}' $extra
+          # The database at the root is written only where asked for (mcpp
+          # 2026.11: `[build] compile_commands', MCPP_COMPILE_COMMANDS).
+          MCPP_COMPILE_COMMANDS=compile_commands.json mcpp build --toolchain '${{ matrix.toolchain }}' $extra
           test -s compile_commands.json \
             || { echo "::error::no compile_commands.json — nothing to check"; exit 1; }
 

@@ -793,3 +793,15 @@ waiter count is used on that path. The mark is the high bit musl's unlock and
 condition variables already read, so a requeued waiter and a timed lock work
 with it unchanged. Four contexts locking one mutex took 383 ns a round against
 the system's 177; they take 160.
+
+## The page is asked for on x86_64 too (0.26.0)
+
+### `arch/x86_64/bits/limits.h`, the one line removed
+
+`PAGESIZE` was the constant 4096 on x86_64, so `<limits.h>` defined `PAGE_SIZE`
+as it and `sysconf(_SC_PAGESIZE)` answered 4096 whatever the environment's
+granularity, while this library maps and releases memory in that granularity
+(`libc.page_size`, `port/src/okm_start.c`). Under Windows, whose granularity is
+65536, a program that mapped two pages and released the second was refused.
+Without the constant the page is `libc.page_size`, as musl already has it on
+aarch64.
