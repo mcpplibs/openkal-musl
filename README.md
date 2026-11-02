@@ -731,6 +731,38 @@ implementation places memory where it is asked (`kal_exec_alloc_at`, weakly);
 the image loader is libokld of openkal-image 0.4.0, the release openkal-platform
 0.23.0 names.
 
+**A snapshot of an image's initialisers** (openkal-image 0.4.0,
+`docs/snapshot.md` there): the library takes part, exporting the record
+`__okrun_snapshot` and the entry `__okrun_snapshot_start`. While a runner runs
+the initialisers for a snapshot (phase 1) the library brings up its memory and
+nothing else --- the page, the first context's record, the descriptor table's
+memory, the allocator --- and a named value read then is asked of the
+environment for that one name and kept, which the runner records and compares
+at every start. A start from the snapshot (phase 2) makes the snapshot's context
+record its own context's, takes the arguments, the named values, the streams and
+the directories, randomness and the stack's guard, and lets mimalloc draw its
+randomness again; memory within the snapshot's arena is never given back to the
+environment, which did not give it. A named value an initialiser set is reported
+in phase 1 as what a snapshot cannot hold (`port/src/okm_start.c`, `okm.h`).
+
+**A program gives on the directories it holds.** `posix_spawn` grants a started
+program each of this program's directories, as the handles it holds --- whose
+rights an implementation passes with them (openkal 0.23, `kal_fs_dir_attenuate`)
+--- under their own names, the directory it runs in first, where the
+implementation claims `KAL_PROCESS_PROP_GRANT_DIR`. A start that named none was
+given the implementation's defaults, the whole file system, so a program given
+read-only directories started programs that could write anywhere.
+`examples/grants` observes it; the control (the grants left out) writes.
+
+**mimalloc's options from one pass.** mimalloc asks for each of its options by
+name; the named values are now searched once for any `MIMALLOC_` name, and a
+program that sets none is answered without a pass for each option.
+
+**The descriptor table is not written at the start.** A description's fields are
+set when it is bound; writing all 1 024 at the start made the table's 340 KiB
+resident before the first instruction, 85 of a language server's worker's 530
+page faults.
+
 ## The image loader of openkal-image 0.3.1 (0.26.1)
 
 An image's `dlopen` uses libokld of openkal-image 0.3.1, the release openkal-platform 0.21.1 names
