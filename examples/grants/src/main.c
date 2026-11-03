@@ -18,6 +18,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <openkal.h>
+#include <okm_preopen.h>
 
 extern char** environ;
 
@@ -38,6 +39,38 @@ static int grandchild(void)
 	const int fd = open("created-by-the-third.txt", O_CREAT | O_WRONLY, 0600);
 	if (fd >= 0) { close(fd); unlink("created-by-the-third.txt"); return 61; }
 	return 60;
+}
+
+/* A program that records what it reaches of the root (okm_preopen.h): an
+ * absent name asked about, and a present file read. */
+static int recording(const char* dir)
+{
+	char record[4096], name[4096];
+	snprintf(record, sizeof record, "%s/record", dir);
+	if (okm_preopen_attenuate("/", KAL_DIR_RECORDED, record) != 0) return 80;
+	snprintf(name, sizeof name, "%s/absent.h", dir);
+	if (access(name, F_OK) == 0) return 81;
+	snprintf(name, sizeof name, "%s/present.txt", dir);
+	const int fd = open(name, O_RDONLY);
+	if (fd < 0) return 82;
+	close(fd);
+	return 0;
+}
+
+/* Whether the record holds the entry `kind' and `dir/leaf', the name relative
+ * to the root. */
+static int recorded(const char* dir, char kind, const char* leaf)
+{
+	char record[4096], want[4096], buf[65536];
+	snprintf(record, sizeof record, "%s/record", dir);
+	const int n = snprintf(want, sizeof want, "%c%s/%s", kind, dir + 1, leaf) + 1;
+	const int fd = open(record, O_RDONLY);
+	if (fd < 0) return 0;
+	const ssize_t got = read(fd, buf, sizeof buf);
+	close(fd);
+	for (ssize_t at = 0; at < got; at += (ssize_t)strlen(buf + at) + 1)
+		if ((ssize_t)n - 1 == (ssize_t)strlen(buf + at) && !memcmp(buf + at, want, n)) return 1;
+	return 0;
 }
 
 /* The second program: the third, through posix_spawn. */
@@ -86,6 +119,7 @@ int main(int argc, char** argv)
 	if (realpath(g_self, named)) strcpy(g_self, named);
 	if (argc > 1 && !strcmp(argv[1], "--second")) return child();
 	if (argc > 1 && !strcmp(argv[1], "--third")) return grandchild();
+	if (argc > 2 && !strcmp(argv[1], "--recording")) return recording(argv[2]);
 
 	printf("-- openkal-musl grants probe --\n");
 	if (!(kal_process_props() & KAL_PROCESS_PROP_GRANT_DIR)
@@ -118,6 +152,29 @@ int main(int argc, char** argv)
 	printf("   the third program reported %d\n", status);
 	check(!terminated && status != 61, "a program it starts holds them read-only too: it creates nothing there");
 	check(!terminated && status == 60, "and is refused the creation");
+
+	/* A HELD DIRECTORY RECORDED AT THE PROGRAM'S OWN REQUEST: a program started
+	 * through posix_spawn records the root, asks about an absent name and reads
+	 * a file; the record names both, relative to the root, and ends with the
+	 * program's end. */
+	{
+		char present[4096];
+		snprintf(present, sizeof present, "%s/present.txt", dir);
+		const int fd = open(present, O_CREAT | O_WRONLY, 0600);
+		if (fd >= 0) close(fd);
+		char* rargv[] = { g_self, "--recording", dir, 0 };
+		pid_t pid;
+		int status = -1;
+		const int e = posix_spawn(&pid, g_self, 0, 0, rargv, environ);
+		if (!e) waitpid(pid, &status, 0);
+		check(!e && WIFEXITED(status) && WEXITSTATUS(status) == 0, "a program records the root it holds");
+		if (e || !WIFEXITED(status) || WEXITSTATUS(status)) printf("   it reported %d\n", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+		check(recorded(dir, 'a', "absent.h"), "the record names the absent name it asked about");
+		check(recorded(dir, 'r', "present.txt"), "and the file it read");
+		char record[4096];
+		snprintf(record, sizeof record, "%s/record", dir);
+		unlink(record); unlink(present);
+	}
 	rmdir(made);
 	printf("-- failures: %d --\n", failures);
 	return failures != 0;

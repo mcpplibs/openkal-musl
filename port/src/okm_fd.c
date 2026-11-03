@@ -38,6 +38,8 @@ extern __typeof(kal_process_channel_close) kal_process_channel_close __attribute
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <string.h>
+#include <okm_preopen.h>
 
 /* --- translation ---------------------------------------------------------- */
 
@@ -385,6 +387,41 @@ int okm_preopen(int i, struct kal_dir* dir, const char** name, size_t* len)
 	if (name) *name = g_pre[i].name;
 	if (len)  *len  = g_pre[i].len;
 	return 0;
+}
+
+/* A held directory with less, at the program's request (okm_preopen.h). */
+int okm_preopen_attenuate(const char* name, unsigned long flags, const char* record)
+{
+#if OKM_HAS_FS
+	const size_t len = strlen(name);
+	int i = 0;
+	while (i < g_npre && !(g_pre[i].len == len && !memcmp(g_pre[i].name, name, len))) i++;
+	if (i == g_npre) { errno = ENOENT; return -1; }
+	if (!(okm_fs_props(g_pre[i].dir) & KAL_FS_PROP_ATTENUATE)) { errno = ENOTSUP; return -1; }
+	struct kal_dir_rights rights = { 0 };
+	rights.self_size = sizeof rights;
+	rights.flags = flags;
+	if (flags & KAL_DIR_RECORDED) {
+		/* Opened before the directory has less, so that its own opening is
+		 * not in it; never closed, since the implementation appends to it
+		 * until the program ends. */
+		const int fd = open(record, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
+		if (fd < 0) return -1;
+		const struct okm_desc* d = okm_desc_of(fd);
+		if (!d || d->kind != OKM_FILE) { errno = EINVAL; return -1; }
+		rights.record = d->file;
+	}
+	struct kal_dir less = { 0 };
+	const int e = kal_fs_dir_attenuate(g_pre[i].dir, &rights, &less);
+	if (e != kal_ok) { errno = okm_errno(e); return -1; }
+	if (okm_cwd_dir.h == g_pre[i].dir.h) okm_cwd_dir = less;
+	g_pre[i].dir = less;
+	return 0;
+#else
+	(void)name; (void)flags; (void)record;
+	errno = ENOTSUP;
+	return -1;
+#endif
 }
 
 static size_t copy_str(char* dst, const char* src, size_t n, size_t cap)

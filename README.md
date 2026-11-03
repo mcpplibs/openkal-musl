@@ -754,6 +754,17 @@ given the implementation's defaults, the whole file system, so a program given
 read-only directories started programs that could write anywhere.
 `examples/grants` observes it; the control (the grants left out) writes.
 
+**A held directory with less, at the program's request** (`<okm_preopen.h>`).
+`okm_preopen_attenuate(name, flags, record)` replaces a directory the program
+holds with the handle `kal_fs_dir_attenuate` derives from it --- read-only,
+unchanging, recorded --- so that the names the program passes to `open`,
+`stat` and the rest reach it; with `KAL_DIR_RECORDED` the record is opened for
+appending before the directory has less and held until the program ends. A
+language server's module worker records what it reaches of its directories so
+that its caller can tell a header since added earlier on the search path
+(mcppls-clangd). `examples/grants` observes an absent name asked about and a
+file read in a started program's record.
+
 **mimalloc's options from one pass.** mimalloc asks for each of its options by
 name; the named values are now searched once for any `MIMALLOC_` name, and a
 program that sets none is answered without a pass for each option.
