@@ -32,6 +32,10 @@
  * one. */
 #include <openkal/process.h>
 extern __typeof(kal_process_channel_close) kal_process_channel_close __attribute__((__weak__));
+/* Attenuation (openkal 0.23), for okm_preopen_attenuate: weak by the same rule,
+ * since a volume may not attenuate (KAL_FS_PROP_ATTENUATE) and an
+ * implementation before 0.23 has no such name. */
+extern __typeof(kal_fs_dir_attenuate) kal_fs_dir_attenuate __attribute__((__weak__));
 #include "okm_opt.h"
 #include "okm_stat.h"
 
@@ -397,7 +401,10 @@ int okm_preopen_attenuate(const char* name, unsigned long flags, const char* rec
 	int i = 0;
 	while (i < g_npre && !(g_pre[i].len == len && !memcmp(g_pre[i].name, name, len))) i++;
 	if (i == g_npre) { errno = ENOENT; return -1; }
-	if (!(okm_fs_props(g_pre[i].dir) & KAL_FS_PROP_ATTENUATE)) { errno = ENOTSUP; return -1; }
+	if (!kal_fs_dir_attenuate || !(okm_fs_props(g_pre[i].dir) & KAL_FS_PROP_ATTENUATE)) {
+		errno = ENOTSUP;
+		return -1;
+	}
 	struct kal_dir_rights rights = { 0 };
 	rights.self_size = sizeof rights;
 	rights.flags = flags;
