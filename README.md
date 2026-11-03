@@ -728,7 +728,7 @@ before; `/dev/null` is answered with itself (`port/src/okm_realpath.c`,
 
 **An image's `dlopen` places it at its base** where the image states one and the
 implementation places memory where it is asked (`kal_exec_alloc_at`, weakly);
-the image loader is libokld of openkal-image 0.4.0, the release openkal-platform
+the image loader is libokld of openkal-image 0.4.1, the release openkal-platform
 0.23.0 names.
 
 **A snapshot of an image's initialisers** (openkal-image 0.4.0,
