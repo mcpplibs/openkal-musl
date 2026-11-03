@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.27.1"
+openkal-musl = "0.27.2"
 ```
 
 > **Engine floor (mcpp 2026.11.2.1):** 0.26.0 embeds its allocator through a
@@ -725,7 +725,7 @@ as `[target.'cfg(all(windows, compiler = "llvm"))'] requires =
 ["mcpp:compiler-runtime=compiler-rt"]`, so a graph without it is refused before
 anything is compiled, naming the layer, rather than failing at the link with
 `___chkstk_ms` undefined. mcpp checks a requirement a layer decides from
-2026.11.2.3.
+2026.11.3.1.
 
 **`realpath` asks the environment for the whole name** (openkal 0.23,
 `kal_fs_resolved_name`), where musl asked of each component whether it is a
@@ -738,8 +738,7 @@ before; `/dev/null` is answered with itself (`port/src/okm_realpath.c`,
 
 **An image's `dlopen` places it at its base** where the image states one and the
 implementation places memory where it is asked (`kal_exec_alloc_at`, weakly);
-the image loader is libokld of openkal-image 0.4.1, the release openkal-platform
-0.23.0 names.
+the image loader is libokld of openkal-image 0.4.2 (openkal-musl 0.27.2 and later).
 
 **A snapshot of an image's initialisers** (openkal-image 0.4.0,
 `docs/snapshot.md` there): the library takes part, exporting the record
