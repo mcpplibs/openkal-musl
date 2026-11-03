@@ -65,11 +65,14 @@ static struct kal_dir root(void)
 static int read_only(struct kal_dir from, const char* path, struct kal_dir* out)
 {
 	struct kal_dir d = { 0 };
-	if (kal_fs_open_dir(from, path + 1, strlen(path + 1), &d) != kal_ok) return 0;
+	int e = kal_fs_open_dir(from, path + 1, strlen(path + 1), &d);
+	if (e != kal_ok) { printf("   %s is not opened: %d\n", path, e); return 0; }
 	struct kal_dir_rights r = { 0 };
 	r.self_size = sizeof r;
 	r.flags = KAL_DIR_READ_ONLY;
-	return kal_fs_dir_attenuate(d, &r, out) == kal_ok;
+	e = kal_fs_dir_attenuate(d, &r, out);
+	if (e != kal_ok) printf("   %s is not attenuated: %d\n", path, e);
+	return e == kal_ok;
 }
 
 int main(int argc, char** argv)
@@ -86,11 +89,18 @@ int main(int argc, char** argv)
 		printf("this system grants no directories, or does not attenuate them\n-- failures: 0 --\n");
 		return 0;
 	}
-	char dir[] = "/tmp/okm-grants-XXXXXX";
-	check(mkdtemp(dir) != 0, "a directory of the program's own");
-	char bin[4096];
+	char made[] = "/tmp/okm-grants-XXXXXX";
+	check(mkdtemp(made) != 0, "a directory of the program's own");
+	/* By the names the environment resolves them to: a grant is opened
+	 * beneath the root, and on macOS /tmp is a symbolic link elsewhere
+	 * (/private/tmp), which a name opened beneath a directory does not leave
+	 * it to follow. */
+	char dir[4096], bin[4096];
+	check(realpath(made, dir) != 0, "the directory's name, resolved");
 	strcpy(bin, g_self);
 	*strrchr(bin, '/') = 0;
+	char resolved[4096];
+	if (realpath(bin, resolved)) strcpy(bin, resolved);
 	struct kal_dir mine = { 0 }, its = { 0 };
 	check(read_only(root(), dir, &mine) && read_only(root(), bin, &its), "both directories, read-only");
 	const struct kal_preopen grants[2] = { { mine, dir, strlen(dir) }, { its, bin, strlen(bin) } };
@@ -105,7 +115,7 @@ int main(int argc, char** argv)
 	printf("   the third program reported %d\n", status);
 	check(!terminated && status != 61, "a program it starts holds them read-only too: it creates nothing there");
 	check(!terminated && status == 60, "and is refused the creation");
-	rmdir(dir);
+	rmdir(made);
 	printf("-- failures: %d --\n", failures);
 	return failures != 0;
 }
