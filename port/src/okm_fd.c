@@ -593,6 +593,9 @@ static int join(const char* prefix, const char* rel, char* out, size_t cap)
 
 	const size_t keep = rroot ? rroot : proot;
 	const char*  from = rroot ? rel : prefix;
+	/* Beneath a volume either separator separates (0.27.0): `d:\a\b' is `d:/a/b'. */
+	if (keep == 3 && from[1] == ':')
+		for (size_t i = 0; i < o; i++) if (tmp[i] == '\\') tmp[i] = '/';
 	if (keep + 1 >= cap) return -ENAMETOOLONG;
 	for (size_t i = 0; i < keep; i++) out[i] = from[i] == '\\' ? '/' : from[i];
 	return normalise(tmp, out + keep, cap - keep);
@@ -681,7 +684,7 @@ int okm_resolve(int dirfd, const char* path, struct okm_at* at, int empty_ok)
 	if (best < 0) return -ENOENT;
 
 	const char* rest = abs + best_len;
-	while (*rest == '/') rest++;
+	while (*rest == '/' || (*rest == '\\' && best_len >= 2 && g_pre[best].name[1] == ':')) rest++;
 	at->base = g_pre[best].dir;
 	const size_t rest_len = abs_len ? abs_len - (size_t)(rest - abs) : __builtin_strlen(rest);
 	if (!*rest) at->len = copy_str(at->rel, ".", 1, sizeof at->rel);
