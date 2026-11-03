@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.27.1"
+openkal-musl = "0.27.2"
 ```
 
 > **Engine floor (mcpp 2026.11.2.1):** 0.26.0 embeds its allocator through a
@@ -738,8 +738,7 @@ before; `/dev/null` is answered with itself (`port/src/okm_realpath.c`,
 
 **An image's `dlopen` places it at its base** where the image states one and the
 implementation places memory where it is asked (`kal_exec_alloc_at`, weakly);
-the image loader is libokld of openkal-image 0.4.1, the release openkal-platform
-0.23.0 names.
+the image loader is libokld of openkal-image 0.4.2 (openkal-musl 0.27.2 and later).
 
 **A snapshot of an image's initialisers** (openkal-image 0.4.0,
 `docs/snapshot.md` there): the library takes part, exporting the record
