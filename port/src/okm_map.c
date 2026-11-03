@@ -53,7 +53,7 @@ static int record(struct region r)
 		struct region* n = kal_alloc(cap * sizeof *n, _Alignof(struct region));
 		if (!n) return -ENOMEM;
 		for (size_t i = 0; i < g_count; i++) n[i] = g_regions[i];
-		if (g_regions) kal_free(g_regions, g_cap * sizeof *g_regions, _Alignof(struct region));
+		if (g_regions) okm_kal_free(g_regions, g_cap * sizeof *g_regions, _Alignof(struct region));
 		g_regions = n;
 		g_cap = cap;
 	}

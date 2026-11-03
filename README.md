@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.26.1"
+openkal-musl = "0.27.0"
 ```
 
 > **Engine floor (mcpp 2026.11.2.1):** 0.26.0 embeds its allocator through a
@@ -686,6 +686,106 @@ x86_64; a word at a time, from the aligned word, elsewhere), where musl's own
 compare a byte at a time; the two took 14 % of clangd.okb's time, most of it
 matching command-line options. Every load is aligned to its size, so none
 reaches a page the string does not (`port/src/okm_string.c`).
+
+## The null device, a resolved name, and an image at its base (0.27.0)
+
+`/dev/null` is this library's name on every environment, including one whose
+preopens are volumes and hold no such file, and one whose program was granted
+only some directories. Opening it gives a descriptor of the null device: a read
+reports the end of input, a write is accepted in full, `fstat` and `stat` report a
+character device (Linux's numbers, 1 and 3), `lseek` reports 0, `isatty` is false,
+and `poll` reports it ready. A started program is given the environment's own
+device at a position --- through a file action that opens `/dev/null`, and through
+a descriptor of it duplicated there or held at the position by the caller --- as
+`KAL_SPAWN_NULL_IN`, `_OUT` or `_ERR` (openkal 0.22, clause 7.15). An
+implementation before openkal 0.22 does not claim the flags, and is given the
+environment's file of that name where one is reachable, as before.
+
+LLVM starts every program whose output it discards this way, and a language
+server run as an image on Windows could start none of its module workers before:
+the C library looked for the name among the volumes. `examples/subprocess`
+observes each part above.
+
+**The compiler's runtime on PE under clang is the graph's, and is required.**
+The link names no runtime (`-nostdlib`); under GCC `build.mcpp` names GCC's own,
+and under clang the routines a compiler emits calls to --- a stack probe, a
+complex multiply --- are compiler-rt's, which `openkal-llvm-runtime` builds for
+the target (the platform's hosted arrangement brings it). The manifest states it
+as `[target.'cfg(all(windows, compiler = "llvm"))'] requires =
+["mcpp:compiler-runtime=compiler-rt"]`, so a graph without it is refused before
+anything is compiled, naming the layer, rather than failing at the link with
+`___chkstk_ms` undefined. mcpp checks a requirement a layer decides from
+2026.11.2.3.
+
+**`realpath` asks the environment for the whole name** (openkal 0.23,
+`kal_fs_resolved_name`), where musl asked of each component whether it is a
+link: in a language server's session, 872 000 enquiries where the program of the
+environment made 353 000. A name with a `.` or `..` component or a separator at
+the end, a volume that does not state `KAL_FS_PROP_RESOLVED_NAME`, and a runner
+of openkal 0.22 (the name is referenced weakly) are answered by musl's walk as
+before; `/dev/null` is answered with itself (`port/src/okm_realpath.c`,
+`musl/PATCHES.md`).
+
+**An image's `dlopen` places it at its base** where the image states one and the
+implementation places memory where it is asked (`kal_exec_alloc_at`, weakly);
+the image loader is libokld of openkal-image 0.4.1, the release openkal-platform
+0.23.0 names.
+
+**A snapshot of an image's initialisers** (openkal-image 0.4.0,
+`docs/snapshot.md` there): the library takes part, exporting the record
+`__okrun_snapshot` and the entry `__okrun_snapshot_start`. While a runner runs
+the initialisers for a snapshot (phase 1) the library brings up its memory and
+nothing else --- the page, the first context's record, the descriptor table's
+memory, the allocator --- and a named value read then is asked of the
+environment for that one name and kept, which the runner records and compares
+at every start. A start from the snapshot (phase 2) makes the snapshot's context
+record its own context's, takes the arguments, the named values, the streams and
+the directories, randomness and the stack's guard, and lets mimalloc draw its
+randomness again; memory within the snapshot's arena is never given back to the
+environment, which did not give it. A named value an initialiser set is reported
+in phase 1 as what a snapshot cannot hold (`port/src/okm_start.c`, `okm.h`).
+
+**A program gives on the directories it holds.** `posix_spawn` grants a started
+program each of this program's directories, as the handles it holds --- whose
+rights an implementation passes with them (openkal 0.23, `kal_fs_dir_attenuate`)
+--- under their own names, the directory it runs in first, where the
+implementation claims `KAL_PROCESS_PROP_GRANT_DIR`. A start that named none was
+given the implementation's defaults, the whole file system, so a program given
+read-only directories started programs that could write anywhere.
+`examples/grants` observes it; the control (the grants left out) writes.
+
+**A name beneath a volume is compared as its environment compares it.** On a
+system whose absolute names begin with a volume (`C:`), a name is matched with
+the directories the program holds without regard to case and with either
+separator: an editor names `c:\Users\...` where the directory is `C:` or
+`C:/Users/...`, and such a name reached none of them. `examples/image-names`
+writes a file under one spelling and reads it under the other, as an image on
+Windows.
+
+**A held directory with less, at the program's request** (`<okm_preopen.h>`).
+`okm_preopen_attenuate(name, flags, record)` replaces a directory the program
+holds with the handle `kal_fs_dir_attenuate` derives from it --- read-only,
+unchanging, recorded --- so that the names the program passes to `open`,
+`stat` and the rest reach it; with `KAL_DIR_RECORDED` the record is opened for
+appending before the directory has less and held until the program ends. A
+language server's module worker records what it reaches of its directories so
+that its caller can tell a header since added earlier on the search path
+(mcppls-clangd). `examples/grants` observes an absent name asked about and a
+file read in a started program's record.
+
+**mimalloc's options from one pass.** mimalloc asks for each of its options by
+name; the named values are now searched once for any `MIMALLOC_` name, and a
+program that sets none is answered without a pass for each option.
+
+**What the allocator keeps follows the program's resource preference** (openkal
+0.23, `kal_env_resources`): memory a heap no longer uses is given back after
+mimalloc's own delay (10 ms) when balanced, after a second for performance, and
+at once for economy --- a default, which `MIMALLOC_PURGE_DELAY` states otherwise.
+
+**The descriptor table is not written at the start.** A description's fields are
+set when it is bound; writing all 1 024 at the start made the table's 340 KiB
+resident before the first instruction, 85 of a language server's worker's 530
+page faults.
 
 ## The image loader of openkal-image 0.3.1 (0.26.1)
 

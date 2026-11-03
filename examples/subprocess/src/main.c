@@ -100,6 +100,45 @@ static void check(int ok, const char* what)
 	else printf("ok: %s\n", what);
 }
 
+static void null_device(char** argv)
+{
+	/* THE NULL DEVICE, WHICH POSIX NAMES `/dev/null' AND EVERY SYSTEM HAS
+	 * (0.27.0). Its name is this library's: the program reads the end of input
+	 * from it and writes into it, and finds a character device there, on an
+	 * environment whose preopens are volumes as on one with a root. A started
+	 * program is given the environment's own device at a position --- through a
+	 * file action naming it, and through a descriptor of it duplicated there.
+	 * LLVM starts every program whose output it discards this way, and a
+	 * language server run as an image on Windows could start none of its
+	 * workers before. */
+	const int fd = open("/dev/null", O_RDWR);
+	check(fd >= 0, "/dev/null opens");
+	char b[8];
+	struct stat st;
+	check(fd >= 0 && read(fd, b, sizeof b) == 0, "a read of /dev/null reports the end of input");
+	check(fd >= 0 && write(fd, "x", 1) == 1, "a write to /dev/null is accepted");
+	check(fd >= 0 && fstat(fd, &st) == 0 && S_ISCHR(st.st_mode), "/dev/null is a character device");
+	check(stat("/dev/null", &st) == 0 && S_ISCHR(st.st_mode), "and so is its name");
+	check(access("/dev/null", R_OK | W_OK) == 0, "/dev/null may be read and written");
+
+	posix_spawn_file_actions_t fa;
+	posix_spawn_file_actions_init(&fa);
+	posix_spawn_file_actions_addopen(&fa, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+	posix_spawn_file_actions_addopen(&fa, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+	if (fd >= 0) posix_spawn_file_actions_adddup2(&fa, fd, STDERR_FILENO);
+	pid_t c = -1;
+	char* av[] = { argv[0], (char*)"--child-null", NULL };
+	const int e = posix_spawn(&c, argv[0], &fa, NULL, av, environ);
+	posix_spawn_file_actions_destroy(&fa);
+	check(e == 0, "a program is started with /dev/null at its three positions");
+	int s = -1;
+	if (e == 0) waitpid(c, &s, 0);
+	check(e == 0 && WIFEXITED(s) && WEXITSTATUS(s) == 0,
+	      "and reads the end there, and every write it makes is accepted");
+	if (e == 0 && WIFEXITED(s) && WEXITSTATUS(s)) printf("  the program reported %d\n", WEXITSTATUS(s));
+	if (fd >= 0) close(fd);
+}
+
 /* --- the modes this program is started in --------------------------------- */
 
 static int child_mode(int argc, char** argv)
@@ -118,6 +157,16 @@ static int child_mode(int argc, char** argv)
 		}
 		if (strcmp(argv[i], "--child-exit") == 0 && i + 1 < argc) {
 			_exit(atoi(argv[i + 1]));
+		}
+		/* GIVEN THE NULL DEVICE AT ITS THREE POSITIONS (openkal 0.22): a read
+		 * reports the end at once and every write is accepted. 61: a read did
+		 * not end; 62, 63: a write was not accepted in full. */
+		if (strcmp(argv[i], "--child-null") == 0) {
+			char b[8];
+			if (read(STDIN_FILENO, b, sizeof b) != 0) _exit(61);
+			if (write(STDOUT_FILENO, "discarded-bytes\n", 16) != 16) _exit(62);
+			if (write(STDERR_FILENO, "discarded-bytes\n", 16) != 16) _exit(63);
+			_exit(0);
 		}
 		if (strcmp(argv[i], "--child-sleep") == 0 && i + 1 < argc) {
 			usleep((unsigned)atoi(argv[i + 1]) * 1000u);
@@ -523,6 +572,8 @@ int main(int argc, char** argv)
 			failures += 1;
 		}
 	}
+
+	null_device(argv);
 
 	if (!expect_shell) {
 		printf("   this system has no shell at /bin/sh; system and popen are not asked\n");

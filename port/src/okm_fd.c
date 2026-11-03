@@ -32,12 +32,18 @@
  * one. */
 #include <openkal/process.h>
 extern __typeof(kal_process_channel_close) kal_process_channel_close __attribute__((__weak__));
+/* Attenuation (openkal 0.23), for okm_preopen_attenuate: weak by the same rule,
+ * since a volume may not attenuate (KAL_FS_PROP_ATTENUATE) and an
+ * implementation before 0.23 has no such name. */
+extern __typeof(kal_fs_dir_attenuate) kal_fs_dir_attenuate __attribute__((__weak__));
 #include "okm_opt.h"
 #include "okm_stat.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <string.h>
+#include <okm_preopen.h>
 
 /* --- translation ---------------------------------------------------------- */
 
@@ -270,7 +276,7 @@ static void desc_release(int d)
 	/* A socket's release reads and writes okm_net.c's table, which this lock
 	 * guards; it is made here, as before. */
 	if (p->kind == OKM_SOCKET) close_owned(p);
-	else if (p->kind != OKM_STREAM && p->kind != OKM_FREE) {
+	else if (p->kind != OKM_STREAM && p->kind != OKM_FREE && p->kind != OKM_NULL) {
 		if (g_settling_n < OKM_SETTLING_MAX) {
 			g_settling[g_settling_n].owner = (kal_uintptr)OKM_CONTEXT_ID();
 			g_settling[g_settling_n].d = *p;
@@ -387,6 +393,44 @@ int okm_preopen(int i, struct kal_dir* dir, const char** name, size_t* len)
 	return 0;
 }
 
+/* A held directory with less, at the program's request (okm_preopen.h). */
+int okm_preopen_attenuate(const char* name, unsigned long flags, const char* record)
+{
+#if OKM_HAS_FS
+	const size_t len = strlen(name);
+	int i = 0;
+	while (i < g_npre && !(g_pre[i].len == len && !memcmp(g_pre[i].name, name, len))) i++;
+	if (i == g_npre) { errno = ENOENT; return -1; }
+	if (!kal_fs_dir_attenuate || !(okm_fs_props(g_pre[i].dir) & KAL_FS_PROP_ATTENUATE)) {
+		errno = ENOTSUP;
+		return -1;
+	}
+	struct kal_dir_rights rights = { 0 };
+	rights.self_size = sizeof rights;
+	rights.flags = flags;
+	if (flags & KAL_DIR_RECORDED) {
+		/* Opened before the directory has less, so that its own opening is
+		 * not in it; never closed, since the implementation appends to it
+		 * until the program ends. */
+		const int fd = open(record, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
+		if (fd < 0) return -1;
+		const struct okm_desc* d = okm_desc_of(fd);
+		if (!d || d->kind != OKM_FILE) { errno = EINVAL; return -1; }
+		rights.record = d->file;
+	}
+	struct kal_dir less = { 0 };
+	const int e = kal_fs_dir_attenuate(g_pre[i].dir, &rights, &less);
+	if (e != kal_ok) { errno = okm_errno(e); return -1; }
+	if (okm_cwd_dir.h == g_pre[i].dir.h) okm_cwd_dir = less;
+	g_pre[i].dir = less;
+	return 0;
+#else
+	(void)name; (void)flags; (void)record;
+	errno = ENOTSUP;
+	return -1;
+#endif
+}
+
 static size_t copy_str(char* dst, const char* src, size_t n, size_t cap)
 {
 	if (n >= cap) n = cap ? cap - 1 : 0;
@@ -397,8 +441,22 @@ static size_t copy_str(char* dst, const char* src, size_t n, size_t cap)
 
 void okm_table_init(void)
 {
+	okm_table_init_memory();
+	okm_table_init_streams();
+}
+
+void okm_table_init_memory(void)
+{
 	for (int i = 0; i < OKM_MAX_FD; i++) { g_fd[i].desc = -1; g_fd[i].cloexec = 0; }
-	for (int i = 0; i < OKM_MAX_DESC; i++) { g_desc[i].path_slot = -1; g_desc[i].sock = -1; }
+}
+
+void okm_table_init_streams(void)
+{
+	/* A description's fields are set when it is bound (okm_fd_bind) and reset
+	 * when it is released; one never bound is read by nothing but its count.
+	 * Writing every one here made the whole table --- 1 024 descriptions, 340
+	 * KiB --- resident in every program before its first instruction: 85 page
+	 * faults of a language server's worker's 530 (0.27.0). */
 
 	/* The program's own three streams are descriptors 0, 1 and 2, which is
 	 * what every program above this library assumes without saying so. They
@@ -492,14 +550,29 @@ static size_t root_length(const char* name)
 	return 0;
 }
 
+/* A NAME BENEATH A VOLUME (`C:', `C:/...') IS COMPARED AS ITS ENVIRONMENT
+ * COMPARES IT (0.27.0): without regard to case, and with either separator. An
+ * editor names a file `c:/Users/...' where the directory supplied is `C:' or
+ * `C:/Users/...', and the name reached no directory at all. */
+static int same_char(char a, char b, int volume)
+{
+	if (a == b) return 1;
+	if (!volume) return 0;
+	if ((a == '/' || a == '\\') && (b == '/' || b == '\\')) return 1;
+	if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+	if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+	return a == b;
+}
+
 static int is_prefix_at_boundary(const char* name, size_t len, const char* abs)
 {
 	if (len == 0) return 0;
-	for (size_t i = 0; i < len; i++) if (abs[i] != name[i]) return 0;
+	const int volume = len >= 2 && name[1] == ':';
+	for (size_t i = 0; i < len; i++) if (!same_char(abs[i], name[i], volume)) return 0;
 	/* A supplied directory whose own name ends in a separator --- a root, on
 	 * either spelling --- matches without requiring another. */
-	if (name[len - 1] == '/') return 1;
-	return abs[len] == 0 || abs[len] == '/';
+	if (name[len - 1] == '/' || (volume && name[len - 1] == '\\')) return 1;
+	return abs[len] == 0 || abs[len] == '/' || (volume && abs[len] == '\\');
 }
 
 /* Builds an absolute name from a base and a remainder, keeping whatever root
@@ -520,6 +593,9 @@ static int join(const char* prefix, const char* rel, char* out, size_t cap)
 
 	const size_t keep = rroot ? rroot : proot;
 	const char*  from = rroot ? rel : prefix;
+	/* Beneath a volume either separator separates (0.27.0): `d:\a\b' is `d:/a/b'. */
+	if (keep == 3 && from[1] == ':')
+		for (size_t i = 0; i < o; i++) if (tmp[i] == '\\') tmp[i] = '/';
 	if (keep + 1 >= cap) return -ENAMETOOLONG;
 	for (size_t i = 0; i < keep; i++) out[i] = from[i] == '\\' ? '/' : from[i];
 	return normalise(tmp, out + keep, cap - keep);
@@ -608,7 +684,7 @@ int okm_resolve(int dirfd, const char* path, struct okm_at* at, int empty_ok)
 	if (best < 0) return -ENOENT;
 
 	const char* rest = abs + best_len;
-	while (*rest == '/') rest++;
+	while (*rest == '/' || (*rest == '\\' && best_len >= 2 && g_pre[best].name[1] == ':')) rest++;
 	at->base = g_pre[best].dir;
 	const size_t rest_len = abs_len ? abs_len - (size_t)(rest - abs) : __builtin_strlen(rest);
 	if (!*rest) at->len = copy_str(at->rel, ".", 1, sizeof at->rel);
@@ -670,6 +746,16 @@ int okm_absolute(int dirfd, const char* path, char* out, size_t cap)
 	if (!d || d->kind != OKM_DIR) return -ENOTDIR;
 	if (d->path_slot < 0 || !g_dirpath[d->path_slot][0]) return -ENOENT;
 	return join(g_dirpath[d->path_slot], path, out, cap);
+}
+
+int okm_null_name(int dirfd, const char* path)
+{
+	static const char name[] = "/dev/null";
+	if (!path || !*path) return 0;
+	char abs[OKM_MAX_PATH];
+	if (okm_absolute(dirfd, path, abs, sizeof abs) != 0) return 0;
+	for (size_t i = 0; i < sizeof name; i++) if (abs[i] != name[i]) return 0;
+	return 1;
 }
 
 /* Every stream this image holds, released --- used by the one place that has an

@@ -25,7 +25,7 @@
  */
 void __okm_libc_init(void);
 
-__attribute__((constructor)) static void okm_early_init(void)
+__attribute__((constructor, __no_stack_protector__)) static void okm_early_init(void)
 {
 	__okm_libc_init();
 }

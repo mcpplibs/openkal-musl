@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.26.1"
+version     = "0.27.0"
 # `embed' and `exclude' on a dependency edge (the allocator, below) are mcpp
 # 2026.11.2.1's; an older engine refuses the edge rather than building a C
 # library without its allocator.
@@ -167,7 +167,7 @@ lchown    = { form = "enosys", note = "as chown" }
 tcsetattr = { form = "accepted-no-effect", note = "openkal names four positions of the terminal mode word, the fourth covering ICRNL, INLCR, IGNCR and ISTRIP together; a request that alters output post-processing, the line speed, the control characters or VMIN/VTIME is accepted and that part has no effect" }
 
 [dependencies]
-openkal = "0.21.0"
+openkal = "0.23.0"
 
 # An ordinary consumer of openkal declares the specification and leaves the
 # choice of implementation to whoever builds the program, which is what the
@@ -182,7 +182,7 @@ openkal = "0.21.0"
 #
 # The consequence for a program is that it names this package and nothing else.
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = { version = "0.22.0", features = ["standalone"] }
+openkal-linux = { version = "0.24.0", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
 # 0.12.0 is the first release of this implementation that declares which
@@ -192,7 +192,7 @@ openkal-linux = { version = "0.22.0", features = ["standalone"] }
 # is the shape of a check that silently does not run --- while the same
 # consumer was answered on Linux and Windows, whose implementations have
 # carried the array since openkal-linux 0.15.0 and openkal-windows 0.10.0.
-openkal-macos = { version = "0.19.0", features = ["standalone"] }
+openkal-macos = { version = "0.21.2", features = ["standalone"] }
 
 # FIRST STEP TOWARD A BARE MACHINE, AND NOT THE WHOLE OF IT.
 #
@@ -233,7 +233,7 @@ defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
 # other. What the image form adds is libokld --- the loader the image format
 # defines --- for `dlopen', which places further images the same way.
 [target.'cfg(os = "openkal")'.dependencies]
-openkal-ld = "0.3.1"
+openkal-ld = "0.4.1"
 
 # The routines a compiler emits calls to and no C library defines --- on
 # AArch64, every arithmetic operation on a 128-bit `long double`, which
@@ -266,8 +266,18 @@ sources = [
   "port/src/image/*.c",
 ]
 
+# THE COMPILER'S RUNTIME ON PE UNDER CLANG IS THE GRAPH'S. The link above
+# names no runtime (`-nostdlib'), and under clang the routines a compiler emits
+# calls to --- a stack probe, a complex multiply --- are compiler-rt's, built for
+# this target by `openkal-llvm-runtime' (build.mcpp names GCC's own under GCC).
+# A graph without it is refused here, naming the layer, rather than at the link
+# with `___chkstk_ms' undefined (measured: a Linux host cross-building for
+# x86_64-windows with this package alone).
+[target.'cfg(all(windows, compiler = "llvm"))']
+requires = ["mcpp:compiler-runtime=compiler-rt"]
+
 [target.'cfg(windows)'.dependencies]
-openkal-windows = { version = "0.17.0", features = ["standalone"] }
+openkal-windows = { version = "0.19.0", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #
@@ -372,6 +382,10 @@ sources = [
   "!musl/src/time/clock_gettime.c",
   "!musl/src/env/__libc_start_main.c",
   "!musl/src/env/__init_tls.c",
+  # Replaced in port/src/okm_start.c (0.27.0): while a snapshot's initialisers
+  # run, a named value is a question for the start, which the runner making the
+  # snapshot refuses (port/src/okm.h).
+  "!musl/src/env/getenv.c",
   "!musl/src/thread/__set_thread_area.c",
   "!musl/src/thread/clone.c",
   # Replaced in port/src/okm_thread.c: musl leaves for a 256-byte shared stack

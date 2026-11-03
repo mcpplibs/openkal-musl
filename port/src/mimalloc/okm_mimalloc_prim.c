@@ -32,8 +32,24 @@
 #include <errno.h>
 #include <pthread.h>
 #include <sched.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include "../okm_stat.h"
+
+/* THE SNAPSHOT'S RECORD (port/src/okm.h, whose internal names this file does
+ * not take): while a runner runs the initialisers for a snapshot (phase 1)
+ * nothing is asked of the environment but memory --- no randomness, no clock,
+ * no stream --- and in a program started from one (phase 2) the arena's memory
+ * is never given back, nor its backing taken. */
+struct okm_snapshot { kal_u64 arena, size; kal_u32 phase, reserved; kal_u64 context; };
+extern struct okm_snapshot __okrun_snapshot;
+static int sealing(void) { return __okrun_snapshot.phase == 1; }
+static int from_snapshot(const void* p)
+{
+	const kal_u64 a = (kal_u64)(uintptr_t)p;
+	return __okrun_snapshot.phase == 2 && a >= __okrun_snapshot.arena
+	    && a - __okrun_snapshot.arena < __okrun_snapshot.size;
+}
 
 extern __typeof(kal_region_reserve)  kal_region_reserve  __attribute__((__weak__));
 extern __typeof(kal_region_commit)   kal_region_commit   __attribute__((__weak__));
@@ -115,7 +131,7 @@ int _mi_prim_alloc(void* hint_addr, size_t size, size_t try_alignment, bool comm
 
 int _mi_prim_free(void* addr, size_t size)
 {
-	if (size == 0) return 0;
+	if (size == 0 || from_snapshot(addr)) return 0;
 	size = whole(size);
 	if (g_regions) {
 		kal_region_release(addr, size);
@@ -131,7 +147,7 @@ int _mi_prim_commit(void* addr, size_t size, bool* is_zero)
 	/* A part backed before keeps its contents (region.h), so nothing is
 	 * promised about zero. */
 	*is_zero = false;
-	if (!g_regions) return 0;
+	if (!g_regions || from_snapshot(addr)) return 0;
 	okm_stat_add(OKM_STAT_REGION_COMMITS, 1);
 	const int e = kal_region_commit(addr, size);
 	return e == kal_ok ? 0 : ENOMEM;
@@ -139,7 +155,7 @@ int _mi_prim_commit(void* addr, size_t size, bool* is_zero)
 
 int _mi_prim_decommit(void* addr, size_t size, bool* needs_recommit)
 {
-	if (!g_regions) { *needs_recommit = false; return 0; }
+	if (!g_regions || from_snapshot(addr)) { *needs_recommit = false; return 0; }
 	*needs_recommit = true;
 	okm_stat_add(OKM_STAT_REGION_DECOMMITS, 1);
 	return kal_region_decommit(addr, size) == kal_ok ? 0 : EINVAL;
@@ -147,7 +163,7 @@ int _mi_prim_decommit(void* addr, size_t size, bool* needs_recommit)
 
 int _mi_prim_reset(void* addr, size_t size)
 {
-	if (!g_regions) return 0;
+	if (!g_regions || from_snapshot(addr)) return 0;
 	okm_stat_add(OKM_STAT_REGION_DISCARDS, 1);
 	return kal_region_discard(addr, size) == kal_ok ? 0 : EINVAL;
 }
@@ -178,6 +194,7 @@ size_t _mi_prim_numa_node_count(void) { return 1; }
 
 mi_msecs_t _mi_prim_clock_now(void)
 {
+	if (sealing()) return 0;
 	return (mi_msecs_t)(kal_time_monotonic() / 1000000u);
 }
 
@@ -187,7 +204,7 @@ mi_msecs_t _mi_prim_clock_now(void)
  * time. */
 void _mi_prim_process_info(mi_process_info_t* pinfo)
 {
-	if (!kal_process_self || !kal_process_info || !kal_process_close) return;
+	if (sealing() || !kal_process_self || !kal_process_info || !kal_process_close) return;
 	struct kal_process me;
 	if (kal_process_self(&me) != kal_ok) return;
 	struct kal_program_info info = { .self_size = sizeof info };
@@ -203,6 +220,7 @@ void _mi_prim_process_info(mi_process_info_t* pinfo)
 
 void _mi_prim_out_stderr(const char* msg)
 {
+	if (sealing()) return;
 	kal_uintptr n = 0;
 	while (msg[n]) n++;
 	(void)kal_stream_write(kal_stderr(), msg, n);
@@ -213,6 +231,13 @@ void _mi_prim_out_stderr(const char* msg)
  * is made. Before it is made the answer is "not yet", and mimalloc asks again. */
 extern char** __environ;
 
+/* WHETHER THE SET HOLDS ANY OF MIMALLOC'S OWN (0.27.0): mimalloc asks for each
+ * of its options by name, a pass over the whole set each time, and a program
+ * that sets none of them --- every program, nearly --- is answered from one pass.
+ * Asked again when the set is another (musl's setenv replaces the array). */
+static char** g_scanned;
+static int    g_has_own;
+
 int _mi_prim_getenv(const char* name, char* result, size_t result_size)
 {
 	if (name == NULL) return -1;
@@ -220,6 +245,13 @@ int _mi_prim_getenv(const char* name, char* result, size_t result_size)
 	if (len == 0) return -1;
 	char** env = __environ;
 	if (env == NULL) return -1;
+	if (env != g_scanned) {
+		g_has_own = 0;
+		for (int i = 0; i < 10000 && env[i] != NULL && !g_has_own; i++)
+			g_has_own = _mi_strnicmp(env[i], "MIMALLOC_", 9) == 0;
+		g_scanned = env;
+	}
+	if (!g_has_own) return 0;
 	for (int i = 0; i < 10000 && env[i] != NULL; i++) {
 		const char* s = env[i];
 		if (_mi_strnicmp(name, s, len) == 0 && s[len] == '=') {
@@ -232,7 +264,10 @@ int _mi_prim_getenv(const char* name, char* result, size_t result_size)
 
 bool _mi_prim_random_buf(void* buf, size_t buf_len)
 {
-	if (!kal_random_fill) return false;
+	/* The weak randomness mimalloc falls back on while a snapshot's
+	 * initialisers run is made strong when a program starts from it
+	 * (__okm_malloc_start). */
+	if (sealing() || !kal_random_fill) return false;
 	return kal_random_fill(buf, buf_len) == kal_ok;
 }
 
@@ -289,9 +324,52 @@ void _mi_allocator_done(void) {}
  * format initialisers run before the program's entry and in the order their
  * objects were linked (port/src/mach), so a constructor could run before the
  * C library it calls is up. The end is a destructor, which runs from `exit'. */
+/* WHAT THE ALLOCATOR KEEPS, BY THE PROGRAM'S RESOURCE PREFERENCE (0.27.0;
+ * openkal 0.23, mcpp design 2026-11-03 part 4 §16): memory a heap no longer
+ * uses is given back after mimalloc's own delay (10 ms) when balanced, after a
+ * second for performance, and at once for economy. A default, which
+ * MIMALLOC_PURGE_DELAY states otherwise. Weak: a runner of openkal 0.22 has
+ * no preference to tell. */
+extern __typeof(kal_env_resources) kal_env_resources __attribute__((__weak__));
+
+static void okm_malloc_preference(void)
+{
+	if (!kal_env_resources) return;
+	switch (kal_env_resources()) {
+	case KAL_RESOURCES_PERFORMANCE: mi_option_set_default(mi_option_purge_delay, 1000); break;
+	case KAL_RESOURCES_ECONOMY:     mi_option_set_default(mi_option_purge_delay, 0); break;
+	default: break;
+	}
+}
+
 __attribute__((__visibility__("hidden"))) void __okm_malloc_init(void)
 {
+	/* Not while a snapshot's initialisers run: the start supplies it (below). */
+	if (!sealing()) okm_malloc_preference();
+	/* A SNAPSHOT'S ARENA HOLDS WHAT IS RESERVED WHILE ITS INITIALISERS RUN, and a
+	 * program started from it reserves all of it again: mimalloc reserves a
+	 * gibibyte at a time, so it is asked for little while they run. */
+	if (sealing()) mi_option_set(mi_option_arena_reserve, 4 * 1024);   /* KiB */
 	_mi_auto_process_init();
+}
+
+/* A PROGRAM STARTED FROM A SNAPSHOT (0.27.0, okm_start.c): the randomness the
+ * initialisers ran without is drawn now, as mimalloc draws it again where it
+ * started weakly, and the arena is reserved at mimalloc's own size again. */
+__attribute__((__visibility__("hidden"))) void __okm_malloc_start(void)
+{
+	mi_option_set(mi_option_arena_reserve, 1024 * 1024);   /* KiB: mimalloc's own, a gibibyte */
+	okm_malloc_preference();
+	mi_theap_t* theap = _mi_theap_default();
+	if (theap != NULL) {
+		_mi_random_reinit_if_weak(&theap->random);
+		mi_subproc_t* subproc = mi_theap_subproc(theap);
+		if (subproc->theap_meta != NULL) {
+			mi_lock(&subproc->theap_meta_lock) {
+				_mi_random_reinit_if_weak(&subproc->theap_meta->random);
+			}
+		}
+	}
 }
 
 __attribute__((__destructor__)) static void okm_malloc_done(void)

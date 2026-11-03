@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
@@ -234,6 +235,9 @@ int main(int argc, char **argv, char **envp) {
 		clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &c1);
 		const long long slept = (long long)(c1.tv_sec - c0.tv_sec) * 1000000000 + (c1.tv_nsec - c0.tv_nsec);
 		check(had && slept < 100000000, "time asleep is not processor time");
+		if (!(had && slept < 100000000))
+			printf("   asleep 200 ms, the processor clock moved %lld ns (%lld.%09ld to %lld.%09ld)\n", slept,
+			       (long long)c0.tv_sec, c0.tv_nsec, (long long)c1.tv_sec, c1.tv_nsec);
 		clock_gettime(CLOCK_MONOTONIC, &s0);
 		volatile unsigned long long sink = 0;
 		do {
@@ -369,6 +373,22 @@ int main(int argc, char **argv, char **envp) {
 		 * that depended on another probe's leftovers would report an absence as
 		 * a defect. */
 		{ FILE *t = fopen("okm-link-target.tmp", "w"); if (t) { fputs("0123456789", t); fclose(t); } }
+
+		/* THE WHOLE NAME, FROM THE ENVIRONMENT (0.27.0, openkal 0.23). A
+		 * file's realpath is absolute, in this library's spelling (a separator
+		 * or a volume first, forward separators), and ends with its name; an
+		 * absent name is ENOENT, and the null device is itself. */
+		char direct[PATH_MAX], absent[PATH_MAX], null_name[PATH_MAX];
+		const char *d = realpath("okm-link-target.tmp", direct);
+		const size_t tail = strlen("/okm-link-target.tmp");
+		const int direct_ok = d && strlen(d) > tail && strcmp(d + strlen(d) - tail, "/okm-link-target.tmp") == 0
+		                      && (d[0] == '/' || (d[1] == ':' && d[2] == '/')) && !strchr(d, '\\');
+		if (d) printf("   realpath: %s\n", d);
+		check(direct_ok, "realpath of a file is its absolute name");
+		errno = 0;
+		check(realpath("okm-probe-absent", absent) == 0 && errno == ENOENT, "realpath of an absent name reports ENOENT");
+		check(realpath("/dev/null", null_name) && strcmp(null_name, "/dev/null") == 0, "realpath of /dev/null is /dev/null");
+
 		unlink("okm-probe-link");
 		const int made = symlink("okm-link-target.tmp", "okm-probe-link");
 		if (made == 0) {
@@ -423,6 +443,14 @@ int main(int argc, char **argv, char **envp) {
 				check(unlink("okm-probe-dangling") == 0,
 				      "a link whose target is absent is still removable");
 			}
+
+			/* realpath of the link is its target's absolute name, and a name
+			 * musl's walk answers (a `.' component) agrees. */
+			char via_link[PATH_MAX], walked[PATH_MAX];
+			const char *a = realpath("okm-probe-link", via_link);
+			const char *c = realpath("./okm-probe-link", walked);
+			check(a && direct_ok && strcmp(a, direct) == 0, "realpath of a link is its target's absolute name");
+			check(c && a && strcmp(c, a) == 0, "and a name musl's walk answers agrees");
 
 			unlink("okm-probe-link");
 		} else if (errno == ENOSYS || errno == EPERM) {

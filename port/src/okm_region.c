@@ -100,7 +100,7 @@ static int record(struct range r)
 		struct range* n = kal_alloc(cap * sizeof *n, _Alignof(struct range));
 		if (!n) return -ENOMEM;
 		if (g_count) memcpy(n, g_ranges, g_count * sizeof *n);
-		if (g_ranges) kal_free(g_ranges, g_cap * sizeof *g_ranges, _Alignof(struct range));
+		if (g_ranges) okm_kal_free(g_ranges, g_cap * sizeof *g_ranges, _Alignof(struct range));
 		g_ranges = n;
 		g_cap = cap;
 	}
@@ -156,6 +156,8 @@ int okm_region_unmap(void* addr, size_t len, long* result)
 		memmove(&g_ranges[i], &g_ranges[i + 1], (g_count - (size_t)i - 1) * sizeof *g_ranges);
 		g_count--;
 		okm_mutex_unlock(&g_lock);
+		/* A snapshot's range stays: the environment did not give it (okm.h). */
+		if (okm_from_snapshot((void*)r.base)) { *result = 0; return 1; }
 		kal_region_release((void*)r.base, r.size);
 		okm_stat_add(OKM_STAT_REGION_RELEASES, 1);
 		okm_stat_sub(OKM_STAT_REGION_RESERVED, r.size);
@@ -164,7 +166,7 @@ int okm_region_unmap(void* addr, size_t len, long* result)
 	}
 	okm_mutex_unlock(&g_lock);
 	/* A part: its backing goes, its addresses stay reserved. */
-	if (lo < hi) {
+	if (lo < hi && !okm_from_snapshot((void*)lo)) {
 		kal_region_decommit((void*)lo, hi - lo);
 		okm_stat_add(OKM_STAT_REGION_DECOMMITS, 1);
 	}
@@ -187,6 +189,13 @@ int okm_region_advise(void* addr, size_t len, int advice, long* result)
 	uintptr_t lo, hi;
 	if (!part_of(r, a, len, g, &lo, &hi)) { *result = 0; return 1; }
 	int e;
+	if (okm_from_snapshot((void*)lo)) {
+		/* A snapshot's memory keeps its backing; a part that must read as zero
+		 * is made zero. */
+		if (advice != MADV_FREE) memset((void*)lo, 0, hi - lo);
+		*result = 0;
+		return 1;
+	}
 	if (advice == MADV_FREE) {
 		e = kal_region_discard((void*)lo, hi - lo);
 		okm_stat_add(OKM_STAT_REGION_DISCARDS, 1);

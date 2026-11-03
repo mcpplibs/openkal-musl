@@ -33,8 +33,14 @@
 /* The allocator's start, where the allocator has one (port/src/mimalloc
  * defines it); musl's own needs none. A weak definition rather than a weak
  * reference, which one object format of the three resolves only from a
- * library. */
+ * library. The second is what the allocator does once the environment is
+ * there, in a program started from a snapshot (0.27.0). */
 __attribute__((__weak__)) hidden void __okm_malloc_init(void) {}
+__attribute__((__weak__)) hidden void __okm_malloc_start(void) {}
+
+/* THE SNAPSHOT'S RECORD (okm.h), which the image exports for its runner: zero
+ * in every program not run from a snapshot or for one. */
+__attribute__((__visibility__("default"), __used__)) struct okm_snapshot __okrun_snapshot;
 
 void __okm_set_tp(uintptr_t value);
 
@@ -283,10 +289,120 @@ static void fill_random(void)
  * we. */
 static int g_libc_up;
 
-void __okm_libc_init(void)
+/* THE PAGE THIS LIBRARY REPORTS: openkal's granularity as a floor (the
+ * reason is in __okm_libc_init). */
+static void take_page_size(void)
+{
+	kal_uintptr grain = kal_memory_granularity();
+	if (grain < 4096) grain = 4096;
+	else if (grain & (grain - 1)) {           /* not a power of two: round up */
+		kal_uintptr p = 4096;
+		while (p && p < grain) p <<= 1;
+		grain = p ? p : 4096;
+	}
+	libc.page_size = grain;
+}
+
+/* WHAT A SNAPSHOT'S INITIALISERS BRING UP (0.27.0, okm.h): the page, the first
+ * context's record, the descriptor table's memory and the allocator --- the
+ * library's memory, and nothing the start supplies, which the runner making
+ * the snapshot refuses. The rest is the second phase's. */
+static void okm_libc_memory(void)
+{
+	take_page_size();
+	g_auxv[0] = 6  /* AT_PAGESZ */; g_auxv[1] = libc.page_size;
+	g_auxv[2] = 25 /* AT_RANDOM */; g_auxv[3] = (size_t)(uintptr_t)g_random;
+	g_auxv[4] = 0;
+	libc.auxv = g_auxv;
+	__init_tls(0);
+	okm_table_init_memory();
+	__okm_malloc_init();
+}
+
+/* THE SECOND PHASE'S ENTRY, which the runner calls (openkal-image 0.4,
+ * docs/snapshot.md).
+ *
+ * In a program started from a snapshot (phase 2): the context the initialisers
+ * ran on becomes this one, and what the start supplies is taken --- randomness
+ * and the stack's guard, the arguments and the named values, the streams and
+ * the directories, the measurement --- and then the allocator's own. The
+ * stack's guard changes here, so this function keeps none.
+ *
+ * In the runner making the snapshot (phase 1), once the initialisers have run:
+ * what they did that a snapshot cannot hold is reported by asking for what the
+ * start supplies, which that runner refuses. A named value set by an
+ * initialiser is one: the start's whole set would replace it. */
+__attribute__((__visibility__("default"), __no_stack_protector__)) void __okrun_snapshot_start(void)
+{
+	if (okm_sealing()) {
+		if (__environ) (void)kal_env_var_count();
+		return;
+	}
+	if (__okrun_snapshot.phase != 2) return;
+	__okm_rebind_context((kal_uintptr)__okrun_snapshot.context);
+	pthread_t td = __pthread_self();
+	td->tid = (int)OKM_CONTEXT_ID();
+	if (td->tid == 0) td->tid = 1;
+	fill_random();
+	__okm_init_env();
+	__init_ssp(g_random);
+	okm_table_init_streams();
+	okm_trace_banner();
+	__okm_prof_init();
+	__okm_malloc_start();
+}
+
+/* A NAMED VALUE ASKED FOR WHILE A SNAPSHOT'S INITIALISERS RUN: asked of the
+ * environment for that one name and kept, so that a second asking answers the
+ * same storage. The runner making the snapshot answers with the program's own
+ * value and records the name, and a start that would answer it otherwise does
+ * not use the snapshot; what an initialiser kept of the answer is the
+ * snapshot's memory, and holds the value the start has. */
+static char* sealing_getenv(const char* name, size_t l)
+{
+	static struct { char* name; size_t len; char* value; } asked[64];
+	static int count;
+	for (int i = 0; i < count; i++)
+		if (asked[i].len == l && !memcmp(asked[i].name, name, l)) return asked[i].value;
+	const kal_intptr n = kal_env_var(name, l, 0, 0);
+	char* value = 0;
+	if (n >= 0 && (value = kal_alloc((kal_uintptr)n + 1, 1))) {
+		if (kal_env_var(name, l, value, (kal_uintptr)n) != n) value[0] = 0;
+		value[n] = 0;
+	}
+	char* kept = count < 64 ? kal_alloc(l + 1, 1) : 0;
+	if (kept) {
+		memcpy(kept, name, l);
+		kept[l] = 0;
+		asked[count].name = kept;
+		asked[count].len = l;
+		asked[count].value = value;
+		count++;
+	}
+	return value;
+}
+
+/* A NAMED VALUE, as musl's getenv (src/env/getenv.c, which this replaces)
+ * answers it, and while a snapshot's initialisers run, as sealing_getenv
+ * does. */
+char* getenv(const char* name)
+{
+	size_t l = __strchrnul(name, '=') - name;
+	if (okm_sealing()) return l && !name[l] ? sealing_getenv(name, l) : 0;
+	if (l && !name[l] && __environ)
+		for (char** e = __environ; *e; e++)
+			if (!strncmp(name, *e, l) && l[*e] == '=')
+				return *e + l + 1;
+	return 0;
+}
+
+/* THE STACK'S GUARD CHANGES HERE (__init_ssp), so this function keeps none: a
+ * guard placed on entry would be compared with another on return. */
+__attribute__((__no_stack_protector__)) void __okm_libc_init(void)
 {
 	if (g_libc_up) return;
 	g_libc_up = 1;
+	if (okm_sealing()) { okm_libc_memory(); return; }
 
 	/* THE PAGE WAS FIXED WHEN THIS LIBRARY WAS BUILT AND IS NOW ASKED FOR.
 	 *
@@ -322,14 +438,7 @@ void __okm_libc_init(void)
 	 * So this takes openkal's answer as a FLOOR TO RESPECT rather than as the
 	 * value: at least what the machine requires, at least what this library
 	 * requires, and a power of two because both assume one. */
-	kal_uintptr grain = kal_memory_granularity();
-	if (grain < 4096) grain = 4096;
-	else if (grain & (grain - 1)) {           /* not a power of two: round up */
-		kal_uintptr p = 4096;
-		while (p && p < grain) p <<= 1;
-		grain = p ? p : 4096;
-	}
-	libc.page_size = grain;
+	take_page_size();
 	fill_random();
 	g_auxv[0] = 6  /* AT_PAGESZ */; g_auxv[1] = libc.page_size;
 	g_auxv[2] = 25 /* AT_RANDOM */; g_auxv[3] = (size_t)(uintptr_t)g_random;

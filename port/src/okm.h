@@ -20,6 +20,7 @@
 
 #include <openkal.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* WHICH OPENKAL INTERFACES THE IMPLEMENTATION BENEATH PROVIDES.
  *
@@ -107,6 +108,13 @@ enum okm_kind {
 	 * and carries two endpoints that no other descriptor needs. `sock' below is
 	 * the index. */
 	OKM_SOCKET,
+	/* THE NULL DEVICE, WHICH IS THIS LIBRARY'S AND HAS NO STREAM. A read
+	 * reports the end of input and a write is accepted in full, with nothing
+	 * beneath either. POSIX names it `/dev/null'; the name is resolved here on
+	 * every environment, including one whose preopens are volumes and hold no
+	 * such file. A started program is given the environment's own device at
+	 * the position (openkal 0.22, `KAL_SPAWN_NULL_*'; okm_spawn.c). */
+	OKM_NULL,
 };
 
 /* An open file description, in the POSIX sense: what a descriptor refers to,
@@ -198,6 +206,58 @@ int  okm_fd_dup(int fd, int newfd, int cloexec); /* newfd < 0: lowest free     *
 int  okm_fd_cloexec(int fd, int on);
 int  okm_fd_get_cloexec(int fd);
 void okm_table_init(void);
+/* The table's two halves (0.27.0): its memory, and the streams and directories
+ * the environment supplies --- the second asked of the environment, which a
+ * snapshot's initialisers do not (okm_start.c). */
+void okm_table_init_memory(void);
+void okm_table_init_streams(void);
+
+/* THE SNAPSHOT OF A STARTED IMAGE (0.27.0; openkal-image 0.4, docs/snapshot.md).
+ *
+ * A runner may run an image's initialisers once, with memory alone --- an
+ * arena after the image's span, and nothing the start supplies --- and keep the
+ * image's data and the arena as a prepared copy; every later start maps them,
+ * runs no initialiser, and calls `__okrun_snapshot_start' (okm_start.c), which
+ * takes what the start supplies. The runner states which in this record, which
+ * the image exports:
+ *
+ *   phase 1   the initialisers are running for a snapshot: this library brings
+ *             up its memory and nothing else (no named value, no stream, no
+ *             randomness, no clock);
+ *   phase 2   the program was started from a snapshot: the arena's memory is
+ *             the snapshot's, mapped by the runner, and is never given back to
+ *             the environment, which did not give it.
+ *
+ * Zero otherwise, which is every program not run so. */
+struct okm_snapshot {
+	kal_u64 arena;     /* the arena's address */
+	kal_u64 size;      /* its bytes */
+	kal_u32 phase;
+	kal_u32 reserved;
+	kal_u64 context;   /* the word of the context the initialisers ran on */
+};
+extern struct okm_snapshot __okrun_snapshot;
+
+static inline int okm_sealing(void) { return __okrun_snapshot.phase == 1; }
+
+/* Whether memory was the snapshot's: obtained while the initialisers ran, and
+ * not the environment's to take back. */
+static inline int okm_from_snapshot(const void* p)
+{
+	const kal_u64 a = (kal_u64)(uintptr_t)p;
+	return __okrun_snapshot.phase == 2 && a >= __okrun_snapshot.arena
+	    && a - __okrun_snapshot.arena < __okrun_snapshot.size;
+}
+
+/* kal_free, but not of the snapshot's memory. */
+static inline void okm_kal_free(void* p, kal_uintptr n, kal_uintptr align)
+{
+	if (!okm_from_snapshot(p)) kal_free(p, n, align);
+}
+
+/* The context the snapshot's initialisers ran on, become the calling one
+ * (okm_context.c). */
+void __okm_rebind_context(kal_uintptr from);
 
 /* Announces this library's version on the standard error stream, and only
  * when OPENKAL_MUSL_TRACE asks for it. Called once from startup rather than
@@ -235,6 +295,9 @@ void okm_dir_remember(int fd, const char* abs);
 /* The absolute form of a name, for the callers that need it before the
  * directory it resolves against is known. Returns 0 or a negated error. */
 int okm_absolute(int dirfd, const char* path, char* out, size_t cap);
+/* Whether `path', resolved lexically against `dirfd', is the null device's
+ * name, `/dev/null'. */
+int okm_null_name(int dirfd, const char* path);
 
 /* The working directory, which POSIX has and openkal does not: openkal names
  * every operation relative to a directory the program holds, so the notion of
