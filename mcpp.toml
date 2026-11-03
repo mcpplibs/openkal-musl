@@ -192,7 +192,7 @@ openkal-linux = { version = "0.24.0", features = ["standalone"] }
 # is the shape of a check that silently does not run --- while the same
 # consumer was answered on Linux and Windows, whose implementations have
 # carried the array since openkal-linux 0.15.0 and openkal-windows 0.10.0.
-openkal-macos = { version = "0.21.1", features = ["standalone"] }
+openkal-macos = { version = "0.21.2", features = ["standalone"] }
 
 # FIRST STEP TOWARD A BARE MACHINE, AND NOT THE WHOLE OF IT.
 #
