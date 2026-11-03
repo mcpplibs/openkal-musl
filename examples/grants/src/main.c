@@ -80,6 +80,10 @@ int main(int argc, char** argv)
 	const kal_intptr n = kal_env_image(g_self, sizeof g_self - 1);
 	if (n <= 0) { printf("FAIL: the program's own file is named\n"); return 1; }
 	g_self[n] = 0;
+	/* The program's name as it was started may be relative to the directory
+	 * it was started in; the starts below name it from the root. */
+	char named[4096];
+	if (realpath(g_self, named)) strcpy(g_self, named);
 	if (argc > 1 && !strcmp(argv[1], "--second")) return child();
 	if (argc > 1 && !strcmp(argv[1], "--third")) return grandchild();
 
@@ -99,8 +103,6 @@ int main(int argc, char** argv)
 	check(realpath(made, dir) != 0, "the directory's name, resolved");
 	strcpy(bin, g_self);
 	*strrchr(bin, '/') = 0;
-	char resolved[4096];
-	if (realpath(bin, resolved)) strcpy(bin, resolved);
 	struct kal_dir mine = { 0 }, its = { 0 };
 	check(read_only(root(), dir, &mine) && read_only(root(), bin, &its), "both directories, read-only");
 	const struct kal_preopen grants[2] = { { mine, dir, strlen(dir) }, { its, bin, strlen(bin) } };
@@ -111,6 +113,7 @@ int main(int argc, char** argv)
 	int status = -1, terminated = 0;
 	const int started = kal_process_spawn(&how, g_self + 1, strlen(g_self + 1), args, lens, 2, 0, 0, 0, 0, &p);
 	check(started == kal_ok, "the second program starts with the two");
+	if (started != kal_ok) printf("   %s is not started: %d\n", g_self, started);
 	if (started == kal_ok) { kal_process_wait(p, &status, &terminated); kal_process_close(p); }
 	printf("   the third program reported %d\n", status);
 	check(!terminated && status != 61, "a program it starts holds them read-only too: it creates nothing there");
