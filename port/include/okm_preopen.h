@@ -14,7 +14,9 @@
  * is opened for appending (created if absent, not truncated, so that the
  * program may write a heading first), before the directory is attenuated, and
  * held open until the program ends, as the record requires. The directory the
- * program is in, where it is the held one, moves to the new handle.
+ * program is in, where it is the held one, moves to the new handle. The table
+ * of held directories is read without a lock: a program calls this before its
+ * other contexts reach the file system, as a worker does at its start.
  *
  * 0, or -1 and errno: ENOENT for a name no held directory has, ENOTSUP where
  * the volume does not attenuate (KAL_FS_PROP_ATTENUATE), EINVAL for a flag
