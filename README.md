@@ -725,7 +725,7 @@ as `[target.'cfg(all(windows, compiler = "llvm"))'] requires =
 ["mcpp:compiler-runtime=compiler-rt"]`, so a graph without it is refused before
 anything is compiled, naming the layer, rather than failing at the link with
 `___chkstk_ms` undefined. mcpp checks a requirement a layer decides from
-2026.11.2.3.
+2026.11.3.1.
 
 **`realpath` asks the environment for the whole name** (openkal 0.23,
 `kal_fs_resolved_name`), where musl asked of each component whether it is a

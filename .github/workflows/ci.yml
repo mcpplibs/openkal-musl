@@ -35,7 +35,7 @@ env:
   # openkal images, whose platform version group is selected by the engine;
   # use the release that selects the corrected 0.23.2 group. Until it is
   # published, MCPP_SOURCE_REF builds the same candidate from source.
-  MCPP_VERSION: 2026.11.2.3
+  MCPP_VERSION: 2026.11.3.1
   XLINGS_VERSION: v2026.10.26.1
   XLINGS_NON_INTERACTIVE: '1'
 
