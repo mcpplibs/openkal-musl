@@ -162,11 +162,14 @@ set -e
 # openkal-macos 0.21.0 adds the sandbox a confined program is started in
 # (openkal 0.23) and, on 64-bit ARM, the calling thread's record and its
 # stack's bounds, which a fault report and a sample walk the frames within there.
+# openkal-macos 0.21.3 adds the loader's record of the arguments and the
+# environment, for a question asked before its initialiser ran (an initialiser
+# linked ahead of it, as this library's own is in the hosted arrangement).
 # The linker stops naming undefined symbols at twenty unless told otherwise, so
 # it is told.
-expected=$'__dyld_atfork_parent\n__dyld_atfork_prepare\n__dyld_fork_child\n__libc_fork_child\n__libc_fork_parent\n__libc_fork_prepare\n__mach_fork_child\n__malloc_fork_child\n__malloc_fork_parent\n__malloc_fork_prepare\n__pthread_atfork_child\n__pthread_atfork_parent\n__pthread_atfork_prepare\n_clock_gettime_nsec_np\n_pthread_create_from_mach_thread\n_pthread_set_qos_class_self_np\n_pthread_threadid_np\n_sandbox_init_with_parameters'
+expected=$'__NSGetArgc\n__NSGetArgv\n__NSGetEnviron\n__dyld_atfork_parent\n__dyld_atfork_prepare\n__dyld_fork_child\n__libc_fork_child\n__libc_fork_parent\n__libc_fork_prepare\n__mach_fork_child\n__malloc_fork_child\n__malloc_fork_parent\n__malloc_fork_prepare\n__pthread_atfork_child\n__pthread_atfork_parent\n__pthread_atfork_prepare\n_clock_gettime_nsec_np\n_pthread_create_from_mach_thread\n_pthread_set_qos_class_self_np\n_pthread_threadid_np\n_sandbox_init_with_parameters'
 if [ "${triple%%-*}" = arm64 ]; then
-    expected=$'__dyld_atfork_parent\n__dyld_atfork_prepare\n__dyld_fork_child\n__libc_fork_child\n__libc_fork_parent\n__libc_fork_prepare\n__mach_fork_child\n__malloc_fork_child\n__malloc_fork_parent\n__malloc_fork_prepare\n__pthread_atfork_child\n__pthread_atfork_parent\n__pthread_atfork_prepare\n__pthread_self\n_clock_gettime_nsec_np\n_pthread_create_from_mach_thread\n_pthread_get_stackaddr_np\n_pthread_get_stacksize_np\n_pthread_set_qos_class_self_np\n_pthread_threadid_np\n_sandbox_init_with_parameters'
+    expected=$'__NSGetArgc\n__NSGetArgv\n__NSGetEnviron\n__dyld_atfork_parent\n__dyld_atfork_prepare\n__dyld_fork_child\n__libc_fork_child\n__libc_fork_parent\n__libc_fork_prepare\n__mach_fork_child\n__malloc_fork_child\n__malloc_fork_parent\n__malloc_fork_prepare\n__pthread_atfork_child\n__pthread_atfork_parent\n__pthread_atfork_prepare\n__pthread_self\n_clock_gettime_nsec_np\n_pthread_create_from_mach_thread\n_pthread_get_stackaddr_np\n_pthread_get_stacksize_np\n_pthread_set_qos_class_self_np\n_pthread_threadid_np\n_sandbox_init_with_parameters'
 fi
 echo "probe: names this system supplies:"
 printf '  %s\n' $undef
