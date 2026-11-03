@@ -550,14 +550,29 @@ static size_t root_length(const char* name)
 	return 0;
 }
 
+/* A NAME BENEATH A VOLUME (`C:', `C:/...') IS COMPARED AS ITS ENVIRONMENT
+ * COMPARES IT (0.27.0): without regard to case, and with either separator. An
+ * editor names a file `c:/Users/...' where the directory supplied is `C:' or
+ * `C:/Users/...', and the name reached no directory at all. */
+static int same_char(char a, char b, int volume)
+{
+	if (a == b) return 1;
+	if (!volume) return 0;
+	if ((a == '/' || a == '\\') && (b == '/' || b == '\\')) return 1;
+	if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+	if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+	return a == b;
+}
+
 static int is_prefix_at_boundary(const char* name, size_t len, const char* abs)
 {
 	if (len == 0) return 0;
-	for (size_t i = 0; i < len; i++) if (abs[i] != name[i]) return 0;
+	const int volume = len >= 2 && name[1] == ':';
+	for (size_t i = 0; i < len; i++) if (!same_char(abs[i], name[i], volume)) return 0;
 	/* A supplied directory whose own name ends in a separator --- a root, on
 	 * either spelling --- matches without requiring another. */
-	if (name[len - 1] == '/') return 1;
-	return abs[len] == 0 || abs[len] == '/';
+	if (name[len - 1] == '/' || (volume && name[len - 1] == '\\')) return 1;
+	return abs[len] == 0 || abs[len] == '/' || (volume && abs[len] == '\\');
 }
 
 /* Builds an absolute name from a base and a remainder, keeping whatever root

@@ -754,6 +754,14 @@ given the implementation's defaults, the whole file system, so a program given
 read-only directories started programs that could write anywhere.
 `examples/grants` observes it; the control (the grants left out) writes.
 
+**A name beneath a volume is compared as its environment compares it.** On a
+system whose absolute names begin with a volume (`C:`), a name is matched with
+the directories the program holds without regard to case and with either
+separator: an editor names `c:\Users\...` where the directory is `C:` or
+`C:/Users/...`, and such a name reached none of them. `examples/image-names`
+writes a file under one spelling and reads it under the other, as an image on
+Windows.
+
 **A held directory with less, at the program's request** (`<okm_preopen.h>`).
 `okm_preopen_attenuate(name, flags, record)` replaces a directory the program
 holds with the handle `kal_fs_dir_attenuate` derives from it --- read-only,

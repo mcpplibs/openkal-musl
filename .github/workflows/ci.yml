@@ -1290,6 +1290,7 @@ jobs:
   #
   #   image-dlopen            eleven observations of placing another image
   #   image-early-constructor the library is up before a program's constructor
+  #   image-names             a name beneath a volume, spelled as its environment allows
   images:
     name: ok images (built once)
     runs-on: ubuntu-24.04
@@ -1335,12 +1336,14 @@ jobs:
             ( cd examples/image-early-constructor && mcpp build --target "$arch-openkal" )
             ( cd examples/malloc-threads && mcpp build --release --target "$arch-openkal" )
             ( cd examples/strings && mcpp build --target "$arch-openkal" )
+            ( cd examples/image-names && mcpp build --target "$arch-openkal" )
             ( cd bench && mcpp build --release --target "$arch-openkal" )
             cp examples/image-dlopen/plugin/target/"$arch"-openkal/*/bin/libplug.okso "out/$arch/"
             cp examples/image-dlopen/target/"$arch"-openkal/*/bin/image-dlopen.oke "out/$arch/"
             cp examples/image-early-constructor/target/"$arch"-openkal/*/bin/image-early-constructor.oke "out/$arch/"
             cp examples/malloc-threads/target/"$arch"-openkal/*/bin/malloc-threads.oke "out/$arch/"
             cp examples/strings/target/"$arch"-openkal/*/bin/strings.oke "out/$arch/"
+            cp examples/image-names/target/"$arch"-openkal/*/bin/image-names.oke "out/$arch/"
             cp bench/target/"$arch"-openkal/*/bin/bench.oke "out/$arch/"
             cp bench/src/main.c "out/bench.c"
           done
@@ -1414,6 +1417,10 @@ jobs:
           grep -q -- '-- failures: 0 --' malloc-threads.log || { echo "::error::malloc-threads"; exit 1; }
           "$OKRUN" "out/$a/strings.oke" | tr -d '\r' | tee strings.log
           grep -q -- '-- failures: 0 --' strings.log || { echo "::error::strings"; exit 1; }
+          # A NAME BENEATH A VOLUME as its environment spells it (0.27.0): on
+          # Windows, the volume's letter in the other case and either separator.
+          "$OKRUN" "out/$a/image-names.oke" | tr -d '\r' | tee names.log
+          grep -q -- '-- failures: 0 --' names.log || { echo "::error::image-names"; exit 1; }
           grep -q 'the C library was up before the constructor' early.log || { echo "::error::image-early-constructor"; exit 1; }
 
       # THE PRIMITIVES OF THE IMAGE AGAINST THE SYSTEM'S OWN C LIBRARY, on
