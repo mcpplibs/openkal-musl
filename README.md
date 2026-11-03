@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.27.0"
+openkal-musl = "0.27.1"
 ```
 
 > **Engine floor (mcpp 2026.11.2.1):** 0.26.0 embeds its allocator through a
@@ -686,6 +686,16 @@ x86_64; a word at a time, from the aligned word, elsewhere), where musl's own
 compare a byte at a time; the two took 14 % of clangd.okb's time, most of it
 matching command-line options. Every load is aligned to its size, so none
 reaches a page the string does not (`port/src/okm_string.c`).
+
+## The directories a hosted program was granted, on macOS (0.27.1)
+
+Over openkal-macos 0.21.3. On that format initialisers run in link order, and
+this library's own (`port/src/mach/early_init.c`), which reads the program's
+directories, ran before the implementation had recorded the program's
+environment where the hosted arrangement links this library ahead of it: a
+program started with grants read the implementation's defaults instead, the
+whole file system writable. The implementation now takes the environment from
+the loader's record when it is asked first. Nothing in this library changes.
 
 ## The null device, a resolved name, and an image at its base (0.27.0)
 
