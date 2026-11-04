@@ -1,0 +1,17 @@
+[package]
+name = "routing-scratch"
+version = "0.1.0"
+
+[dependencies]
+openkal-musl = { path = "../.." }
+
+[targets.routing-scratch]
+kind = "bin"
+main = "src/main.c"
+
+[build]
+cxx_runtime = "host-coupled"
+
+[target.'cfg(os = "openkal")'.layers]
+compiler-runtime = false
+"c++-abi" = false

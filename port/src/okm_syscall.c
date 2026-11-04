@@ -1547,22 +1547,418 @@ static int ms_of_timespec(const struct timespec* ts)
 	return (int)ms;
 }
 
+/* Large routing scratch belongs only to the calls that use it. Image builds
+ * initialise automatic storage, so placing this union in the public dispatcher
+ * cleared 8 KiB for every read, write and metadata enquiry as well. Keep one
+ * shared slot (including at -O0; see #48), behind a non-inlined call boundary,
+ * and retain the image's automatic initialisation on the paths using it. */
+static __attribute__((__noinline__)) syscall_arg_t do_scratch_call(
+    syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2, syscall_arg_t a3,
+    syscall_arg_t a4, syscall_arg_t a5, syscall_arg_t a6)
+{
+	union { struct okm_at one; struct okm_at two[2]; char block[8192]; } scratch;
+	switch (n) {
+	case SYS_copy_file_range: {
+		const int fd_in = (int)a1, fd_out = (int)a3;
+		int64_t* off_in  = (int64_t*)a2;
+		int64_t* off_out = (int64_t*)a4;
+		size_t   want    = (size_t)a5;
+		const unsigned flags = (unsigned)a6;
+
+		if (flags != 0) return -EINVAL;   /* none are defined */
+		if (want == 0) return 0;
+
+		struct okm_desc* di = okm_desc_of(fd_in);
+		struct okm_desc* dobj = okm_desc_of(fd_out);
+		if (!di || !dobj) return -EBADF;
+		if (di->kind != OKM_FILE || dobj->kind != OKM_FILE) return -EINVAL;
+
+		/* When an offset is given the descriptor's own position is not to
+		 * move, so it is saved and put back. Seeking to learn it is the only
+		 * way to ask, which is why this is done once rather than per block.
+		 *
+		 * kal_u64, NOT uint64_t. `okm_fs_seek' (kal_fs_seek) writes through a
+		 * `kal_u64*', which is `__UINT64_TYPE__' --- the compiler's own
+		 * statement of this target's 64-bit type, and authoritative. Under the
+		 * old LLP64 presentation `uint64_t' happened to be spelled the same
+		 * way, which is what let this file write `uint64_t' here and pass
+		 * unnoticed; under LP64 `uint64_t' is `unsigned long', the same width
+		 * on a target where the declaration holds but a DIFFERENT TYPE from
+		 * `unsigned long long' all the same, and a pointer to one is not a
+		 * pointer to the other. Measured, gcc/mingw: `unsigned long' is not
+		 * even the same WIDTH there (that compiler's `long' is 4 bytes and
+		 * cannot be otherwise), which is a separate and unrelated reason that
+		 * toolchain cannot build this package's declaration at all. */
+		kal_u64 keep_in = 0, keep_out = 0;
+		if (off_in) {
+			if (okm_fs_seek(di->file, 0, SEEK_CUR, &keep_in) != kal_ok) return -EIO;
+			if (okm_fs_seek(di->file, *off_in, SEEK_SET, &(kal_u64){0}) != kal_ok) return -EIO;
+		}
+		if (off_out) {
+			if (okm_fs_seek(dobj->file, 0, SEEK_CUR, &keep_out) != kal_ok) return -EIO;
+			if (okm_fs_seek(dobj->file, *off_out, SEEK_SET, &(kal_u64){0}) != kal_ok) return -EIO;
+		}
+
+		char* const block = scratch.block;
+		size_t done = 0;
+		syscall_arg_t failure = 0;
+
+		while (done < want) {
+			size_t chunk = want - done;
+			if (chunk > sizeof scratch.block) chunk = sizeof scratch.block;
+
+			const syscall_arg_t got = do_read(fd_in, block, chunk);
+			if (got < 0) { failure = got; break; }
+			if (got == 0) break;                 /* end of input */
+
+			const syscall_arg_t put = do_write(fd_out, block, (size_t)got);
+			if (put < 0) { failure = put; break; }
+			done += (size_t)put;
+			if (put < got) { failure = -EIO; break; }
+		}
+
+		if (off_in) {
+			kal_u64 now = 0;
+			okm_fs_seek(di->file, 0, SEEK_CUR, &now);
+			*off_in += (int64_t)done;
+			okm_fs_seek(di->file, (int64_t)keep_in, SEEK_SET, &now);
+		}
+		if (off_out) {
+			kal_u64 now = 0;
+			okm_fs_seek(dobj->file, 0, SEEK_CUR, &now);
+			*off_out += (int64_t)done;
+			okm_fs_seek(dobj->file, (int64_t)keep_out, SEEK_SET, &now);
+		}
+
+		/* A failure after some bytes moved reports the bytes, not the failure:
+		 * the caller resumes from there, and reporting the error would lose
+		 * what had already been written. */
+		if (done > 0) return (syscall_arg_t)done;
+		return failure ? failure : 0;
+	}
+	/* Setting the time a file reports as its last modification.
+	 *
+	 * openkal states the operation on an open file, so the name is opened here
+	 * and released again. It is opened for writing because openkal requires
+	 * that: one of the environments beneath decides at the point of opening
+	 * what may afterwards be done with a file. The consequence is a divergence
+	 * from this interface's own rule --- POSIX asks for ownership and this asks
+	 * for write access --- and it is recorded rather than concealed, in
+	 * musl/PATCHES.md.
+	 *
+	 * Only the modification time is set. openkal reports one time for a file
+	 * and offers to set that one; a request that leaves it alone therefore
+	 * succeeds and does nothing, which is what it asked for. */
+	case SYS_utimensat: {
+		const struct timespec* times = (const struct timespec*)a3;
+		if (times && times[1].tv_nsec == UTIME_OMIT) return 0;
+
+		uint64_t when;
+		if (!times || times[1].tv_nsec == UTIME_NOW) when = kal_time_wall();
+		else when = (uint64_t)times[1].tv_sec * 1000000000u
+		          + (uint64_t)times[1].tv_nsec;
+
+		/* A null name means the descriptor itself, which is how this
+		 * library expresses `futimens'. Then the file is already open and is
+		 * used as it is; a file the caller opened without asking to write it
+		 * is reported as such by the implementation, which is the same answer
+		 * the environment would give. */
+		if (!(const char*)a2) {
+			struct okm_desc* d = okm_desc_of((int)a1);
+			if (!d || d->kind != OKM_FILE) return -EBADF;
+			const int e = okm_fs_set_modified(d->file, when);
+			return e == kal_ok ? 0 : -okm_errno(e);
+		}
+
+		struct okm_at* const at = &scratch.one;
+		{
+			const long r = okm_resolve((int)a1, (const char*)a2, at, 0);
+			if (r) return r;
+		}
+		/* A DIRECTORY COULD NOT HAVE ITS TIME SET, AND IT IS AN ORDINARY
+		 * THING TO WANT.
+		 *
+		 * `KAL_OPEN_READ | KAL_OPEN_WRITE' was asked for unconditionally, and
+		 * an implementation opening a directory for writing refuses --- so this
+		 * answered EISDIR for every directory. Reported by a consumer whose
+		 * lock is a directory it stamps; measured through the C++ library
+		 * above, where BOTH overloads of `last_write_time' report under that
+		 * one name, so the failure read as though READING the time had failed.
+		 * Reading it was never broken.
+		 *
+		 * AND THE OPERATION IS PERFORMABLE. Measured directly against
+		 * openkal-linux: opening the directory with KAL_OPEN_READ succeeds and
+		 * `kal_fs_set_modified' upon it succeeds and the directory's time
+		 * really changes.
+		 *
+		 * WHICH IS OUTSIDE WHAT `fs.h' STATES, AND IS RECORDED RATHER THAN
+		 * CONCEALED. The interface says the file "shall have been opened with
+		 * KAL_OPEN_WRITE", and names `kal_fs_open_dir' --- which yields a
+		 * `kal_dir' --- as the way to open a directory, while
+		 * `kal_fs_set_modified' takes a `kal_file' and has no `kal_dir' form.
+		 * So there is no stated route to a directory's time at all.
+		 *
+		 * ASKED OF THE SPECIFICATION, AND openkal 0.10 ANSWERED IT.
+		 * `kal_fs_set_modified_at' takes a NAME, so a directory is now reached by
+		 * a stated route rather than by opening it for reading and hoping. The
+		 * older way is kept below for a backend that has not followed yet, and is
+		 * tried only where the new operation is absent. */
+		struct kal_node_info kind = { .self_size = sizeof kind };
+		const int ke = okm_fs_info(at->base, at->rel, slen(at->rel), 0,
+		                           KAL_INFO_KIND, &kind);
+		/* AN ENQUIRY THAT CANNOT BE MADE IS NOT AN ANSWER OF `NO', so a build
+		 * without `openkal.fs' asks for what the interface requires and lets the
+		 * open answer, exactly as it did before this enquiry was added. */
+		if (ke != kal_ok && ke != kal_err_not_supported) return -okm_errno(ke);
+		if (ke == kal_ok && kind.kind == kal_node_absent) return -ENOENT;
+		const kal_uintptr want = (ke == kal_ok && kind.kind == kal_node_directory)
+		                       ? KAL_OPEN_READ
+		                       : (KAL_OPEN_READ | KAL_OPEN_WRITE);
+
+		{
+			const int se = okm_fs_set_modified_at(at->base, at->rel,
+			                                      slen(at->rel), when);
+			if (se != kal_err_not_supported)
+				return se == kal_ok ? 0 : -okm_errno(se);
+		}
+
+		struct kal_file f;
+		int e = okm_fs_open(at->base, at->rel, slen(at->rel), want, &f);
+		if (e != kal_ok) return -okm_errno(e);
+		e = okm_fs_set_modified(f, when);
+		okm_fs_close_file(f);
+		return e == kal_ok ? 0 : -okm_errno(e);
+	}
+
+	/* SETTING THE LENGTH OF A FILE BY NAME, WHICH IS A DIFFERENT OPERATION
+	 * FROM SETTING IT BY DESCRIPTOR AND WAS ABSENT.
+	 *
+	 * Only `ftruncate' had a case here, and `truncate' fell to the default arm.
+	 * The two are not interchangeable to a caller that has a name and no open
+	 * file: opening one, truncating it and releasing it is what this case does,
+	 * and a caller cannot do it itself without the descriptor it has not got.
+	 *
+	 * The C++ library above takes the name-shaped one. libc++'s `__resize_file'
+	 * is `detail::truncate(p.c_str(), size)', so `std::filesystem::resize_file'
+	 * reported ENOSYS for every path. Reported in openkal-linux#13.
+	 *
+	 * Opened for reading AND writing rather than for writing alone. openkal
+	 * decides at the point of opening what may afterwards be done with a file,
+	 * and `kal_fs_truncate' is a change --- which is the same reason
+	 * `SYS_utimensat' above opens the way it does. The divergence this produces
+	 * from POSIX, which asks for write permission and not for read, is the one
+	 * already recorded there. */
+	case SYS_truncate: {
+		struct okm_at* const at = &scratch.one;
+		{
+			const long r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
+			if (r) return r;
+		}
+		struct kal_file f;
+		int e = okm_fs_open(at->base, at->rel, slen(at->rel),
+		                    KAL_OPEN_READ | KAL_OPEN_WRITE, &f);
+		if (e != kal_ok) return -okm_errno(e);
+		e = okm_fs_truncate(f, (uint64_t)a2);
+		okm_fs_close_file(f);
+		return e == kal_ok ? 0 : -okm_errno(e);
+	}
+
+	case SYS_mkdirat: {
+		struct okm_at* const at = &scratch.one;
+		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, at, 0);
+		if (r) return r;
+		const int e = okm_fs_mkdir(at->base, at->rel, slen(at->rel));
+		return e == kal_ok ? 0 : -okm_errno(e);
+	}
+#ifdef SYS_mkdir
+	case SYS_mkdir: {
+		struct okm_at* const at = &scratch.one;
+		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
+		if (r) return r;
+		const int e = okm_fs_mkdir(at->base, at->rel, slen(at->rel));
+		return e == kal_ok ? 0 : -okm_errno(e);
+	}
+#endif
+	case SYS_unlinkat: {
+		struct okm_at* const at = &scratch.one;
+		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, at, 0);
+		if (r) return r;
+		const int e = okm_fs_remove(at->base, at->rel, slen(at->rel));
+		return e == kal_ok ? 0 : -okm_errno(e);
+	}
+#ifdef SYS_unlink
+	case SYS_unlink: {
+		struct okm_at* const at = &scratch.one;
+		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
+		if (r) return r;
+		const int e = okm_fs_remove(at->base, at->rel, slen(at->rel));
+		return e == kal_ok ? 0 : -okm_errno(e);
+	}
+#endif
+#ifdef SYS_rmdir
+	case SYS_rmdir: {
+		struct okm_at* const at = &scratch.one;
+		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
+		if (r) return r;
+		const int e = okm_fs_remove(at->base, at->rel, slen(at->rel));
+		return e == kal_ok ? 0 : -okm_errno(e);
+	}
+#endif
+	/* One architecture states only the later of the two. The kernel's table
+	 * grew, and an architecture added after the growth has no number for the
+	 * operation the earlier one named --- so the pair is written as two
+	 * conditionals rather than as one name and an optional second. */
+#ifdef SYS_renameat
+	case SYS_renameat:
+#endif
+#ifdef SYS_renameat2
+	case SYS_renameat2:
+#endif
+	{
+		/* A FLAG IS DONE BY ITS MEANING OR REFUSED, NEVER IGNORED.
+		 *
+		 * Until 0.22.4 the flags word of renameat2 was not read: a
+		 * RENAME_NOREPLACE rename replaced the name it was told to leave,
+		 * and a RENAME_EXCHANGE --- swap two names --- moved the first over
+		 * the second and lost the second's file. Both were reported as
+		 * success. (mcpplibs.os 0.2.1's audit found it; data was lost.)
+		 *
+		 * RENAME_NOREPLACE is kal_fs_rename_flags(KAL_RENAME_NO_REPLACE):
+		 * the test and the rename are one act, as the kernel's are. A volume
+		 * that cannot do it answers kal_err_not_supported, which is EINVAL
+		 * here, the kernel's answer for a flag the file system does not
+		 * support. openkal has no exchange, and the flag cannot be composed
+		 * above it without a moment in which one name is missing; it is
+		 * refused with EINVAL, as is every other bit and every combination
+		 * the kernel refuses. */
+		unsigned long flags = 0;
+#ifdef SYS_renameat2
+		if (n == SYS_renameat2) flags = (unsigned long)a5;
+#endif
+		enum { rename_noreplace = 1 };
+		if (flags & ~(unsigned long)rename_noreplace) return -EINVAL;
+		struct okm_at* const from = &scratch.two[0];
+		struct okm_at* const to   = &scratch.two[1];
+		syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, from, 0);
+		if (r) return r;
+		r = okm_resolve((int)a3, (const char*)a4, to, 0);
+		if (r) return r;
+		if (flags & rename_noreplace) {
+			const int e = okm_fs_rename_flags(from->base, from->rel, slen(from->rel),
+			                                  to->base, to->rel, slen(to->rel),
+			                                  KAL_RENAME_NO_REPLACE);
+			if (e == kal_err_not_supported) return -EINVAL;
+			return e == kal_ok ? 0 : -okm_errno(e);
+		}
+		const int e = okm_fs_rename(from->base, from->rel, slen(from->rel),
+		                            to->base, to->rel, slen(to->rel));
+		return e == kal_ok ? 0 : -okm_errno(e);
+	}
+#ifdef SYS_rename
+	case SYS_rename: {
+		struct okm_at* const from = &scratch.two[0];
+		struct okm_at* const to   = &scratch.two[1];
+		syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, from, 0);
+		if (r) return r;
+		r = okm_resolve(AT_FDCWD, (const char*)a2, to, 0);
+		if (r) return r;
+		const int e = okm_fs_rename(from->base, from->rel, slen(from->rel),
+		                            to->base, to->rel, slen(to->rel));
+		return e == kal_ok ? 0 : -okm_errno(e);
+	}
+#endif
+	case SYS_faccessat:
+#ifdef SYS_faccessat2
+	case SYS_faccessat2:
+#endif
+	{
+		if (okm_null_name((int)a1, (const char*)a2)) return ((int)a3 & X_OK) ? -EACCES : 0;
+		struct okm_at* const at = &scratch.one;
+		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, at, 0);
+		if (r) return r;
+		struct kal_node_info info = { .self_size = sizeof info };
+		const int e = okm_fs_info(at->base, at->rel, slen(at->rel), 0,
+		                          KAL_INFO_KIND | KAL_INFO_WRITABLE
+		                          | KAL_INFO_EXECUTABLE, &info);
+		if (e != kal_ok) return -okm_errno(e);
+		if (info.kind == kal_node_absent) return -ENOENT;
+		if (((int)a3 & W_OK) && !info.writable) return -EACCES;
+		/* Version 0.13: X_OK follows the same field `fstat' now reports.
+		 * Before it, and still where the enquiry does not answer the
+		 * position (a directory, or a volume that does not claim
+		 * KAL_FS_PROP_EXECUTABLE), this answers yes for anything that
+		 * exists --- README.md records both halves. */
+		if (((int)a3 & X_OK) && info.kind != kal_node_directory
+		    && (info.present & KAL_INFO_EXECUTABLE) && !info.executable)
+			return -EACCES;
+		return 0;
+	}
+#ifdef SYS_access
+	case SYS_access: {
+		if (okm_null_name(AT_FDCWD, (const char*)a1)) return ((int)a2 & X_OK) ? -EACCES : 0;
+		struct okm_at* const at = &scratch.one;
+		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
+		if (r) return r;
+		struct kal_node_info info = { .self_size = sizeof info };
+		const int e = okm_fs_info(at->base, at->rel, slen(at->rel), 0,
+		                          KAL_INFO_KIND | KAL_INFO_WRITABLE
+		                          | KAL_INFO_EXECUTABLE, &info);
+		if (e != kal_ok) return -okm_errno(e);
+		if (info.kind == kal_node_absent) return -ENOENT;
+		if (((int)a2 & W_OK) && !info.writable) return -EACCES;
+		if (((int)a2 & X_OK) && info.kind != kal_node_directory
+		    && (info.present & KAL_INFO_EXECUTABLE) && !info.executable)
+			return -EACCES;
+		return 0;
+	}
+#endif
+
+#if defined(SYS_statfs) || defined(SYS_fstatfs)
+	case
+#  ifdef SYS_statfs
+	     SYS_statfs
+#  else
+	     SYS_fstatfs
+#  endif
+	: {
+		struct okm_statfs {
+			unsigned long type, bsize;
+			uint64_t blocks, bfree, bavail, files, ffree;
+			struct { int v[2]; } fsid;
+			unsigned long namelen, frsize, flags, spare[4];
+		}* out = (void*)a2;
+		if (!out) return -EFAULT;
+		struct okm_at* const at = &scratch.one;
+		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
+		if (r) return r;
+		struct kal_dir d;
+		int e = okm_fs_open_dir(at->base, ".", 1, &d);
+		if (e != kal_ok) return -okm_errno(e);
+		kal_u64 total = 0, avail = 0;
+		e = okm_fs_capacity(d, &total, &avail);
+		okm_fs_close_dir(d);
+		if (e != kal_ok) return -okm_errno(e);
+
+		for (unsigned i = 0; i < sizeof *out; i++) ((char*)out)[i] = 0;
+		/* openkal reports BYTES and this record counts blocks, so a block size
+		 * is chosen and the counts are derived from it rather than invented. */
+		out->bsize = out->frsize = OKM_PAGE;
+		out->blocks = total / OKM_PAGE;
+		out->bfree = out->bavail = avail / OKM_PAGE;
+		out->namelen = 255;
+		return 0;
+	}
+#endif
+	default: return -ENOSYS;
+	}
+}
+
 syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
                             syscall_arg_t a3, syscall_arg_t a4, syscall_arg_t a5,
                             syscall_arg_t a6)
 {
 	(void)a5; (void)a6;
-	/* ONE PLACE FOR A RESOLVED NAME, AND NOT ONE PER CASE.
-	 *
-	 * Fifteen cases each declared their own `struct okm_at', which carries a
-	 * whole path, and one declared an 8 KiB copy buffer. An optimising
-	 * compiler gives them one slot because no two are alive at once; an
-	 * unoptimised one gives each its own, and this function's frame was
-	 * 69,008 bytes (`sub rsp, 0x10d90'), measured by the consumer who reported
-	 * mcpplibs/openkal-musl#48 --- a quarter of the stack every thread then
-	 * had, spent by any system call. No case uses two of these at once, so
-	 * they share one union, which is what the optimiser had been doing. */
-	union { struct okm_at one; struct okm_at two[2]; char block[8192]; } scratch;
+
 	switch (n) {
 
 	/* --- transfer --------------------------------------------------------- */
@@ -1722,84 +2118,8 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		out[1] = wfd;
 		return 0;
 	}
-	case SYS_copy_file_range: {
-		const int fd_in = (int)a1, fd_out = (int)a3;
-		int64_t* off_in  = (int64_t*)a2;
-		int64_t* off_out = (int64_t*)a4;
-		size_t   want    = (size_t)a5;
-		const unsigned flags = (unsigned)a6;
-
-		if (flags != 0) return -EINVAL;   /* none are defined */
-		if (want == 0) return 0;
-
-		struct okm_desc* di = okm_desc_of(fd_in);
-		struct okm_desc* dobj = okm_desc_of(fd_out);
-		if (!di || !dobj) return -EBADF;
-		if (di->kind != OKM_FILE || dobj->kind != OKM_FILE) return -EINVAL;
-
-		/* When an offset is given the descriptor's own position is not to
-		 * move, so it is saved and put back. Seeking to learn it is the only
-		 * way to ask, which is why this is done once rather than per block.
-		 *
-		 * kal_u64, NOT uint64_t. `okm_fs_seek' (kal_fs_seek) writes through a
-		 * `kal_u64*', which is `__UINT64_TYPE__' --- the compiler's own
-		 * statement of this target's 64-bit type, and authoritative. Under the
-		 * old LLP64 presentation `uint64_t' happened to be spelled the same
-		 * way, which is what let this file write `uint64_t' here and pass
-		 * unnoticed; under LP64 `uint64_t' is `unsigned long', the same width
-		 * on a target where the declaration holds but a DIFFERENT TYPE from
-		 * `unsigned long long' all the same, and a pointer to one is not a
-		 * pointer to the other. Measured, gcc/mingw: `unsigned long' is not
-		 * even the same WIDTH there (that compiler's `long' is 4 bytes and
-		 * cannot be otherwise), which is a separate and unrelated reason that
-		 * toolchain cannot build this package's declaration at all. */
-		kal_u64 keep_in = 0, keep_out = 0;
-		if (off_in) {
-			if (okm_fs_seek(di->file, 0, SEEK_CUR, &keep_in) != kal_ok) return -EIO;
-			if (okm_fs_seek(di->file, *off_in, SEEK_SET, &(kal_u64){0}) != kal_ok) return -EIO;
-		}
-		if (off_out) {
-			if (okm_fs_seek(dobj->file, 0, SEEK_CUR, &keep_out) != kal_ok) return -EIO;
-			if (okm_fs_seek(dobj->file, *off_out, SEEK_SET, &(kal_u64){0}) != kal_ok) return -EIO;
-		}
-
-		char* const block = scratch.block;
-		size_t done = 0;
-		syscall_arg_t failure = 0;
-
-		while (done < want) {
-			size_t chunk = want - done;
-			if (chunk > sizeof scratch.block) chunk = sizeof scratch.block;
-
-			const syscall_arg_t got = do_read(fd_in, block, chunk);
-			if (got < 0) { failure = got; break; }
-			if (got == 0) break;                 /* end of input */
-
-			const syscall_arg_t put = do_write(fd_out, block, (size_t)got);
-			if (put < 0) { failure = put; break; }
-			done += (size_t)put;
-			if (put < got) { failure = -EIO; break; }
-		}
-
-		if (off_in) {
-			kal_u64 now = 0;
-			okm_fs_seek(di->file, 0, SEEK_CUR, &now);
-			*off_in += (int64_t)done;
-			okm_fs_seek(di->file, (int64_t)keep_in, SEEK_SET, &now);
-		}
-		if (off_out) {
-			kal_u64 now = 0;
-			okm_fs_seek(dobj->file, 0, SEEK_CUR, &now);
-			*off_out += (int64_t)done;
-			okm_fs_seek(dobj->file, (int64_t)keep_out, SEEK_SET, &now);
-		}
-
-		/* A failure after some bytes moved reports the bytes, not the failure:
-		 * the caller resumes from there, and reporting the error would lose
-		 * what had already been written. */
-		if (done > 0) return (syscall_arg_t)done;
-		return failure ? failure : 0;
-	}
+	case SYS_copy_file_range:
+		return do_scratch_call(n, a1, a2, a3, a4, a5, a6);
 	case SYS_lseek: {
 		struct okm_desc* d = okm_desc_of((int)a1);
 		if (!d) return -EBADF;
@@ -1810,133 +2130,10 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		if (e != kal_ok) return -okm_errno(e);
 		return (syscall_arg_t)at;
 	}
-	/* Setting the time a file reports as its last modification.
-	 *
-	 * openkal states the operation on an open file, so the name is opened here
-	 * and released again. It is opened for writing because openkal requires
-	 * that: one of the environments beneath decides at the point of opening
-	 * what may afterwards be done with a file. The consequence is a divergence
-	 * from this interface's own rule --- POSIX asks for ownership and this asks
-	 * for write access --- and it is recorded rather than concealed, in
-	 * musl/PATCHES.md.
-	 *
-	 * Only the modification time is set. openkal reports one time for a file
-	 * and offers to set that one; a request that leaves it alone therefore
-	 * succeeds and does nothing, which is what it asked for. */
-	case SYS_utimensat: {
-		const struct timespec* times = (const struct timespec*)a3;
-		if (times && times[1].tv_nsec == UTIME_OMIT) return 0;
-
-		uint64_t when;
-		if (!times || times[1].tv_nsec == UTIME_NOW) when = kal_time_wall();
-		else when = (uint64_t)times[1].tv_sec * 1000000000u
-		          + (uint64_t)times[1].tv_nsec;
-
-		/* A null name means the descriptor itself, which is how this
-		 * library expresses `futimens'. Then the file is already open and is
-		 * used as it is; a file the caller opened without asking to write it
-		 * is reported as such by the implementation, which is the same answer
-		 * the environment would give. */
-		if (!(const char*)a2) {
-			struct okm_desc* d = okm_desc_of((int)a1);
-			if (!d || d->kind != OKM_FILE) return -EBADF;
-			const int e = okm_fs_set_modified(d->file, when);
-			return e == kal_ok ? 0 : -okm_errno(e);
-		}
-
-		struct okm_at* const at = &scratch.one;
-		{
-			const long r = okm_resolve((int)a1, (const char*)a2, at, 0);
-			if (r) return r;
-		}
-		/* A DIRECTORY COULD NOT HAVE ITS TIME SET, AND IT IS AN ORDINARY
-		 * THING TO WANT.
-		 *
-		 * `KAL_OPEN_READ | KAL_OPEN_WRITE' was asked for unconditionally, and
-		 * an implementation opening a directory for writing refuses --- so this
-		 * answered EISDIR for every directory. Reported by a consumer whose
-		 * lock is a directory it stamps; measured through the C++ library
-		 * above, where BOTH overloads of `last_write_time' report under that
-		 * one name, so the failure read as though READING the time had failed.
-		 * Reading it was never broken.
-		 *
-		 * AND THE OPERATION IS PERFORMABLE. Measured directly against
-		 * openkal-linux: opening the directory with KAL_OPEN_READ succeeds and
-		 * `kal_fs_set_modified' upon it succeeds and the directory's time
-		 * really changes.
-		 *
-		 * WHICH IS OUTSIDE WHAT `fs.h' STATES, AND IS RECORDED RATHER THAN
-		 * CONCEALED. The interface says the file "shall have been opened with
-		 * KAL_OPEN_WRITE", and names `kal_fs_open_dir' --- which yields a
-		 * `kal_dir' --- as the way to open a directory, while
-		 * `kal_fs_set_modified' takes a `kal_file' and has no `kal_dir' form.
-		 * So there is no stated route to a directory's time at all.
-		 *
-		 * ASKED OF THE SPECIFICATION, AND openkal 0.10 ANSWERED IT.
-		 * `kal_fs_set_modified_at' takes a NAME, so a directory is now reached by
-		 * a stated route rather than by opening it for reading and hoping. The
-		 * older way is kept below for a backend that has not followed yet, and is
-		 * tried only where the new operation is absent. */
-		struct kal_node_info kind = { .self_size = sizeof kind };
-		const int ke = okm_fs_info(at->base, at->rel, slen(at->rel), 0,
-		                           KAL_INFO_KIND, &kind);
-		/* AN ENQUIRY THAT CANNOT BE MADE IS NOT AN ANSWER OF `NO', so a build
-		 * without `openkal.fs' asks for what the interface requires and lets the
-		 * open answer, exactly as it did before this enquiry was added. */
-		if (ke != kal_ok && ke != kal_err_not_supported) return -okm_errno(ke);
-		if (ke == kal_ok && kind.kind == kal_node_absent) return -ENOENT;
-		const kal_uintptr want = (ke == kal_ok && kind.kind == kal_node_directory)
-		                       ? KAL_OPEN_READ
-		                       : (KAL_OPEN_READ | KAL_OPEN_WRITE);
-
-		{
-			const int se = okm_fs_set_modified_at(at->base, at->rel,
-			                                      slen(at->rel), when);
-			if (se != kal_err_not_supported)
-				return se == kal_ok ? 0 : -okm_errno(se);
-		}
-
-		struct kal_file f;
-		int e = okm_fs_open(at->base, at->rel, slen(at->rel), want, &f);
-		if (e != kal_ok) return -okm_errno(e);
-		e = okm_fs_set_modified(f, when);
-		okm_fs_close_file(f);
-		return e == kal_ok ? 0 : -okm_errno(e);
-	}
-
-	/* SETTING THE LENGTH OF A FILE BY NAME, WHICH IS A DIFFERENT OPERATION
-	 * FROM SETTING IT BY DESCRIPTOR AND WAS ABSENT.
-	 *
-	 * Only `ftruncate' had a case here, and `truncate' fell to the default arm.
-	 * The two are not interchangeable to a caller that has a name and no open
-	 * file: opening one, truncating it and releasing it is what this case does,
-	 * and a caller cannot do it itself without the descriptor it has not got.
-	 *
-	 * The C++ library above takes the name-shaped one. libc++'s `__resize_file'
-	 * is `detail::truncate(p.c_str(), size)', so `std::filesystem::resize_file'
-	 * reported ENOSYS for every path. Reported in openkal-linux#13.
-	 *
-	 * Opened for reading AND writing rather than for writing alone. openkal
-	 * decides at the point of opening what may afterwards be done with a file,
-	 * and `kal_fs_truncate' is a change --- which is the same reason
-	 * `SYS_utimensat' above opens the way it does. The divergence this produces
-	 * from POSIX, which asks for write permission and not for read, is the one
-	 * already recorded there. */
-	case SYS_truncate: {
-		struct okm_at* const at = &scratch.one;
-		{
-			const long r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
-			if (r) return r;
-		}
-		struct kal_file f;
-		int e = okm_fs_open(at->base, at->rel, slen(at->rel),
-		                    KAL_OPEN_READ | KAL_OPEN_WRITE, &f);
-		if (e != kal_ok) return -okm_errno(e);
-		e = okm_fs_truncate(f, (uint64_t)a2);
-		okm_fs_close_file(f);
-		return e == kal_ok ? 0 : -okm_errno(e);
-	}
-
+	case SYS_utimensat:
+		return do_scratch_call(n, a1, a2, a3, a4, a5, a6);
+	case SYS_truncate:
+		return do_scratch_call(n, a1, a2, a3, a4, a5, a6);
 	case SYS_ftruncate: {
 		struct okm_desc* d = okm_desc_of((int)a1);
 		if (d && d->kind == OKM_NULL) return -EINVAL;
@@ -2005,156 +2202,34 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 #endif
 	case SYS_getdents64: return do_getdents((int)a1, (void*)a2, (size_t)a3);
 
-	case SYS_mkdirat: {
-		struct okm_at* const at = &scratch.one;
-		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, at, 0);
-		if (r) return r;
-		const int e = okm_fs_mkdir(at->base, at->rel, slen(at->rel));
-		return e == kal_ok ? 0 : -okm_errno(e);
-	}
+	case SYS_mkdirat:
 #ifdef SYS_mkdir
-	case SYS_mkdir: {
-		struct okm_at* const at = &scratch.one;
-		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
-		if (r) return r;
-		const int e = okm_fs_mkdir(at->base, at->rel, slen(at->rel));
-		return e == kal_ok ? 0 : -okm_errno(e);
-	}
+	case SYS_mkdir:
 #endif
-	case SYS_unlinkat: {
-		struct okm_at* const at = &scratch.one;
-		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, at, 0);
-		if (r) return r;
-		const int e = okm_fs_remove(at->base, at->rel, slen(at->rel));
-		return e == kal_ok ? 0 : -okm_errno(e);
-	}
+	case SYS_unlinkat:
 #ifdef SYS_unlink
-	case SYS_unlink: {
-		struct okm_at* const at = &scratch.one;
-		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
-		if (r) return r;
-		const int e = okm_fs_remove(at->base, at->rel, slen(at->rel));
-		return e == kal_ok ? 0 : -okm_errno(e);
-	}
+	case SYS_unlink:
 #endif
 #ifdef SYS_rmdir
-	case SYS_rmdir: {
-		struct okm_at* const at = &scratch.one;
-		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
-		if (r) return r;
-		const int e = okm_fs_remove(at->base, at->rel, slen(at->rel));
-		return e == kal_ok ? 0 : -okm_errno(e);
-	}
+	case SYS_rmdir:
 #endif
-	/* One architecture states only the later of the two. The kernel's table
-	 * grew, and an architecture added after the growth has no number for the
-	 * operation the earlier one named --- so the pair is written as two
-	 * conditionals rather than as one name and an optional second. */
 #ifdef SYS_renameat
 	case SYS_renameat:
 #endif
 #ifdef SYS_renameat2
 	case SYS_renameat2:
 #endif
-	{
-		/* A FLAG IS DONE BY ITS MEANING OR REFUSED, NEVER IGNORED.
-		 *
-		 * Until 0.22.4 the flags word of renameat2 was not read: a
-		 * RENAME_NOREPLACE rename replaced the name it was told to leave,
-		 * and a RENAME_EXCHANGE --- swap two names --- moved the first over
-		 * the second and lost the second's file. Both were reported as
-		 * success. (mcpplibs.os 0.2.1's audit found it; data was lost.)
-		 *
-		 * RENAME_NOREPLACE is kal_fs_rename_flags(KAL_RENAME_NO_REPLACE):
-		 * the test and the rename are one act, as the kernel's are. A volume
-		 * that cannot do it answers kal_err_not_supported, which is EINVAL
-		 * here, the kernel's answer for a flag the file system does not
-		 * support. openkal has no exchange, and the flag cannot be composed
-		 * above it without a moment in which one name is missing; it is
-		 * refused with EINVAL, as is every other bit and every combination
-		 * the kernel refuses. */
-		unsigned long flags = 0;
-#ifdef SYS_renameat2
-		if (n == SYS_renameat2) flags = (unsigned long)a5;
-#endif
-		enum { rename_noreplace = 1 };
-		if (flags & ~(unsigned long)rename_noreplace) return -EINVAL;
-		struct okm_at* const from = &scratch.two[0];
-		struct okm_at* const to   = &scratch.two[1];
-		syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, from, 0);
-		if (r) return r;
-		r = okm_resolve((int)a3, (const char*)a4, to, 0);
-		if (r) return r;
-		if (flags & rename_noreplace) {
-			const int e = okm_fs_rename_flags(from->base, from->rel, slen(from->rel),
-			                                  to->base, to->rel, slen(to->rel),
-			                                  KAL_RENAME_NO_REPLACE);
-			if (e == kal_err_not_supported) return -EINVAL;
-			return e == kal_ok ? 0 : -okm_errno(e);
-		}
-		const int e = okm_fs_rename(from->base, from->rel, slen(from->rel),
-		                            to->base, to->rel, slen(to->rel));
-		return e == kal_ok ? 0 : -okm_errno(e);
-	}
 #ifdef SYS_rename
-	case SYS_rename: {
-		struct okm_at* const from = &scratch.two[0];
-		struct okm_at* const to   = &scratch.two[1];
-		syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, from, 0);
-		if (r) return r;
-		r = okm_resolve(AT_FDCWD, (const char*)a2, to, 0);
-		if (r) return r;
-		const int e = okm_fs_rename(from->base, from->rel, slen(from->rel),
-		                            to->base, to->rel, slen(to->rel));
-		return e == kal_ok ? 0 : -okm_errno(e);
-	}
+	case SYS_rename:
 #endif
 	case SYS_faccessat:
 #ifdef SYS_faccessat2
 	case SYS_faccessat2:
 #endif
-	{
-		if (okm_null_name((int)a1, (const char*)a2)) return ((int)a3 & X_OK) ? -EACCES : 0;
-		struct okm_at* const at = &scratch.one;
-		const syscall_arg_t r = okm_resolve((int)a1, (const char*)a2, at, 0);
-		if (r) return r;
-		struct kal_node_info info = { .self_size = sizeof info };
-		const int e = okm_fs_info(at->base, at->rel, slen(at->rel), 0,
-		                          KAL_INFO_KIND | KAL_INFO_WRITABLE
-		                          | KAL_INFO_EXECUTABLE, &info);
-		if (e != kal_ok) return -okm_errno(e);
-		if (info.kind == kal_node_absent) return -ENOENT;
-		if (((int)a3 & W_OK) && !info.writable) return -EACCES;
-		/* Version 0.13: X_OK follows the same field `fstat' now reports.
-		 * Before it, and still where the enquiry does not answer the
-		 * position (a directory, or a volume that does not claim
-		 * KAL_FS_PROP_EXECUTABLE), this answers yes for anything that
-		 * exists --- README.md records both halves. */
-		if (((int)a3 & X_OK) && info.kind != kal_node_directory
-		    && (info.present & KAL_INFO_EXECUTABLE) && !info.executable)
-			return -EACCES;
-		return 0;
-	}
 #ifdef SYS_access
-	case SYS_access: {
-		if (okm_null_name(AT_FDCWD, (const char*)a1)) return ((int)a2 & X_OK) ? -EACCES : 0;
-		struct okm_at* const at = &scratch.one;
-		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
-		if (r) return r;
-		struct kal_node_info info = { .self_size = sizeof info };
-		const int e = okm_fs_info(at->base, at->rel, slen(at->rel), 0,
-		                          KAL_INFO_KIND | KAL_INFO_WRITABLE
-		                          | KAL_INFO_EXECUTABLE, &info);
-		if (e != kal_ok) return -okm_errno(e);
-		if (info.kind == kal_node_absent) return -ENOENT;
-		if (((int)a2 & W_OK) && !info.writable) return -EACCES;
-		if (((int)a2 & X_OK) && info.kind != kal_node_directory
-		    && (info.present & KAL_INFO_EXECUTABLE) && !info.executable)
-			return -EACCES;
-		return 0;
-	}
+	case SYS_access:
 #endif
-
+		return do_scratch_call(n, a1, a2, a3, a4, a5, a6);
 	/* Version 0.13. `chmod' and `fchmodat' both name a path, and `do_chmod'
 	 * above states the judgement. `fchmod' names a descriptor instead, and
 	 * this port has no name for one: a regular file's own name is not kept
@@ -3153,34 +3228,8 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 #  else
 	     SYS_fstatfs
 #  endif
-	: {
-		struct okm_statfs {
-			unsigned long type, bsize;
-			uint64_t blocks, bfree, bavail, files, ffree;
-			struct { int v[2]; } fsid;
-			unsigned long namelen, frsize, flags, spare[4];
-		}* out = (void*)a2;
-		if (!out) return -EFAULT;
-		struct okm_at* const at = &scratch.one;
-		const syscall_arg_t r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
-		if (r) return r;
-		struct kal_dir d;
-		int e = okm_fs_open_dir(at->base, ".", 1, &d);
-		if (e != kal_ok) return -okm_errno(e);
-		kal_u64 total = 0, avail = 0;
-		e = okm_fs_capacity(d, &total, &avail);
-		okm_fs_close_dir(d);
-		if (e != kal_ok) return -okm_errno(e);
-
-		for (unsigned i = 0; i < sizeof *out; i++) ((char*)out)[i] = 0;
-		/* openkal reports BYTES and this record counts blocks, so a block size
-		 * is chosen and the counts are derived from it rather than invented. */
-		out->bsize = out->frsize = OKM_PAGE;
-		out->blocks = total / OKM_PAGE;
-		out->bfree = out->bavail = avail / OKM_PAGE;
-		out->namelen = 255;
-		return 0;
-	}
+	:
+		return do_scratch_call(n, a1, a2, a3, a4, a5, a6);
 #endif
 
 #ifdef SYS_prlimit64

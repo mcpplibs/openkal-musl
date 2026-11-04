@@ -160,7 +160,9 @@ void okm_mutex_unlock(volatile kal_u32* word)
 static volatile kal_u32 g_lock;
 
 #define OKM_SETTLING_MAX 32   /* see `desc_release' */
+static int g_settling_n;
 static int take_settling(struct okm_desc* mine);
+static void unlock_settling(void);
 static void close_owned(const struct okm_desc* p);
 
 void okm_lock(void) { okm_mutex_lock(&g_lock, OKM_STAT_FD_LOCK_WAITS); }
@@ -169,10 +171,10 @@ void okm_lock(void) { okm_mutex_lock(&g_lock, OKM_STAT_FD_LOCK_WAITS); }
  * it (`desc_release' below). */
 void okm_unlock(void)
 {
-	struct okm_desc mine[OKM_SETTLING_MAX];
-	const int n = take_settling(mine);
-	okm_mutex_unlock(&g_lock);
-	for (int i = 0; i < n; i++) close_owned(&mine[i]);
+	/* The count is read while g_lock is still held. Most releases have
+	 * nothing to close and need neither a 10 KiB array nor its initialisation. */
+	if (!g_settling_n) { okm_mutex_unlock(&g_lock); return; }
+	unlock_settling();
 }
 
 /* --- the table ------------------------------------------------------------ */
@@ -229,7 +231,6 @@ static int path_slot_alloc(void)
  * are places here closes the rest under the lock, as every close was made
  * before 0.26.0. */
 static struct { kal_uintptr owner; struct okm_desc d; } g_settling[OKM_SETTLING_MAX];
-static int g_settling_n;
 
 static void close_owned(const struct okm_desc* p)
 {
@@ -266,6 +267,16 @@ static int take_settling(struct okm_desc* mine)
 		g_settling[i] = g_settling[--g_settling_n];
 	}
 	return n;
+}
+
+/* Draining remains under the lock; resource closes remain after its release.
+ * Do not inline: the array must not become part of the empty fast path. */
+static __attribute__((__noinline__)) void unlock_settling(void)
+{
+	struct okm_desc mine[OKM_SETTLING_MAX];
+	const int n = take_settling(mine);
+	okm_mutex_unlock(&g_lock);
+	for (int i = 0; i < n; i++) close_owned(&mine[i]);
 }
 
 static void desc_release(int d)
@@ -748,7 +759,7 @@ int okm_absolute(int dirfd, const char* path, char* out, size_t cap)
 	return join(g_dirpath[d->path_slot], path, out, cap);
 }
 
-int okm_null_name(int dirfd, const char* path)
+static __attribute__((__noinline__)) int null_name_resolved(int dirfd, const char* path)
 {
 	static const char name[] = "/dev/null";
 	if (!path || !*path) return 0;
@@ -756,6 +767,26 @@ int okm_null_name(int dirfd, const char* path)
 	if (okm_absolute(dirfd, path, abs, sizeof abs) != 0) return 0;
 	for (size_t i = 0; i < sizeof name; i++) if (abs[i] != name[i]) return 0;
 	return 1;
+}
+
+int okm_null_name(int dirfd, const char* path)
+{
+	if (!path || !*path) return 0;
+	size_t length = 0;
+	while (length < OKM_MAX_PATH && path[length]) length++;
+	if (length == OKM_MAX_PATH) return 0;
+	const char* end = path + length;
+	/* Treat both separator spellings conservatively, even where a backslash
+	 * is literal. An ordinary final component survives normalisation; dots
+	 * may expose a component of the cwd or dirfd and need full resolution. */
+	while (end > path && (end[-1] == '/' || end[-1] == '\\')) end--;
+	const char* last = end;
+	while (last > path && last[-1] != '/' && last[-1] != '\\') last--;
+	const size_t n = (size_t)(end - last);
+	if (n && !(n == 4 && !memcmp(last, "null", 4))
+	    && !(n == 1 && last[0] == '.')
+	    && !(n == 2 && last[0] == '.' && last[1] == '.')) return 0;
+	return null_name_resolved(dirfd, path);
 }
 
 /* Every stream this image holds, released --- used by the one place that has an
