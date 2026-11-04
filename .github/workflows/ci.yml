@@ -1279,6 +1279,7 @@ jobs:
   #   image-dlopen            eleven observations of placing another image
   #   image-early-constructor the library is up before a program's constructor
   #   image-names             a name beneath a volume, spelled as its environment allows
+  #   routing-scratch         mutations, copy offsets, null names and concurrent closes
   images:
     name: ok images (built once)
     runs-on: ubuntu-24.04
@@ -1325,6 +1326,7 @@ jobs:
             ( cd examples/malloc-threads && mcpp build --release --target "$arch-openkal" )
             ( cd examples/strings && mcpp build --target "$arch-openkal" )
             ( cd examples/image-names && mcpp build --target "$arch-openkal" )
+            ( cd examples/routing-scratch && mcpp build --release --target "$arch-openkal" )
             ( cd bench && mcpp build --release --target "$arch-openkal" )
             cp examples/image-dlopen/plugin/target/"$arch"-openkal/*/bin/libplug.okso "out/$arch/"
             cp examples/image-dlopen/target/"$arch"-openkal/*/bin/image-dlopen.oke "out/$arch/"
@@ -1332,6 +1334,7 @@ jobs:
             cp examples/malloc-threads/target/"$arch"-openkal/*/bin/malloc-threads.oke "out/$arch/"
             cp examples/strings/target/"$arch"-openkal/*/bin/strings.oke "out/$arch/"
             cp examples/image-names/target/"$arch"-openkal/*/bin/image-names.oke "out/$arch/"
+            cp examples/routing-scratch/target/"$arch"-openkal/*/bin/routing-scratch.oke "out/$arch/"
             cp bench/target/"$arch"-openkal/*/bin/bench.oke "out/$arch/"
             cp bench/src/main.c "out/bench.c"
           done
@@ -1409,6 +1412,8 @@ jobs:
           # Windows, the volume's letter in the other case and either separator.
           "$OKRUN" "out/$a/image-names.oke" | tr -d '\r' | tee names.log
           grep -q -- '-- failures: 0 --' names.log || { echo "::error::image-names"; exit 1; }
+          "$OKRUN" "out/$a/routing-scratch.oke" | tr -d '\r' | tee routing-scratch.log
+          grep -q -- '-- failures: 0 --' routing-scratch.log || { echo "::error::routing-scratch"; exit 1; }
           grep -q 'the C library was up before the constructor' early.log || { echo "::error::image-early-constructor"; exit 1; }
 
       # THE PRIMITIVES OF THE IMAGE AGAINST THE SYSTEM'S OWN C LIBRARY, on
