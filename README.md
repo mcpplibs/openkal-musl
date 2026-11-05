@@ -731,10 +731,12 @@ anything is compiled, naming the layer, rather than failing at the link with
 `kal_fs_resolved_name`), where musl asked of each component whether it is a
 link: in a language server's session, 872 000 enquiries where the program of the
 environment made 353 000. A name with a `.` or `..` component or a separator at
-the end, a volume that does not state `KAL_FS_PROP_RESOLVED_NAME`, and a runner
-of openkal 0.22 (the name is referenced weakly) are answered by musl's walk as
-before; `/dev/null` is answered with itself (`port/src/okm_realpath.c`,
-`musl/PATCHES.md`).
+the end, an operation returning `kal_err_not_supported`, and a runner of openkal
+0.22 (the name is referenced weakly) are answered by musl's walk as before;
+`/dev/null` is answered with itself (`port/src/okm_realpath.c`, `musl/PATCHES.md`).
+From 0.27.6 the port calls the optional operation directly, without a separate
+directory-property enquiry. It preserves the operation's errors and still
+resolves each name; it does not cache a path's answer.
 
 **An image's `dlopen` places it at its base** where the image states one and the
 implementation places memory where it is asked (`kal_exec_alloc_at`, weakly);
