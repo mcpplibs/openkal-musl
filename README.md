@@ -8,8 +8,11 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.27.3"
+openkal-musl = "0.27.7"
 ```
+
+Linux builds select openkal-linux 0.24.2; image bindings select openkal-ld 0.4.5.
+The openkal interface remains 0.23.0.
 
 > **Engine floor (mcpp 2026.11.2.1):** 0.26.0 embeds its allocator through a
 > dependency edge's `embed` and `exclude` (mcpp's design of 2026-11-02, part 3
