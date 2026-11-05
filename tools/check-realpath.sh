@@ -8,6 +8,7 @@ out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
 for absent in 0 1; do
     "$cc" -std=gnu11 -O2 -I"$here/port/src" -iquote "$here/port/include" -I"$spec/include" \
+        -include "$here/tools/check-realpath-host.h" \
         -D__okm_realpath=okm_test_realpath -DREALPATH_ABSENT="$absent" \
         "$here/port/src/okm_realpath.c" "$here/tools/check-realpath.c" \
         -o "$out/check-$absent"
