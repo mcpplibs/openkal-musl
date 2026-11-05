@@ -12,10 +12,11 @@
  * musl/src/misc/realpath.c asks here first (musl/PATCHES.md). A name is
  * answered here when it has no `.' or `..' component and does not end in a
  * separator, so that resolving it lexically, as okm_resolve does, and
- * following its links agree; when its volume states KAL_FS_PROP_RESOLVED_NAME;
- * and when the runner beneath binds the name (it is referenced weakly, so that
- * an image of this library runs on a runner of openkal 0.22). Otherwise zero,
- * and musl's walk answers as before.
+ * following its links agree; and when the operation answers it. The entry is
+ * referenced weakly so an image also runs on a runner of openkal 0.22. An
+ * absent entry or kal_err_not_supported leaves musl's walk to answer as before.
+ * The operation reports that absence itself (openkal.fs), so querying all of
+ * the directory's properties first adds an enquiry without changing the answer.
  */
 #include "okm.h"
 #include <openkal/fs.h>
@@ -53,7 +54,6 @@ long __okm_realpath(const char *name, char *out, size_t cap)
 	if (!kal_fs_resolved_name) return 0;
 	struct okm_at at;
 	if (okm_resolve(AT_FDCWD, name, &at, 0) != 0) return 0;
-	if (!(kal_fs_props(at.base) & KAL_FS_PROP_RESOLVED_NAME)) return 0;
 	const kal_intptr n = kal_fs_resolved_name(at.base, at.rel, at.len, out, cap);
 	if (n == -(kal_intptr)kal_err_not_supported) return 0;
 	if (n < 0) return -okm_errno((int)-n);

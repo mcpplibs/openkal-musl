@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.27.5"
+version     = "0.27.6"
 # `embed' and `exclude' on a dependency edge (the allocator, below) are mcpp
 # 2026.11.2.1's; an older engine refuses the edge rather than building a C
 # library without its allocator.
