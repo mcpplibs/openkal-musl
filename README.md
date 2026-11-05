@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.27.7"
+openkal-musl = "0.28.0"
 ```
 
 Linux builds select openkal-linux 0.24.2; image bindings select openkal-ld 0.4.5.
@@ -1004,3 +1004,10 @@ is not one this package can ask.
 
 The port is Apache-2.0. The vendored musl sources under `musl/` are MIT, and
 `musl/COPYRIGHT` is unchanged.
+
+## OpenKal 0.24 dependency group
+
+Version 0.28.0 selects OpenKal 0.24, Linux 0.25, macOS 0.22, Windows 0.20
+and image bindings 0.5. The C library retains its existing POSIX surface and
+allocator choices. Declared process units are supplied by the kernel-ABI
+implementation or image runner beneath it.
