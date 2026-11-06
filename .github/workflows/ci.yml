@@ -832,6 +832,16 @@ jobs:
           bash tools/run-probe.sh examples/mmap mmap
           grep -q -- '-- failures: 0 --' examples/mmap/run.log
 
+      # A DIRECTORY'S NAME IS KEPT WHOLE OR NOT AT ALL (0.28.1, #83): names
+      # longer than the descriptor table's slot are resolved through the
+      # directory, never through a truncated prefix. port/src/okm_fd.c.
+      - name: Directories named by more than 511 bytes are resolved through their whole names
+        env:
+          MCPP_TARGET: ${{ matrix.target }}
+        run: |
+          bash tools/run-probe.sh examples/long-names long-names
+          grep -q -- '-- failures: 0 --' examples/long-names/run.log
+
       # A LOCK HELD BY THE OPEN FILE: flock, and fcntl's F_OFD_SETLK, over
       # kal_fs_lock, whose holder is the open file. A second open of the file is
       # the other holder. port/src/okm_syscall.c, SYS_flock and SYS_fcntl.

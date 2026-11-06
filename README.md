@@ -8,11 +8,13 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.28.0"
+openkal-musl = "0.28.1"
 ```
 
-Linux builds select openkal-linux 0.25.0; image bindings select openkal-ld 0.5.0.
-The OpenKal interface is 0.24.0.
+The package states compatible ranges for the packages beneath it: OpenKal ^0.24,
+Linux ^0.25, macOS ^0.22, Windows ^0.20 and image bindings ^0.5. A target that
+selects openkal-platform receives the exact versions of its version group; any
+other build receives the newest compatible release, recorded in `mcpp.lock`.
 
 > **Engine floor (mcpp 2026.11.2.1):** 0.26.0 embeds its allocator through a
 > dependency edge's `embed` and `exclude` (mcpp's design of 2026-11-02, part 3
@@ -1006,6 +1008,16 @@ The port is Apache-2.0. The vendored musl sources under `musl/` are MIT, and
 `musl/COPYRIGHT` is unchanged.
 
 ## OpenKal 0.24 dependency group
+
+Version 0.28.1 keeps a directory's absolute name whole at any length. A name
+of 512 bytes or more was kept truncated, and a relative name opened through
+the directory's descriptor was resolved against the truncated prefix
+(mcpplibs/openkal-musl#83). A name that cannot be kept now leaves the
+directory's name unknown: names beneath it are resolved through its handle,
+an ascending name is refused, and `fchdir` to it reports `ENOMEM`. The
+`long-names` probe covers names across the boundary, relative creation,
+`fstatat`, `renameat`, ascent, `fchdir`, a decoy named by the truncated prefix,
+and removal through descriptors. The dependencies are compatible ranges.
 
 Version 0.28.0 selects OpenKal 0.24, Linux 0.25, macOS 0.22, Windows 0.20
 and image bindings 0.5. The C library retains its existing POSIX surface and
