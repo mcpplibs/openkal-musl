@@ -181,8 +181,18 @@ void okm_unlock(void)
 
 static struct okm_desc g_desc[OKM_MAX_DESC];
 static struct { int desc; int cloexec; } g_fd[OKM_MAX_FD];
-static char g_dirpath[OKM_MAX_DIRS][OKM_DIR_PATH];
-static int  g_dirpath_used[OKM_MAX_DIRS];
+/* A DIRECTORY'S ABSOLUTE NAME, WHOLE OR NOT AT ALL.
+ *
+ * A name shorter than OKM_DIR_PATH is kept in its slot; a longer one in memory
+ * of its own length. A name that cannot be kept leaves the slot empty, which
+ * makes the directory one whose name is unknown: a name beneath it is resolved
+ * through its handle, and a name that ascends from it is refused. A truncated
+ * prefix is never kept, because joining a relative name to it names another
+ * file (mcpplibs/openkal-musl#83). */
+static char   g_dirpath[OKM_MAX_DIRS][OKM_DIR_PATH];
+static char*  g_dirlong[OKM_MAX_DIRS];
+static size_t g_dirlong_size[OKM_MAX_DIRS];
+static int    g_dirpath_used[OKM_MAX_DIRS];
 
 /* THE THREE STREAMS THE PROGRAM WAS STARTED WITH, KEPT BECAUSE A LATER
  * QUESTION IS ABOUT HISTORY RATHER THAN ABOUT THE PRESENT.
@@ -218,6 +228,23 @@ static int path_slot_alloc(void)
 	for (int i = 0; i < OKM_MAX_DIRS; i++)
 		if (!g_dirpath_used[i]) { g_dirpath_used[i] = 1; g_dirpath[i][0] = 0; return i; }
 	return -1;
+}
+
+/* Under okm_lock. */
+static void path_slot_clear(int slot)
+{
+	if (g_dirlong[slot]) okm_kal_free(g_dirlong[slot], g_dirlong_size[slot], 1);
+	g_dirlong[slot] = 0;
+	g_dirlong_size[slot] = 0;
+	g_dirpath[slot][0] = 0;
+}
+
+/* The directory's whole absolute name, or 0 when it is not known. */
+static const char* dir_name(const struct okm_desc* d)
+{
+	if (d->path_slot < 0) return 0;
+	if (g_dirlong[d->path_slot]) return g_dirlong[d->path_slot];
+	return g_dirpath[d->path_slot][0] ? g_dirpath[d->path_slot] : 0;
 }
 
 /* WHAT A DESCRIPTION OWNS, CLOSED AFTER THE LOCK IS RELEASED.
@@ -295,7 +322,7 @@ static void desc_release(int d)
 		}
 		else close_owned(p);
 	}
-	if (p->path_slot >= 0) g_dirpath_used[p->path_slot] = 0;
+	if (p->path_slot >= 0) { path_slot_clear(p->path_slot); g_dirpath_used[p->path_slot] = 0; }
 	p->kind = OKM_FREE; p->iter = 0; p->iter_open = 0; p->path_slot = -1;
 	p->pending = 0; p->sock = -1; p->ahead = 0; p->ahead_eof = 0;
 }
@@ -657,8 +684,8 @@ int okm_resolve(int dirfd, const char* path, struct okm_at* at, int empty_ok)
 	} else {
 		struct okm_desc* d = okm_desc_of(dirfd);
 		if (!d || d->kind != OKM_DIR) return -ENOTDIR;
-		if (d->path_slot >= 0 && g_dirpath[d->path_slot][0]) {
-			const int r = join(g_dirpath[d->path_slot], path, buf, sizeof buf);
+		if (dir_name(d)) {
+			const int r = join(dir_name(d), path, buf, sizeof buf);
 			if (r) return r;
 			have_abs = 1;
 		} else {
@@ -711,7 +738,15 @@ void okm_dir_remember(int fd, const char* abs)
 	if (!d || d->kind != OKM_DIR) return;
 	if (d->path_slot < 0) d->path_slot = path_slot_alloc();
 	if (d->path_slot < 0) return;
-	copy_str(g_dirpath[d->path_slot], abs, __builtin_strlen(abs), OKM_DIR_PATH);
+	const int slot = d->path_slot;
+	path_slot_clear(slot);
+	const size_t n = __builtin_strlen(abs);
+	if (n < OKM_DIR_PATH) { copy_str(g_dirpath[slot], abs, n, OKM_DIR_PATH); return; }
+	char* whole = kal_alloc(n + 1, 1);
+	if (!whole) return;
+	__builtin_memcpy(whole, abs, n + 1);
+	g_dirlong[slot] = whole;
+	g_dirlong_size[slot] = n + 1;
 }
 
 int okm_chdir(int dirfd, const char* path)
@@ -731,10 +766,12 @@ int okm_chdir(int dirfd, const char* path)
 		struct okm_desc* d = okm_desc_of(dirfd);
 		if (!d || d->kind != OKM_DIR) return -ENOTDIR;
 		target = d->dir;
-		if (d->path_slot >= 0 && g_dirpath[d->path_slot][0])
-			copy_str(abs, g_dirpath[d->path_slot], __builtin_strlen(g_dirpath[d->path_slot]), sizeof abs);
-		else
-			copy_str(abs, g_cwd, __builtin_strlen(g_cwd), sizeof abs);
+		/* A working directory is named by every relative name the program
+		 * passes afterwards, so one whose name is not known cannot become it:
+		 * keeping the previous name would resolve those names elsewhere. */
+		const char* name = dir_name(d);
+		if (!name) return -ENOMEM;
+		copy_str(abs, name, __builtin_strlen(name), sizeof abs);
 		/* The directory is now referred to twice; the description keeps its
 		 * own handle and the working directory takes another by opening it
 		 * through itself. */
@@ -755,8 +792,8 @@ int okm_absolute(int dirfd, const char* path, char* out, size_t cap)
 	if (dirfd == AT_FDCWD) return join(g_cwd, path, out, cap);
 	struct okm_desc* d = okm_desc_of(dirfd);
 	if (!d || d->kind != OKM_DIR) return -ENOTDIR;
-	if (d->path_slot < 0 || !g_dirpath[d->path_slot][0]) return -ENOENT;
-	return join(g_dirpath[d->path_slot], path, out, cap);
+	if (!dir_name(d)) return -ENOENT;
+	return join(dir_name(d), path, out, cap);
 }
 
 static __attribute__((__noinline__)) int null_name_resolved(int dirfd, const char* path)
