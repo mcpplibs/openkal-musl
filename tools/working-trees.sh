@@ -108,8 +108,10 @@ satisfies() {   # satisfies <required> <actual> --- caret, for 0.x and above
 in_step() {   # in_step <package> <tree>
     local pkg="$1" tree="$2"
     local want actual
-    want="$(sed -n "s/^$pkg *= *\"\([0-9.]*\)\".*/\1/p;
-                    s/^$pkg *= *{.*version *= *\"\([0-9.]*\)\".*/\1/p" \
+    # A requirement is a caret range, written `^0.24.0' or as the bare
+    # `0.24.0'; `satisfies' reads either the same way.
+    want="$(sed -n "s/^$pkg *= *\"^\{0,1\}\([0-9.]*\)\".*/\1/p;
+                    s/^$pkg *= *{.*version *= *\"^\{0,1\}\([0-9.]*\)\".*/\1/p" \
                  "$here/mcpp.toml" | head -1)"
     actual="$(sed -n 's/^version *= *"\([0-9.]*\)".*/\1/p' "$tree/mcpp.toml" | head -1)"
     if [ -z "$want" ] || [ -z "$actual" ]; then
