@@ -11,6 +11,8 @@ main = "src/main.c"
 
 [build]
 cxx_runtime = "host-coupled"
+# The mtest protocol writer the bench reports through (tests/mtest_protocol.h).
+include_dirs = ["../tests"]
 
 # The image form: the platform states everything an image needs but its C
 # library, which is this package, here by path. A C program has no C++

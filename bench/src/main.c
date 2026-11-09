@@ -25,7 +25,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
-#include "../../tests/mtest_protocol.h"
+#include "mtest_protocol.h"   /* tests/, named by the build */
 
 static double g_run_ns = 40e6;
 

@@ -925,7 +925,7 @@ jobs:
           set -euo pipefail
           ( cd bench && mcpp build --release )
           this="$(cd bench && bash ../tools/one-artifact.sh bench)"
-          cc -O2 -pthread -o bench-system bench/src/main.c
+          cc -O2 -pthread -I tests -o bench-system bench/src/main.c
           for i in 1 2 3; do ./bench-system > "system-$i.txt"; "bench/$this" > "this-$i.txt"; done
           bash tools/bench-compare.sh --report system-1.txt,system-2.txt,system-3.txt this-1.txt,this-2.txt,this-3.txt
           # Once more under the test runner: each measured primitive is a case
@@ -1422,6 +1422,7 @@ jobs:
             cp examples/routing-scratch/target/"$arch"-openkal/*/bin/routing-scratch.oke "out/$arch/"
             cp bench/target/"$arch"-openkal/*/bin/bench.oke "out/$arch/"
             cp bench/src/main.c "out/bench.c"
+            cp tests/mtest_protocol.h out/
           done
           (cd out && sha256sum */* | tee SHA256SUMS)
       - uses: actions/upload-artifact@v4
@@ -1515,6 +1516,6 @@ jobs:
           a='${{ matrix.arch }}'
           for i in 1 2 3; do "$OKRUN" "out/$a/bench.oke" | tr -d '\r' > "image-$i.txt"; done
           if [ '${{ runner.os }}' = Windows ]; then cat image-1.txt; exit 0; fi
-          cc -O2 -pthread -o bench-system out/bench.c
+          cc -O2 -pthread -I out -o bench-system out/bench.c
           for i in 1 2 3; do ./bench-system > "system-$i.txt"; done
           bash tools/bench-compare.sh --report system-1.txt,system-2.txt,system-3.txt image-1.txt,image-2.txt,image-3.txt
