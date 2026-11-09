@@ -1017,8 +1017,9 @@ OpenSBI 0.9.
 the list separator and the program suffixes from the system the implementation
 names (`kal_env_system`, openkal clause 11 entry 30). Where it is `windows`, PATH
 is split on a semicolon, a name holding a backslash or a volume is not searched
-for, and in each entry the name is tried as given and then with each suffix
-`PATHEXT` lists, in its order (`.COM;.EXE;.BAT;.CMD` where it is not set). Every
+for, and in each entry a name that carries a suffix is tried as given and a name
+without one with each suffix `PATHEXT` lists, in its order (`.COM;.EXE;.BAT;.CMD`
+where it is not set), as Windows' command interpreter searches. Every
 other system keeps POSIX's colon and no suffix. Until 0.29.0 the entries were
 split on a colon everywhere, and musl's own `execvp` is now replaced too, so the
 two ways of searching agree.

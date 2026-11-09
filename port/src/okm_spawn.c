@@ -729,9 +729,10 @@ weak_alias(__posix_spawn, posix_spawn);
  * without the suffix it is stored with. openkal states which system's
  * conventions a program follows (`kal_env_system', SPEC.md clause 11 entry
  * 30). Where it says `windows', PATH is split on a semicolon, a name with a
- * backslash or a volume is not searched for, and in each entry the name is
- * tried as given and then with each suffix PATHEXT lists, in its order
- * (`.COM;.EXE;.BAT;.CMD' where it is not set), as Windows tries them. Every
+ * backslash or a volume is not searched for, and in each entry a name that
+ * carries a suffix is tried as given and a name without one with each suffix
+ * PATHEXT lists, in its order (`.COM;.EXE;.BAT;.CMD' where it is not set), as
+ * Windows tries them. Every
  * other system keeps POSIX's colon and no suffix. `execvp', `execvpe' and
  * `execlp' search through the same function below (musl's execvp.c is
  * replaced too), so the two ways of searching for one program agree. */
@@ -785,6 +786,16 @@ static int search_path(const char* file, okm_attempt attempt, void* ctx)
 	const char sep = win ? ';' : ':';
 	const char* suffixes = win ? getenv("PATHEXT") : "";
 	if (!suffixes) suffixes = ".COM;.EXE;.BAT;.CMD";
+	/* WINDOWS' OWN RULE, AS ITS COMMAND INTERPRETER SEARCHES: a name that
+	 * carries a suffix is tried as given and with no other; a name without one
+	 * is tried only with each suffix. Trying a bare name first is not merely
+	 * redundant there: a file `foo' that is not a program, in an earlier entry,
+	 * answers ENOEXEC and would end the search before `foo.exe'. Elsewhere the
+	 * name is tried as given and there are no suffixes. */
+	int with_suffix = 0;
+	for (const char* s = file; *s; s++) if (*s == '.') with_suffix = 1;
+	const int as_given = !win || with_suffix;
+	if (win && with_suffix) suffixes = "";
 
 	const size_t k = slen(file);
 	if (k > NAME_MAX) return ENAMETOOLONG;
@@ -794,12 +805,11 @@ static int search_path(const char* file, okm_attempt attempt, void* ctx)
 		const char* z = p;
 		while (*z && *z != sep) z++;
 		const size_t n = (size_t)(z - p);
-		/* The name as given, then with each suffix the system lists, which
-		 * is none on a system that does not suffix its programs. */
+		/* The name as given, or with each suffix the system lists. */
 		for (const char* x = NULL; ; ) {
 			size_t m = 0;
 			if (x) while (x[m] && x[m] != ';') m++;
-			if (!x || m) {
+			if (x ? m != 0 : as_given) {
 				const int e = search_one(p, n, file, k, x, m, attempt, ctx);
 				if (!e) return 0;
 				if (e == EACCES) seen_eacces = 1;
