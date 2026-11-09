@@ -99,3 +99,19 @@ grep -qE '^-- failures: 0 --$' run.log \
 ! grep -q '^FAIL:' run.log \
     || { echo "::error::$name reported a failure"; exit 1; }
 echo "  ok  $name: every observation held"
+
+# AND BY THE TEST PROTOCOL WHERE A RUNNER IS NAMED (MTEST, an mtest engine).
+# The probe speaks the protocol itself (tests/mtest_protocol.h): its program is
+# one case of kind `cts', each observation a part of it. It runs a second time,
+# under the runner, which keeps the run in its store (`.mtest' in the probe's
+# directory) for the job's report; the run above is the text verdict, which is
+# kept as it was. The runner's verdict is required too.
+if [ -n "${MTEST:-}" ]; then
+    # shellcheck disable=SC2068
+    if ! watch 180 "$MTEST" run --jobs 1 --group "${MTEST_GROUP:-${GITHUB_RUN_ID:-local}}" -- "$(cd "$(dirname "$binary")" && pwd)/$(basename "$binary")" $@; then
+        echo "::error::$name failed under the test runner"
+        "$MTEST" explain 2>&1 | head -60 || true
+        exit 1
+    fi
+    echo "  ok  $name: and under the test runner"
+fi

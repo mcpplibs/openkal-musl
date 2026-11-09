@@ -21,10 +21,12 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "../../../tests/mtest_protocol.h"
 
 static int failures;
 static void check(int ok, const char* what)
 {
+	mtp_observe(what, ok);
 	printf("%s %s\n", ok ? "ok  " : "FAIL", what);
 	if (!ok) failures++;
 }
@@ -61,6 +63,8 @@ static int remove_tree(int parent, const char* name)
 
 int main(void)
 {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("long-names")) return 0;
 	char root[PATH_MAX];
 	check(getcwd(root, sizeof root) != 0, "the working directory is known");
 	const char* top = "okm-long-names.tmp";

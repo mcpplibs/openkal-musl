@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include "../../../tests/mtest_protocol.h"
 
 enum { PAGE = 4096 };
 
@@ -28,6 +29,7 @@ static int failures;
 
 static void fail(const char* what, size_t n)
 {
+	mtp_observe(what, 0);
 	printf("FAIL: %s (%zu)\n", what, n);
 	++failures;
 }
@@ -118,9 +120,12 @@ static void reallocation(void)
 
 int main(void)
 {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("malloc-large")) return 0;
 	mapping_tail();
 	growth();
 	reallocation();
+	mtp_observe("every observation of the probe held", failures == 0);
 	printf("-- failures: %d --\n", failures);
 	return failures == 0 ? 0 : 1;
 }

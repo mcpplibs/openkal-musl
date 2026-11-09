@@ -12,9 +12,11 @@
 #include <pthread.h>
 #include <dlfcn.h>
 #include <time.h>
+#include "../../../tests/mtest_protocol.h"
 
 static int failures = 0;
 static void check(int ok, const char *what) {
+	mtp_observe(what, ok);
 	if (!ok) { printf("FAIL: %s\n", what); failures++; }
 	else printf("ok: %s\n", what);
 }
@@ -22,6 +24,8 @@ static void check(int ok, const char *what) {
 static void *thread_fn(void *arg) { return arg; }
 
 int main(void) {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("link-stubs")) return 0;
 	check(fmax(1.0, 2.0) == 2.0, "fmax");
 
 	pthread_t t;

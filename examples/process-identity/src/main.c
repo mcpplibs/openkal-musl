@@ -24,11 +24,13 @@
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "../../../tests/mtest_protocol.h"
 
 extern char** environ;
 static int failures;
 static void check(int ok, const char* what)
 {
+	mtp_observe(what, ok);
 	printf("%s %s\n", ok ? "ok  " : "FAIL", what);
 	if (!ok) failures++;
 }
@@ -74,6 +76,8 @@ static int status_of(pid_t pid)
 
 int main(int argc, char** argv)
 {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("process-identity")) return 0;
 	if (argc == 4 && strcmp(argv[1], "--ask") == 0) return ask(argv[2], argv[3]);
 	if (argc == 2 && strcmp(argv[1], "--sleep") == 0) { sleep(30); return 0; }
 

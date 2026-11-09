@@ -14,10 +14,12 @@
 #include <stdio.h>
 #include <sys/file.h>
 #include <unistd.h>
+#include "../../../tests/mtest_protocol.h"
 
 static int failures;
 static void check(int ok, const char* what)
 {
+	mtp_observe(what, ok);
 	printf("%s %s\n", ok ? "ok  " : "FAIL", what);
 	if (!ok) failures++;
 }
@@ -32,6 +34,8 @@ static int ofd(int fd, int type)
 
 int main(void)
 {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("locks")) return 0;
 	const char* name = "okm-locks-probe.tmp";
 	int a = open(name, O_RDWR | O_CREAT | O_TRUNC, 0644);
 	int b = open(name, O_RDWR);

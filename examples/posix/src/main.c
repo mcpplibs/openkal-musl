@@ -16,9 +16,11 @@
 #include <sys/wait.h>
 #include <spawn.h>
 #include <sys/syscall.h>
+#include "../../../tests/mtest_protocol.h"
 
 static int failures = 0;
 static void check(int ok, const char *what) {
+	mtp_observe(what, ok);
 	if (!ok) { printf("FAIL: %s (errno=%d)\n", what, errno); failures++; }
 	else printf("ok: %s\n", what);
 }
@@ -55,6 +57,8 @@ static void *cv_waiter(void *p) {
 }
 
 int main(int argc, char **argv, char **envp) {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("posix")) return 0;
 	/* The copy this program starts, so that openkal.process is observed by its
 	 * effect rather than by its return value. */
 	for (int i = 1; i < argc; i++)

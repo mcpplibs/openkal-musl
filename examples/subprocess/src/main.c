@@ -73,6 +73,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "../../../tests/mtest_protocol.h"
 
 extern char** environ;
 
@@ -96,6 +97,7 @@ static int failures = 0;
 
 static void check(int ok, const char* what)
 {
+	mtp_observe(what, ok);
 	if (!ok) { printf("FAIL: %s (errno=%d)\n", what, errno); failures++; }
 	else printf("ok: %s\n", what);
 }
@@ -265,6 +267,8 @@ static void wait_for(pid_t pid)
 
 int main(int argc, char** argv)
 {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("subprocess")) return 0;
 	setbuf(stdout, NULL);
 
 	if (child_mode(argc, argv) == 0) return 0;

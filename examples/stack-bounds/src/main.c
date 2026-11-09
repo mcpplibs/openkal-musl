@@ -25,6 +25,7 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
+#include "../../../tests/mtest_protocol.h"
 
 static int holds(void* base, size_t size, void* here)
 {
@@ -60,6 +61,8 @@ static void* body(void* arg)
 
 int main(void)
 {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("stack-bounds")) return 0;
 	int failures = 0;
 
 	/* The first context: the region contains the context that asked. */
@@ -112,6 +115,8 @@ int main(void)
 	int refused = pthread_getattr_np(t, &other) == ENOSYS;
 	if (!refused) { puts("FAIL: another thread was answered rather than refused"); ++failures; }
 	printf("stack bounds: another thread refused=%d\n", refused);
+
+	mtp_observe("every observation of the probe held", failures == 0);
 
 	printf("-- failures: %d --\n", failures);
 	return failures == 0 ? 0 : 1;

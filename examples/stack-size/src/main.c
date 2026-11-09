@@ -25,12 +25,14 @@
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "../../../tests/mtest_protocol.h"
 
 extern char** environ;
 
 static int failures = 0;
 
 static void check(int ok, const char* what) {
+	mtp_observe(what, ok);
     printf("%s %s\n", ok ? "  ok  " : "  FAIL", what);
     if (!ok) failures++;
 }
@@ -104,6 +106,8 @@ static void* touch_below(void* unused) {
 }
 
 int main(int argc, char** argv) {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("stack-size")) return 0;
     setvbuf(stdout, NULL, _IONBF, 0);
     if (argc > 1 && strcmp(argv[1], "touch-below") == 0) {
         pthread_t t;
