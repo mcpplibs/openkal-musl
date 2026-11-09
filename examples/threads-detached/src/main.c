@@ -20,6 +20,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <time.h>
+#include "../../../tests/mtest_protocol.h"
 
 enum { DETACHED = 8 };
 
@@ -59,6 +60,8 @@ static void pause_briefly(void)
 
 int main(void)
 {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("threads-detached")) return 0;
 	int failures = 0;
 
 	pthread_attr_t attr;
@@ -93,6 +96,8 @@ int main(void)
 	printf("joinable: its error value %ld, destructor ran %d time(s)\n", (long)result, destroyed);
 	if ((long)result != 7) { puts("FAIL: the joinable thread's error value"); ++failures; }
 	if (destroyed != 1) { puts("FAIL: the key's destructor"); ++failures; }
+
+	mtp_observe("every observation of the probe held", failures == 0);
 
 	printf("-- failures: %d --\n", failures);
 	return failures == 0 ? 0 : 1;

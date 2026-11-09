@@ -212,14 +212,14 @@ the working directory, and `posix_spawnp("sh", …)` started `./sh`, failed, and
 `__posix_spawn` per entry, by musl's own rules — and `__posix_spawn` now refuses
 an attribute function it does not recognise rather than ignoring one.
 
-**Including musl's entry separator, which is a colon on every target and is
-the wrong one for exactly one of them.** One environment separates its own PATH
-with a semicolon and begins each entry with a volume letter and a colon, so
-reading that PATH on a colon produces entries that are not names. It is still a
-colon here because `execvp` — which this port does **not** replace — splits on
-one in musl's own source, and having the two ways of searching for one program
-disagree with each other is worse for a caller than having both wrong the same
-way. Nothing on that target searches a PATH today: its CI row declares no shell.
+**And the list separator and the program suffixes are the system's (0.29.0).**
+They were musl's colon on every target, which is wrong for one: Windows separates
+its PATH with a semicolon, begins each entry with a volume letter and a colon,
+and names a program without the suffix it is stored with. `port/src/okm_spawn.c`
+now takes both from the system the implementation names (`kal_env_system`), and
+`src/process/execvp.c` is excluded so that `execvp`, `execvpe` and `execlp`
+search through the same function as `posix_spawnp`: the two ways of searching for
+one program still agree, and now agree with the system.
 
 `src/thread/__unmapself.c` moves to a 256-byte stack shared by every exiting
 thread before it makes the two calls that end a detached one. On Linux the thread

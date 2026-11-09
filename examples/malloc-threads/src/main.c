@@ -20,11 +20,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include "../../../tests/mtest_protocol.h"
 
 static int failures;
 static pthread_mutex_t report = PTHREAD_MUTEX_INITIALIZER;
 static void check(int ok, const char* what)
 {
+	mtp_observe(what, ok);
 	pthread_mutex_lock(&report);
 	printf("%s %s\n", ok ? "ok  " : "FAIL", what);
 	if (!ok) failures++;
@@ -112,6 +114,8 @@ static void* bench(void* arg)
 
 int main(void)
 {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("malloc-threads")) return 0;
 	/* Three generations of four workers: each generation's caches go back to
 	 * mallocng when its threads end. */
 	long bad = 0;

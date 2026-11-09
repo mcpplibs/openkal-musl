@@ -1867,6 +1867,46 @@ static __attribute__((__noinline__)) syscall_arg_t do_scratch_call(
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 #endif
+	/* A SECOND NAME FOR A FILE (0.29.0), over kal_fs_hard_link (openkal
+	 * 0.25). `linkat' with no flags, as the implementations call the kernel:
+	 * a final link of the first name receives the second name itself, and
+	 * every flag --- AT_SYMLINK_FOLLOW, AT_EMPTY_PATH --- is refused, since
+	 * openkal has no operation that follows or names a descriptor. The
+	 * refusals are the kernel's words for them: a directory is EPERM, two
+	 * volumes are EXDEV, and a volume that keeps one name per file is
+	 * ENOTSUP, which kal_err_not_supported is told apart from EXDEV by
+	 * asking the volume whether it claims second names. */
+#ifdef SYS_linkat
+	case SYS_linkat:
+#endif
+#ifdef SYS_link
+	case SYS_link:
+#endif
+	{
+		int fa = AT_FDCWD, fb = AT_FDCWD;
+		const char* na = (const char*)a1;
+		const char* nb = (const char*)a2;
+#ifdef SYS_linkat
+		if (n == SYS_linkat) {
+			if ((int)a5 != 0) return -EINVAL;
+			fa = (int)a1; na = (const char*)a2;
+			fb = (int)a3; nb = (const char*)a4;
+		}
+#endif
+		struct okm_at* const from = &scratch.two[0];
+		struct okm_at* const to   = &scratch.two[1];
+		syscall_arg_t r = okm_resolve(fa, na, from, 0);
+		if (r) return r;
+		r = okm_resolve(fb, nb, to, 0);
+		if (r) return r;
+		const int e = okm_fs_hard_link(from->base, from->rel, slen(from->rel),
+		                               to->base, to->rel, slen(to->rel));
+		if (e == kal_ok) return 0;
+		if (e == kal_err_is_directory) return -EPERM;
+		if (e == kal_err_not_supported)
+			return (okm_fs_props(to->base) & KAL_FS_PROP_HARD_LINKS) ? -EXDEV : -ENOTSUP;
+		return -okm_errno(e);
+	}
 	case SYS_faccessat:
 #ifdef SYS_faccessat2
 	case SYS_faccessat2:
@@ -2221,6 +2261,12 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 #endif
 #ifdef SYS_rename
 	case SYS_rename:
+#endif
+#ifdef SYS_linkat
+	case SYS_linkat:
+#endif
+#ifdef SYS_link
+	case SYS_link:
 #endif
 	case SYS_faccessat:
 #ifdef SYS_faccessat2

@@ -16,9 +16,11 @@
 #include <sys/wait.h>
 #include <spawn.h>
 #include <sys/syscall.h>
+#include "../../../tests/mtest_protocol.h"
 
 static int failures = 0;
 static void check(int ok, const char *what) {
+	mtp_observe(what, ok);
 	if (!ok) { printf("FAIL: %s (errno=%d)\n", what, errno); failures++; }
 	else printf("ok: %s\n", what);
 }
@@ -55,6 +57,8 @@ static void *cv_waiter(void *p) {
 }
 
 int main(int argc, char **argv, char **envp) {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("posix")) return 0;
 	/* The copy this program starts, so that openkal.process is observed by its
 	 * effect rather than by its return value. */
 	for (int i = 1; i < argc; i++)
@@ -212,6 +216,54 @@ int main(int argc, char **argv, char **envp) {
 		check(r == 0 ? first_byte("okm-rn-c.tmp") == 'a' && access("okm-rn-a.tmp", F_OK) != 0 : errno == EINVAL,
 		      "renameat2 RENAME_NOREPLACE onto a free name renames, or says the volume cannot");
 		unlink("okm-rn-a.tmp"); unlink("okm-rn-b.tmp"); unlink("okm-rn-c.tmp");
+	}
+
+	/* A second name for a file (0.29.0, over kal_fs_hard_link): both names
+	 * reach one file, removing one leaves the other, and each refusal is the
+	 * kernel's word for it. The probe's directory is a local volume, which
+	 * keeps several names for one file on every row. */
+	{
+		unlink("okm-ln-a.tmp"); unlink("okm-ln-b.tmp");
+		const int fa = open("okm-ln-a.tmp", O_CREAT | O_WRONLY | O_TRUNC, 0644);
+		check(fa >= 0 && write(fa, "l", 1) == 1, "a file is written for link");
+		close(fa);
+		check(link("okm-ln-a.tmp", "okm-ln-b.tmp") == 0, "link gives the file a second name");
+		struct stat sa, sb;
+		check(stat("okm-ln-a.tmp", &sa) == 0 && stat("okm-ln-b.tmp", &sb) == 0
+		      && sa.st_ino == sb.st_ino && first_byte("okm-ln-b.tmp") == 'l',
+		      "and the two names are one file");
+		errno = 0;
+		check(link("okm-ln-a.tmp", "okm-ln-b.tmp") == -1 && errno == EEXIST,
+		      "a second name that is taken is EEXIST");
+		errno = 0;
+		check(linkat(AT_FDCWD, "okm-ln-a.tmp", AT_FDCWD, "okm-ln-c.tmp", AT_SYMLINK_FOLLOW) == -1
+		      && errno == EINVAL, "linkat with a flag is EINVAL");
+		check(mkdir("okm-ln.dir", 0755) == 0, "a directory is made for link");
+		errno = 0;
+		check(link("okm-ln.dir", "okm-ln-d.tmp") == -1 && errno == EPERM,
+		      "a directory is given no second name, and that is EPERM");
+		rmdir("okm-ln.dir");
+		check(unlink("okm-ln-a.tmp") == 0 && first_byte("okm-ln-b.tmp") == 'l',
+		      "removing one name leaves the file under the other");
+		unlink("okm-ln-b.tmp");
+	}
+
+	/* A program named without a separator is looked for in PATH by POSIX's
+	 * colon on this system (0.29.0 takes the separator from kal_env_system;
+	 * nothing changes on a system that is not Windows). The first entry is
+	 * one that does not exist, so the search has to go on to the next. */
+	if (access("/usr/bin/true", X_OK) == 0 || access("/bin/true", X_OK) == 0) {
+		const char *saved = getenv("PATH");
+		char keep[4096];
+		snprintf(keep, sizeof keep, "%s", saved ? saved : "");
+		setenv("PATH", "/okm-absent-dir:/usr/bin:/bin", 1);
+		pid_t pid = -1;
+		char *av[] = { "true", NULL };
+		const int e = posix_spawnp(&pid, "true", NULL, NULL, av, environ);
+		int status = -1;
+		check(e == 0 && waitpid(pid, &status, 0) == pid && WIFEXITED(status) && WEXITSTATUS(status) == 0,
+		      "posix_spawnp finds a program past an entry that does not exist");
+		if (saved) setenv("PATH", keep, 1); else unsetenv("PATH");
 	}
 
 	/* time */

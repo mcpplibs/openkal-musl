@@ -22,10 +22,12 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include "../../../tests/mtest_protocol.h"
 
 static int failures;
 static void check(int ok, const char* what)
 {
+	mtp_observe(what, ok);
 	printf("%s %s\n", ok ? "ok  " : "FAIL", what);
 	if (!ok) failures++;
 }
@@ -34,6 +36,8 @@ static unsigned char pattern(size_t i) { return (unsigned char)((i * 7 + 3) % 25
 
 int main(void)
 {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("mmap")) return 0;
 	const char* name = "okm-mmap-probe.tmp";
 	const size_t size = 3 * 65536 + 1000;
 	int fd = open(name, O_RDWR | O_CREAT | O_TRUNC, 0644);

@@ -24,11 +24,13 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include "../../../tests/mtest_protocol.h"
 
 static int failures = 0;
 
 static void check(int ok, const char* what)
 {
+	mtp_observe(what, ok);
 	if (!ok) { printf("FAIL: %s (errno=%d)\n", what, errno); failures++; }
 	else printf("ok: %s\n", what);
 }
@@ -45,6 +47,8 @@ static void loopback(struct sockaddr_in* a, unsigned short port)
 
 int main(void)
 {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("net")) return 0;
 	/* Unbuffered, so that a run that stops says how far it got. */
 	setbuf(stdout, NULL);
 

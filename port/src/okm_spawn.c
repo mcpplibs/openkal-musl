@@ -711,10 +711,10 @@ weak_alias(__posix_spawn, posix_spawn);
  * taken as a path relative to the working directory. `posix_spawnp("sh", …)'
  * started `./sh', which is not there, and reported SUCCESS.
  *
- * ⇒ The search is performed here, one `__posix_spawn' per entry, which is the
- * arrangement musl's own `__execvpe' uses one `execve' per entry for. It works
- * for the same reason that one now works: `__posix_spawn' reports a name it
- * cannot start rather than starting something that ends with 127.
+ * ⇒ The search is performed here, one `__posix_spawn' per candidate, which is
+ * the arrangement musl's own `__execvpe' uses one `execve' per entry for. It
+ * works for the same reason that one now works: `__posix_spawn' reports a name
+ * it cannot start rather than starting something that ends with 127.
  *
  * The rules are musl's, so that a program moved onto this port meets the answer
  * it met before: a name containing a separator is not searched for; an empty
@@ -722,60 +722,102 @@ weak_alias(__posix_spawn, posix_spawn);
  * reported only if nothing is found; and any other error ends the search at
  * once, because it is not evidence about the next entry.
  *
- * INCLUDING THE ENTRY SEPARATOR, WHICH IS A COLON ON EVERY TARGET AND IS THE
- * WRONG ONE FOR EXACTLY ONE OF THEM.
- *
- * One environment separates its own PATH with a semicolon and begins each entry
- * with a volume letter and a colon, so a colon-separated reading of its PATH
- * produces entries that are not names. The reason it is still a colon here is
- * that `execvp' --- which this port does NOT replace, and which reaches
- * `execve' --- splits on a colon in musl's own source. Splitting differently in
- * this function would make the two ways of searching for one program disagree
- * with each other, which is a worse thing for a caller to meet than one that is
- * wrong in a way both share. Recorded in musl/PATCHES.md; the CI row for that
- * environment declares no shell, so nothing there searches a PATH today. */
-int __posix_spawnp(pid_t* restrict res, const char* restrict file,
-                   const posix_spawn_file_actions_t* fa,
-                   const posix_spawnattr_t* restrict attr,
-                   char* const argv[restrict], char* const envp[restrict])
+ * THE LIST SEPARATOR AND THE PROGRAM SUFFIXES ARE THE SYSTEM'S (0.29.0).
+ * Until 0.29.0 the entries were split on a colon on every target, which is the
+ * wrong separator for one system: Windows separates PATH with a semicolon and
+ * begins each entry with a volume letter and a colon, and names a program
+ * without the suffix it is stored with. openkal states which system's
+ * conventions a program follows (`kal_env_system', SPEC.md clause 11 entry
+ * 30). Where it says `windows', PATH is split on a semicolon, a name with a
+ * backslash or a volume is not searched for, and in each entry a name that
+ * carries a suffix is tried as given and a name without one with each suffix
+ * PATHEXT lists, in its order (`.COM;.EXE;.BAT;.CMD' where it is not set), as
+ * Windows tries them. Every
+ * other system keeps POSIX's colon and no suffix. `execvp', `execvpe' and
+ * `execlp' search through the same function below (musl's execvp.c is
+ * replaced too), so the two ways of searching for one program agree. */
+
+/* Whether the system's conventions are Windows'. Asked once; two contexts
+ * that ask at once both write the same answer. */
+static int windows_conventions(void)
 {
-	if (!res || !file) return EINVAL;
+	static volatile int known = -1;
+	if (known < 0) {
+		char name[16];
+		const kal_intptr n = kal_env_system(name, sizeof name);
+		known = n == 7 && memcmp(name, "windows", 7) == 0;
+	}
+	return known;
+}
+
+typedef int (*okm_attempt)(const char* candidate, void* ctx);
+
+/* One attempt, answering an errno value: 0 when the candidate was started. */
+static int search_one(const char* dir, size_t n, const char* file, size_t k,
+                      const char* suffix, size_t m, okm_attempt attempt, void* ctx)
+{
+	char cand[OKM_MAX_PATH];
+	/* A candidate that cannot be joined is skipped rather than truncated: a
+	 * truncated name is a different name and might exist. */
+	if (n + (n ? 1 : 0) + k + m + 1 > sizeof cand) return ENOENT;
+	size_t o = 0;
+	for (size_t i = 0; i < n; i++) cand[o++] = dir[i];
+	if (o) cand[o++] = '/';
+	for (size_t i = 0; i < k; i++) cand[o++] = file[i];
+	for (size_t i = 0; i < m; i++) cand[o++] = suffix[i];
+	cand[o] = 0;
+	return attempt(cand, ctx);
+}
+
+/* Searches the PATH for `file' by the system's conventions, attempting each
+ * candidate in turn; answers 0 when one was started, or the errno value. */
+static int search_path(const char* file, okm_attempt attempt, void* ctx)
+{
 	if (!*file) return ENOENT;
+	const int win = windows_conventions();
 
 	for (const char* s = file; *s; s++)
-		if (*s == '/') return __posix_spawn(res, file, fa, attr, argv, envp);
+		if (*s == '/' || (win && (*s == '\\' || *s == ':'))) return attempt(file, ctx);
 
 	const char* path = getenv("PATH");
 	/* musl's own default, and it is here for the same reason it is there: a
 	 * program that never set PATH still has somewhere to be looked for. */
-	if (!path) path = "/usr/local/bin:/bin:/usr/bin";
+	if (!path) path = win ? "" : "/usr/local/bin:/bin:/usr/bin";
+	const char sep = win ? ';' : ':';
+	const char* suffixes = win ? getenv("PATHEXT") : "";
+	if (!suffixes) suffixes = ".COM;.EXE;.BAT;.CMD";
+	/* WINDOWS' OWN RULE, AS ITS COMMAND INTERPRETER SEARCHES: a name that
+	 * carries a suffix is tried as given and with no other; a name without one
+	 * is tried only with each suffix. Trying a bare name first is not merely
+	 * redundant there: a file `foo' that is not a program, in an earlier entry,
+	 * answers ENOEXEC and would end the search before `foo.exe'. Elsewhere the
+	 * name is tried as given and there are no suffixes. */
+	int with_suffix = 0;
+	for (const char* s = file; *s; s++) if (*s == '.') with_suffix = 1;
+	const int as_given = !win || with_suffix;
+	if (win && with_suffix) suffixes = "";
 
 	const size_t k = slen(file);
 	if (k > NAME_MAX) return ENAMETOOLONG;
-
-	/* ON THE STACK, WHICH IS WHAT musl DOES TOO (a variable-length array of
-	 * the same bound). The static buffers above are under this file's lock and
-	 * this function runs before it is taken --- a static here would be a race
-	 * between two contexts searching at once, which is worse than a frame. */
-	char cand[OKM_MAX_PATH];
 	int seen_eacces = 0;
 
 	for (const char* p = path; ; ) {
 		const char* z = p;
-		while (*z && *z != ':') z++;
+		while (*z && *z != sep) z++;
 		const size_t n = (size_t)(z - p);
-		/* An entry that cannot be joined to the name is skipped rather than
-		 * truncated: a truncated name is a different name and might exist. */
-		if (n + (n ? 1 : 0) + k + 1 <= sizeof cand) {
-			size_t o = 0;
-			for (size_t i = 0; i < n; i++) cand[o++] = p[i];
-			if (o) cand[o++] = '/';
-			for (size_t i = 0; i <= k; i++) cand[o + i] = file[i];
-
-			const int e = __posix_spawn(res, cand, fa, attr, argv, envp);
-			if (!e) return 0;
-			if (e == EACCES) seen_eacces = 1;
-			else if (e != ENOENT && e != ENOTDIR) return e;
+		/* The name as given, or with each suffix the system lists. */
+		for (const char* x = NULL; ; ) {
+			size_t m = 0;
+			if (x) while (x[m] && x[m] != ';') m++;
+			if (x ? m != 0 : as_given) {
+				const int e = search_one(p, n, file, k, x, m, attempt, ctx);
+				if (!e) return 0;
+				if (e == EACCES) seen_eacces = 1;
+				else if (e != ENOENT && e != ENOTDIR) return e;
+			}
+			if (!x) x = suffixes;
+			else { x += m; if (*x) x++; }
+			if (!*x) break;
 		}
 		if (!*z) break;
 		p = z + 1;
@@ -783,4 +825,59 @@ int __posix_spawnp(pid_t* restrict res, const char* restrict file,
 	return seen_eacces ? EACCES : ENOENT;
 }
 
+struct spawn_request {
+	pid_t* res;
+	const posix_spawn_file_actions_t* fa;
+	const posix_spawnattr_t* attr;
+	char* const* argv;
+	char* const* envp;
+};
+
+static int attempt_spawn(const char* candidate, void* ctx)
+{
+	const struct spawn_request* r = ctx;
+	return __posix_spawn(r->res, candidate, r->fa, r->attr, r->argv, r->envp);
+}
+
+int __posix_spawnp(pid_t* restrict res, const char* restrict file,
+                   const posix_spawn_file_actions_t* fa,
+                   const posix_spawnattr_t* restrict attr,
+                   char* const argv[restrict], char* const envp[restrict])
+{
+	if (!res || !file) return EINVAL;
+	struct spawn_request r = { res, fa, attr, argv, envp };
+	return search_path(file, attempt_spawn, &r);
+}
+
 weak_alias(__posix_spawnp, posix_spawnp);
+
+/* `execvp' and `execvpe' search by the same function (0.29.0); musl's
+ * execvp.c is excluded. `execve' returns with errno set for a candidate it
+ * cannot start, which is what lets the search go on to the next one. */
+extern char** __environ;
+
+struct exec_request {
+	char* const* argv;
+	char* const* envp;
+};
+
+static int attempt_exec(const char* candidate, void* ctx)
+{
+	const struct exec_request* r = ctx;
+	execve(candidate, r->argv, r->envp);
+	return errno;
+}
+
+int __execvpe(const char* file, char* const argv[], char* const envp[])
+{
+	struct exec_request r = { argv, envp };
+	errno = search_path(file, attempt_exec, &r);
+	return -1;
+}
+
+int execvp(const char* file, char* const argv[])
+{
+	return __execvpe(file, argv, __environ);
+}
+
+weak_alias(__execvpe, execvpe);

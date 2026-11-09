@@ -10,16 +10,20 @@
  */
 #include <stdio.h>
 #include <wchar.h>
+#include "../../../tests/mtest_protocol.h"
 
 static int failures = 0;
 static void check(int ok, const char *what)
 {
+	mtp_observe(what, ok);
 	if (!ok) { printf("FAIL: %s\n", what); failures++; }
 	else printf("ok: %s\n", what);
 }
 
 int main(void)
 {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("c-abi")) return 0;
 	setbuf(stdout, NULL);
 	printf("-- openkal-musl c-abi probe --\n");
 

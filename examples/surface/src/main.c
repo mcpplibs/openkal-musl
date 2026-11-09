@@ -52,11 +52,13 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include "../../../tests/mtest_protocol.h"
 
 static int failures = 0;
 
 static void check(int ok, const char* what)
 {
+	mtp_observe(what, ok);
 	if (!ok) { printf("FAIL: %s (errno=%d)\n", what, errno); failures++; }
 	else printf("ok: %s\n", what);
 }
@@ -78,6 +80,8 @@ static void refuses(int r, int want, const char* what)
 
 int main(int argc, char** argv)
 {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("surface")) return 0;
 	int expect_dir_time = -1;
 	for (int i = 1; i < argc; i++) {
 		if      (strcmp(argv[i], "--dir-time")    == 0) expect_dir_time = 1;

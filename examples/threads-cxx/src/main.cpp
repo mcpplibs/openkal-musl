@@ -13,6 +13,7 @@
  */
 #include <pthread.h>
 #include <stdio.h>
+#include "../../../tests/mtest_protocol.h"
 
 static_assert(sizeof(pthread_t) >= sizeof(void*), "pthread_t must hold the address musl stores in it");
 
@@ -24,6 +25,8 @@ static void* work(void* arg)
 
 int main()
 {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("threads-cxx")) return 0;
     int failures = 0;
     int value = 0;
     pthread_t thread;
@@ -37,6 +40,7 @@ int main()
     if (joined != 0) ++failures;
     if (value != 42) ++failures;
     if (result != &value) ++failures;
+    mtp_observe("every observation of the probe held", failures == 0);
     printf("-- failures: %d --\n", failures);
     return failures == 0 ? 0 : 1;
 }

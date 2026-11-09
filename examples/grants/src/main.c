@@ -19,12 +19,14 @@
 #include <unistd.h>
 #include <openkal.h>
 #include <okm_preopen.h>
+#include "../../../tests/mtest_protocol.h"
 
 extern char** environ;
 
 static int failures;
 static void check(int held, const char* what)
 {
+	mtp_observe(what, held);
 	printf("%s: %s\n", held ? "ok" : "FAIL", what);
 	if (!held) failures++;
 }
@@ -110,6 +112,8 @@ static int read_only(struct kal_dir from, const char* path, struct kal_dir* out)
 
 int main(int argc, char** argv)
 {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("grants")) return 0;
 	const kal_intptr n = kal_env_image(g_self, sizeof g_self - 1);
 	if (n <= 0) { printf("FAIL: the program's own file is named\n"); return 1; }
 	g_self[n] = 0;

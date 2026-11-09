@@ -17,6 +17,7 @@
  * and a C++ program above this library keeps the name.
  */
 #include <stdio.h>
+#include "../../../tests/mtest_protocol.h"
 
 static int hidden = 7;
 static int weak = 11;
@@ -36,6 +37,8 @@ static int sum(int hidden, int weak, int weak_alias)
 
 int main(void)
 {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("identifiers")) return 0;
 	setbuf(stdout, NULL);
 	const int total = sum(hidden, weak, weak_alias);
 	printf("hidden+weak+weak_alias = %d\n", total);
@@ -48,6 +51,7 @@ int main(void)
 	if (failures) printf("FAIL: the names did not carry their values\n");
 	/* The same last line every probe in this repository prints, so that one
 	 * runner reads all four. tools/run-probe.sh asserts both directions of it. */
+	mtp_observe("every observation of the probe held", failures == 0);
 	printf("-- failures: %d --\n", failures);
 	return failures ? 1 : 0;
 }

@@ -10,10 +10,12 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include "../../../tests/mtest_protocol.h"
 
 static int failures;
 static void check(int ok, const char* what)
 {
+	mtp_observe(what, ok);
 	printf("%s %s\n", ok ? "ok  " : "FAIL", what);
 	if (!ok) failures++;
 }
@@ -28,6 +30,8 @@ static int reference_cmp(const unsigned char* l, const unsigned char* r, size_t 
 
 int main(void)
 {
+	/* The mtest protocol where a runner asked for it (tests/mtest_protocol.h). */
+	if (mtp_begin("strings")) return 0;
 	static unsigned char a[512], b[512];
 	long wrong = 0, cases = 0;
 	for (size_t la = 0; la < 16; la++)

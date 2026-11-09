@@ -25,6 +25,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include "mtest_protocol.h"   /* tests/, named by the build */
 
 static double g_run_ns = 40e6;
 
@@ -50,6 +51,8 @@ static int cmp_double(const void* a, const void* b)
 /* Nanoseconds per iteration of `body', the median of five runs. */
 static double measure(body_fn body, void* arg)
 {
+	/* Listing the cases measures nothing. */
+	if (mtp_listing) return 0;
 	/* One unmeasured run first: a first thread, a first mapping and a cold
 	 * cache are not what the line reports. */
 	body(arg, 1);
@@ -73,8 +76,18 @@ static double measure(body_fn body, void* arg)
 
 static void report(const char* name, double value, const char* unit)
 {
-	printf("bench %s %.2f %s\n", name, value, unit);
-	fflush(stdout);
+	if (!mtp_listing) {
+		printf("bench %s %.2f %s\n", name, value, unit);
+		fflush(stdout);
+	}
+	/* And as a case of kind `bench' holding one metric, where a runner asked
+	 * (tests/mtest_protocol.h). The case's identifier is the line's name with
+	 * `.' for `/', which the protocol reserves for a part of a case. */
+	char id[128];
+	size_t i = 0;
+	for (; name[i] && i + 1 < sizeof id; i++) id[i] = name[i] == '/' ? '.' : name[i];
+	id[i] = 0;
+	mtp_measure(id, value, unit);
 }
 
 /* --- strings ----------------------------------------------------------------- */
@@ -340,12 +353,13 @@ static void files(void)
 
 int main(int argc, char** argv)
 {
+	mtp_begin_program();
 	if (argc > 1 && strcmp(argv[1], "--quick") == 0) g_run_ns = 2e6;
 	for (size_t i = 0; i < sizeof g_a; i++) g_a[i] = (unsigned char)('a' + i % 23);
 	strings();
 	allocation();
 	threads();
 	files();
-	printf("-- done --\n");
+	if (!mtp_listing) printf("-- done --\n");
 	return 0;
 }
