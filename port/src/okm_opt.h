@@ -118,6 +118,16 @@ static inline kal_intptr okm_fs_link_read(struct kal_dir base, const char* name,
 	return kal_fs_link_read(base, name, len, out, cap);
 }
 
+/* A SECOND NAME FOR A FILE (openkal 0.25). Weak for the reason the two above
+ * are: an image run by a loader whose implementation predates 0.25 binds it to
+ * zero, and `link' then answers as it did before 0.29.0. */
+extern __typeof(kal_fs_hard_link) kal_fs_hard_link __attribute__((__weak__));
+static inline int okm_fs_hard_link(struct kal_dir from, const char* a, kal_uintptr alen,
+                                   struct kal_dir to, const char* b, kal_uintptr blen) {
+	if (!kal_fs_hard_link) return kal_err_not_supported;
+	return kal_fs_hard_link(from, a, alen, to, b, blen);
+}
+
 #else
 
 /* `static inline' and not a macro, so that an argument is still type-checked
@@ -166,6 +176,9 @@ static inline int okm_fs_rename(struct kal_dir, const char*, kal_uintptr,
 static inline int okm_fs_rename_flags(struct kal_dir, const char*, kal_uintptr,
                                       struct kal_dir, const char*, kal_uintptr,
                                       kal_uintptr) { return kal_err_not_supported; }
+static inline int okm_fs_hard_link(struct kal_dir, const char*, kal_uintptr,
+                                   struct kal_dir, const char*,
+                                   kal_uintptr) { return kal_err_not_supported; }
 static inline int okm_fs_file_info(struct kal_file, kal_u32,
                                    struct kal_node_info*) { return kal_err_not_supported; }
 static inline int okm_fs_set_modified(struct kal_file, kal_u64) { return kal_err_not_supported; }

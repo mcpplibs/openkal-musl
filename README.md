@@ -8,11 +8,11 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.28.1"
+openkal-musl = "0.29.0"
 ```
 
-The package states compatible ranges for the packages beneath it: OpenKal ^0.24,
-Linux ^0.25, macOS ^0.22, Windows ^0.20 and image bindings ^0.5. A target that
+The package states compatible ranges for the packages beneath it: OpenKal ^0.25,
+Linux ^0.26, macOS ^0.23, Windows ^0.21, OpenSBI ^0.9 and image bindings ^0.5. A target that
 selects openkal-platform receives the exact versions of its version group; any
 other build receives the newest compatible release, recorded in `mcpp.lock`.
 
@@ -332,7 +332,7 @@ lesser of the two, and the row returns when the schema carries `targets`.
 | ~~**terminating what a started program itself started**~~ | **answered since 0.12.0 for the form that works**, which is `posix_spawn` with `POSIX_SPAWN_SETPGROUP` and a zero group: the started program forms a unit, what it starts inherits the unit, and `kill(-n)` upon the identifier `posix_spawn` returned reaches all of it — including a shell's backgrounded work, which is the case a timeout has to reach. `setpgid(0, 0)` in **this** program forms a unit too. Naming another program's group is still `EPERM`, and `setsid` is still `EPERM` | openkal 0.11 gave `kal_spawn` a `job`, which is where a unit is established: the caller says which unit, and the implementation performs the placement. What this costs is stated in the row below, because it is one composition and not a general gap. |
 | **`fork(); setpgid(0, 0); exec …`** | the copy forms a unit and the original **cannot name it**, so `kill(-n)` from the original reports `ESRCH`. Use `posix_spawn` with `POSIX_SPAWN_SETPGROUP`, which is the row above | this is a property of the interface and not a shortfall of this port. A unit is named by a handle, openkal handles are built from an index into the holder's own table (clause 6.7), and nothing conveys one across a spawn (clause 11 entry 9) — so the unit the copy forms is the copy's, and the original never learns of it. **0.12.0 reached for the nearest unit it could name, which was its own**, and every negative identifier that matched no child therefore named the caller's group: an enquiry about a unit that did not exist was answered *yes*, and a signal aimed at one **ended the caller together with everything it led**. 0.13.0 answers `ESRCH` and `examples/subprocess` checks it. openkal 0.12 records the whole of it in clause 11 entry 9, so the next implementation meets it in the specification. |
 | ~~how many processors there are~~ | **answered since 0.11.0.** `sched_getaffinity`, and therefore `std::thread::hardware_concurrency()` and `sysconf(_SC_NPROCESSORS_ONLN)`, report the real count | it used to be **silent**: a program sizing a pool of workers got one worker and no error. openkal 0.10 added `kal_task_parallelism`. Zero from that enquiry means *cannot say* and is reported here as a refusal rather than as a bitmap of one processor, because musl would read the latter as a fact this port had invented. |
-| hard links, named pipes, a bidirectional pair | `link` (`create_hard_link`), `mkfifo` and `socketpair` report `ENOSYS`. **`statvfs` (`std::filesystem::space`) is answered since 0.11.0** | openkal has no operation for the first three. `kal_fs_link_create` makes a node whose content is a name — a symbolic link — and there is no hard link; `kal_process_channel` is a pipe in one direction, so a bidirectional pair is not one of them. Volume capacity was in this row until openkal 0.10 added `kal_fs_capacity`. |
+| named pipes, a bidirectional pair | `mkfifo` and `socketpair` report `ENOSYS`. **`statvfs` (`std::filesystem::space`) is answered since 0.11.0; `link` and `linkat` since 0.29.0** | openkal has no operation for either. `kal_process_channel` is a pipe in one direction, so a bidirectional pair is not one of them. Volume capacity was in this row until openkal 0.10 added `kal_fs_capacity`, and hard links until openkal 0.25 added `kal_fs_hard_link`. |
 | an alternate signal stack | `sigaltstack` reports `ENOSYS` since 0.10.0 | it used to report success and install nothing, and the enquiry that would have caught it answered 0 with a zeroed record. There are no signals here, so there is nothing for such a stack to be. |
 | one C runtime and one C++ runtime per image | a static library compiled against the platform's own C runtime, or an object that runtime owns crossing the boundary — a `FILE*`, memory one side allocates and the other frees, `errno` — is not supported. Only handles and values may cross into a platform's own system interfaces | this package supplies the whole of a program's C library; a second one linked in beside it duplicates every piece of global state each keeps (the allocator's own arena, `errno`, locale) and the two do not agree about any of it. A vendor SDK distributed only as a static library built against another C runtime is `n/a` on this target — a design consequence and not a defect. openkal's own README states the same rule for every implementation built above it; the ecosystem design record (`.agents/docs/2026-09-17-openkal-ecosystem-cross-repo-design.md`, R1) states why it binds a package and not the specification. |
 | a context a platform library creates | code reached from it has no C library state — no `errno`, no locale, no `pthread_self` — and must not rely on any, because none of it exists until `kal_task_start` builds it, and such a context was not built by it | musl's per-context state lives in thread-local storage this port's own thread start fills in. A callback from a platform's own thread pool, from COM, or from a framework's own callback thread (Windows, macOS's GCD) arrives on a context this library never started. A package reached this way confines such a callback to work that does not touch this library, or hands the work to a context of its own before it does (R2 of the design record above). |
@@ -1006,6 +1006,35 @@ is not one this package can ask.
 
 The port is Apache-2.0. The vendored musl sources under `musl/` are MIT, and
 `musl/COPYRIGHT` is unchanged.
+
+## OpenKal 0.25 dependency group
+
+Version 0.29.0 selects OpenKal 0.25, Linux 0.26, macOS 0.23, Windows 0.21 and
+OpenSBI 0.9.
+
+**A program is looked for by the system's conventions.** `execvp`, `execvpe`,
+`execlp` and `posix_spawnp` search the PATH through one function, which takes
+the list separator and the program suffixes from the system the implementation
+names (`kal_env_system`, openkal clause 11 entry 30). Where it is `windows`, PATH
+is split on a semicolon, a name holding a backslash or a volume is not searched
+for, and in each entry the name is tried as given and then with each suffix
+`PATHEXT` lists, in its order (`.COM;.EXE;.BAT;.CMD` where it is not set). Every
+other system keeps POSIX's colon and no suffix. Until 0.29.0 the entries were
+split on a colon everywhere, and musl's own `execvp` is now replaced too, so the
+two ways of searching agree.
+
+**`link` and `linkat` give a file a second name** (`kal_fs_hard_link`, openkal
+0.25), with no flags: a final link of the first name receives the second name
+itself, and `AT_SYMLINK_FOLLOW` or any other flag is `EINVAL`. A directory is
+`EPERM`, two volumes are `EXDEV`, a volume that keeps one name per file
+(`KAL_FS_PROP_HARD_LINKS` not claimed) is `ENOTSUP`, and a name that is taken is
+`EEXIST`. They reported `ENOSYS` before.
+
+**The arrangement is stated:** `requires = ["mcpp:kernel-abi=openkal"]`. An
+engine that checks that the requirements of the layers form no circle (mcpp
+2026.11.10.1, `layer-cycle`) refuses a kernel-abi written above a C library
+placed beneath this one; the hosted and standalone arrangements name an
+implementation and resolve as before.
 
 ## OpenKal 0.24 dependency group
 

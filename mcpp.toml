@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.28.1"
+version     = "0.29.0"
 # `embed' and `exclude' on a dependency edge (the allocator, below) are mcpp
 # 2026.11.2.1's; an older engine refuses the edge rather than building a C
 # library without its allocator.
@@ -15,6 +15,14 @@ license     = "Apache-2.0"
 # changes is not the C library a program sees but what that library is written
 # on.
 provides    = ["mcpp:c-abi=musl"]
+# THE ARRANGEMENT, STATED (0.29.0). This C library is written above an openkal
+# implementation and requires the layer beneath it. A build tool that checks
+# that the requirements of the layers form no circle (mcpp 2026.11.10.1,
+# `layer-cycle') then refuses a kernel-abi written above a C library placed
+# beneath this one, which would call itself through it. An engine that predates
+# the check reads the requirement as it reads every other, and the hosted and
+# standalone arrangements both name an implementation, so they resolve as before.
+requires    = ["mcpp:kernel-abi=openkal"]
 authors     = ["mcpplibs"]
 repo        = "https://github.com/mcpplibs/openkal-musl"
 
@@ -167,7 +175,7 @@ lchown    = { form = "enosys", note = "as chown" }
 tcsetattr = { form = "accepted-no-effect", note = "openkal names four positions of the terminal mode word, the fourth covering ICRNL, INLCR, IGNCR and ISTRIP together; a request that alters output post-processing, the line speed, the control characters or VMIN/VTIME is accepted and that part has no effect" }
 
 [dependencies]
-openkal = "^0.24.0"
+openkal = "^0.25.0"
 
 # An ordinary consumer of openkal declares the specification and leaves the
 # choice of implementation to whoever builds the program, which is what the
@@ -182,7 +190,7 @@ openkal = "^0.24.0"
 #
 # The consequence for a program is that it names this package and nothing else.
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = { version = "^0.25.0", features = ["standalone"] }
+openkal-linux = { version = "^0.26.0", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
 # 0.12.0 is the first release of this implementation that declares which
@@ -192,7 +200,7 @@ openkal-linux = { version = "^0.25.0", features = ["standalone"] }
 # is the shape of a check that silently does not run --- while the same
 # consumer was answered on Linux and Windows, whose implementations have
 # carried the array since openkal-linux 0.15.0 and openkal-windows 0.10.0.
-openkal-macos = { version = "^0.22.0", features = ["standalone"] }
+openkal-macos = { version = "^0.23.0", features = ["standalone"] }
 
 # FIRST STEP TOWARD A BARE MACHINE, AND NOT THE WHOLE OF IT.
 #
@@ -203,7 +211,7 @@ openkal-macos = { version = "^0.22.0", features = ["standalone"] }
 # runtime that receives control, and a C library configured for an environment
 # with no process to exit from. So this declares the implementation and stops.
 [target.'cfg(os = "none")'.dependencies]
-openkal-opensbi = { version = "^0.8.2", features = ["standalone"] }
+openkal-opensbi = { version = "^0.9.0", features = ["standalone"] }
 
 # WHICH OPENKAL INTERFACES THE IMPLEMENTATION BENEATH IS EXPECTED TO PROVIDE.
 #
@@ -277,7 +285,7 @@ sources = [
 requires = ["mcpp:compiler-runtime=compiler-rt"]
 
 [target.'cfg(windows)'.dependencies]
-openkal-windows = { version = "^0.20.0", features = ["standalone"] }
+openkal-windows = { version = "^0.21.0", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #
@@ -402,6 +410,10 @@ sources = [
   # a separator was taken as a path --- reporting success for a program it had
   # not started. port/src/okm_spawn.c performs the search instead.
   "!musl/src/process/posix_spawnp.c",
+  # AND execvp.c (0.29.0), so that execvp, execvpe and execlp search the PATH
+  # by the system's conventions through the same function as posix_spawnp
+  # (port/src/okm_spawn.c).
+  "!musl/src/process/execvp.c",
   "!musl/src/mman/mmap.c",
   "!musl/src/internal/syscall_ret.c",
   "!musl/src/unistd/getcwd.c",
