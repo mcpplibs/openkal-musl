@@ -847,7 +847,7 @@ ldflags = ["-nostdlib", "-lSystem",
 # would land in, not because the content differs today.
 # musl-generated/README.md records the three lines and how they are
 # produced.
-[target.'cfg(all(arch = "x86_64", not(windows), not(os = "macos"), not(os = "openkal")))'.build]
+[target.'cfg(all(arch = "x86_64", not(windows), not(os = "macos"), not(os = "openkal"), not(os = "freebsd")))'.build]
 include_dirs = ["musl-generated/x86_64", "musl/arch/x86_64", "musl/arch/generic"]
 
 [target.'cfg(all(arch = "x86_64", windows))'.build]
@@ -888,8 +888,18 @@ include_dirs = ["musl-generated/x86_64-macos", "musl/arch/x86_64", "musl/arch/ge
 # `kal_u64` comes from the COMPILER (`__UINT64_TYPE__`), which is authoritative
 # about the target's ABI; `uint64_t` came from these three lines, which carried
 # Linux's answer. Same width, different type, and the two do not convert.
-[target.'cfg(all(arch = "aarch64", not(os = "macos"), not(os = "openkal")))'.build]
+[target.'cfg(all(arch = "aarch64", not(os = "macos"), not(os = "openkal"), not(os = "freebsd")))'.build]
 include_dirs = ["musl-generated/aarch64", "musl/arch/aarch64", "musl/arch/generic"]
+
+# FREEBSD (0.29.1): musl's architecture headers, with the one type the
+# platform's ABI states otherwise. FreeBSD's `wint_t' is `int' on both
+# architectures, as the compiler's __WINT_TYPE__ there says, where musl's is
+# `unsigned' (port/src/okm_type_identity.c checks every such pair).
+[target.'cfg(all(arch = "x86_64", os = "freebsd"))'.build]
+include_dirs = ["musl-generated/x86_64-freebsd", "musl/arch/x86_64", "musl/arch/generic"]
+
+[target.'cfg(all(arch = "aarch64", os = "freebsd"))'.build]
+include_dirs = ["musl-generated/aarch64-freebsd", "musl/arch/aarch64", "musl/arch/generic"]
 
 # AN OK IMAGE IS COMPILED FOR NO OPERATING SYSTEM (`<arch>-unknown-none-elf`), and
 # there the compiler states `wint_t` as `int` where the Linux answer is

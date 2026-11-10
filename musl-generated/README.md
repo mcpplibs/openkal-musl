@@ -131,3 +131,12 @@ and one line changed: `typedef int wint_t;` where the generic header has
 and on that triple the compiler's `__WINT_TYPE__` is `int` (clang 23, both
 architectures); `port/src/okm_type_identity.c` checks the header against it.
 Every other line is the architecture's, as the image convention fixes it.
+
+## FreeBSD (0.29.1)
+
+`x86_64-freebsd/` and `aarch64-freebsd/` are `x86_64/` and `aarch64/` with one
+line changed, `typedef int wint_t;` for `typedef unsigned wint_t;`: FreeBSD's ABI
+states `wint_t` signed on both architectures (the compiler's `__WINT_TYPE__`
+for `*-unknown-freebsd`), and every other type the header commits to is the
+same there as on Linux. Reproduced by the same commands with the architecture's
+`ARCH`, followed by that one substitution.
