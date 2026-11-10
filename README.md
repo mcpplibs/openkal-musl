@@ -8,11 +8,12 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.29.0"
+openkal-musl = "0.29.1"
 ```
 
 The package states compatible ranges for the packages beneath it: OpenKal ^0.25,
-Linux ^0.26, macOS ^0.23, Windows ^0.21, OpenSBI ^0.9 and image bindings ^0.5. A target that
+Linux ^0.26, macOS ^0.23, Windows ^0.21, FreeBSD ^0.1, OpenSBI ^0.9 and image
+bindings ^0.5. A target that
 selects openkal-platform receives the exact versions of its version group; any
 other build receives the newest compatible release, recorded in `mcpp.lock`.
 
@@ -1008,6 +1009,11 @@ The port is Apache-2.0. The vendored musl sources under `musl/` are MIT, and
 `musl/COPYRIGHT` is unchanged.
 
 ## OpenKal 0.25 dependency group
+
+Version 0.29.1 names openkal-freebsd ^0.1, standalone, on FreeBSD, as Linux's
+and macOS's implementations are named, and links a program above it statically,
+as on Linux. The rows `x86_64-freebsd-musl` and `aarch64-freebsd-musl` are this
+C library over that implementation.
 
 Version 0.29.0 selects OpenKal 0.25, Linux 0.26, macOS 0.23, Windows 0.21 and
 OpenSBI 0.9.
