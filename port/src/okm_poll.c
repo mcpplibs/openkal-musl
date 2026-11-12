@@ -85,12 +85,47 @@ long okm_timed_write(kal_uintptr stream, const void* buf, unsigned long len, kal
 
 /* --- the read-ahead ---------------------------------------------------------- */
 
-long okm_take_ahead(struct okm_desc* d, void* buf, unsigned long len)
+long okm_take_ahead(struct okm_desc* d, kal_uintptr stream, void* buf, unsigned long len)
 {
 	if (!d) return 0;
 	if (d->ahead && len) {
 		((unsigned char*)buf)[0] = d->ahead_byte;
 		d->ahead = 0;
+		/* AND WHATEVER ELSE IS ALREADY THERE, BECAUSE ONE BYTE ON ITS OWN
+		 * TURNED EVERY POLLED READ INTO A POLLED READ OF ONE BYTE.
+		 *
+		 * The enquiry takes a byte to make its answer true. Returning only that
+		 * byte is a legal short read --- and a caller that polls goes straight
+		 * back to `poll', which takes another byte, so the whole of a stream
+		 * arrives ONE BYTE PER ITERATION, for ever. Measured against the host,
+		 * on `echo one; sleep 0.4; echo two':
+		 *
+		 *     here    "o" "n" "e" "." "t" "w" "o" "."      eight chunks
+		 *     host    "one." "two."                        two
+		 *
+		 * Every byte is delivered and in order, so a caller that concatenates
+		 * sees the right bytes --- which is why this survived: the defect is
+		 * invisible to anyone who does not look at the BOUNDARIES. A caller that
+		 * scans a chunk for a word finds none, because `two' arrives as `t' and
+		 * `wo'. openkal-linux#13's first report said the program `only output
+		 * one byte', and this is that.
+		 *
+		 * THE REMEDY IS THE OPERATION THE ENQUIRY ITSELF IS BUILT ON. A bound
+		 * of `now' asks for whatever has already arrived and does not wait, so
+		 * the byte and the rest of what is there come back together. Where the
+		 * environment beneath declines `openkal.timeout' there is no such
+		 * operation, and the single byte is what can be honestly returned.
+		 *
+		 * ONE PLACE, FOR EVERY CALL THAT DELIVERS THE BYTE (0.29.3). `read' did
+		 * this and `recv' did not: `recv', `recvfrom' and `recvmsg' after a
+		 * `poll' returned the one byte, so a client that polls before each
+		 * `recv' took a response in one byte per wakeup (openkal-musl#52:
+		 * 1000 calls for 1000 bytes, where `read' took one). The rest is read
+		 * here, so a call that delivers the byte cannot leave it out. */
+		if (len > 1 && okm_can_bound()) {
+			const long more = okm_timed_read(stream, (char*)buf + 1, len - 1, OKM_NOW_NS);
+			if (more > 0) return 1 + more;
+		}
 		return 1;
 	}
 	if (d->ahead_eof) { d->ahead_eof = 0; return OKM_AHEAD_EOF; }

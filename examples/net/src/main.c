@@ -23,6 +23,7 @@
 #include <string.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <unistd.h>
 #include "../../../tests/mtest_protocol.h"
 
@@ -137,6 +138,50 @@ int main(void)
 		have += (size_t)r;
 	}
 	check(have == 4 && memcmp(in, "pong", 4) == 0, "and arrive back");
+
+	/* --- what a readiness enquiry held, and the rest ------------------------- */
+
+	/* A `poll' holds one byte to make its answer true. The call that delivers
+	 * the byte delivers what else has arrived with it: `read' did, and `recv',
+	 * `recvfrom' and `recvmsg' returned the one byte until 0.29.3, so a client
+	 * that polls before each `recv' took 1000 bytes in 1000 calls
+	 * (openkal-musl#52). A kernel's socket returns the 1000 in one. */
+	{
+		char out[1000], big[4096];
+		memset(out, 'x', sizeof out);
+		check(send(srv, out, sizeof out, 0) == (ssize_t)sizeof out, "a thousand bytes are sent in one call");
+		struct pollfd rp = { cli, POLLIN, 0 };
+		check(poll(&rp, 1, 2000) == 1 && (rp.revents & POLLIN), "the connection is readable");
+		long got1000 = 0, calls = 0, first = 0;
+		while (got1000 < (long)sizeof out) {
+			if (calls && poll(&rp, 1, 2000) != 1) break;
+			const ssize_t r = recv(cli, big, sizeof big, 0);
+			if (r <= 0) break;
+			if (calls++ == 0) first = r;
+			got1000 += r;
+		}
+		printf("   poll + recv: the first call returned %ld bytes, %ld calls for 1000\n", first, calls);
+		check(got1000 == (long)sizeof out, "the thousand arrive through poll and recv");
+		check(first > 1, "a recv after a poll returns what has arrived, not the one byte the poll held");
+
+		check(send(srv, out, sizeof out, 0) == (ssize_t)sizeof out, "a thousand more are sent");
+		check(poll(&rp, 1, 2000) == 1 && (rp.revents & POLLIN), "the connection is readable again");
+		char head[8], tail[4096];
+		struct iovec iov[2] = { { head, sizeof head }, { tail, sizeof tail } };
+		struct msghdr mh;
+		memset(&mh, 0, sizeof mh);
+		mh.msg_iov = iov; mh.msg_iovlen = 2;
+		const ssize_t m = recvmsg(cli, &mh, 0);
+		printf("   poll + recvmsg: the call returned %ld bytes\n", (long)m);
+		check(m > (ssize_t)sizeof head, "a recvmsg after a poll fills its first buffer and goes on to the second");
+		long left = (long)sizeof out - (long)m;
+		while (left > 0) {
+			const ssize_t r = recv(cli, big, sizeof big, 0);
+			if (r <= 0) break;
+			left -= r;
+		}
+		check(left == 0, "and the rest of the thousand follow");
+	}
 
 	/* --- half-closure ------------------------------------------------------- */
 
