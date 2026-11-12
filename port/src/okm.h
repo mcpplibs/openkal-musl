@@ -364,7 +364,8 @@ int  okm_sock_shape(struct okm_desc* d);
 
 /* --- readiness and bounded transfer, in okm_poll.c ------------------------- */
 
-/* The read-ahead a readiness enquiry left, delivered to a caller of `read'.
+/* The read-ahead a readiness enquiry left, delivered to a caller of `read' or
+ * of `recv', with whatever else has already arrived on `stream' behind it.
  *
  *   > 0             the count placed in the buffer
  *   0               nothing was held; the caller performs its own transfer
@@ -374,7 +375,7 @@ int  okm_sock_shape(struct okm_desc* d);
  *                   the same end again at once, so neither is lost by
  *                   forgetting it. */
 #define OKM_AHEAD_EOF (-1L)
-long okm_take_ahead(struct okm_desc* d, void* buf, unsigned long len);
+long okm_take_ahead(struct okm_desc* d, kal_uintptr stream, void* buf, unsigned long len);
 
 /* A transfer bounded in time. `ns' of zero is openkal's spelling of "no bound"
  * and is not what a non-blocking descriptor wants; `OKM_NOW_NS' is the smallest

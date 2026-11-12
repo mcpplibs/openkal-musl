@@ -631,7 +631,7 @@ long okm_sock_recv(int fd, void* buf, unsigned long len, int flags,
 	if (s->state != OKM_SOCK_CONN) return -ENOTCONN;
 	if (addr && alen) *alen = 0;
 
-	const long held = okm_take_ahead(d, buf, len);
+	const long held = okm_take_ahead(d, d->stream, buf, len);
 	if (held == OKM_AHEAD_EOF) return 0;
 	if (held) return held;
 

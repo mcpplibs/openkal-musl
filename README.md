@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.29.2"
+openkal-musl = "0.29.3"
 ```
 
 The package states compatible ranges for the packages beneath it: OpenKal ^0.25,
@@ -1009,6 +1009,20 @@ The port is Apache-2.0. The vendored musl sources under `musl/` are MIT, and
 `musl/COPYRIGHT` is unchanged.
 
 ## OpenKal 0.25 dependency group
+
+Version 0.29.3 delivers what a readiness enquiry held together with what else has
+arrived, for every call that delivers it. `poll` and `select` answer for a
+connection by taking one byte and holding it. `read` returned that byte with the
+rest of what had arrived; `recv`, `recvfrom` and `recvmsg` returned the byte alone,
+so a program that polls before each `recv` took a stream one byte per wakeup:
+1000 calls for 1000 bytes sent in one, where `read` and a kernel's socket take one
+(#52). The delivery is one function, `okm_take_ahead`, which both paths call.
+`examples/net` sends a thousand bytes and counts the calls through `poll` and
+`recv`, and through `poll` and `recvmsg` with two buffers. This version also names
+openkal-linux ^0.26.1, openkal-macos ^0.23.1 and openkal-windows ^0.22.1, which
+retire a handle before closing it (openkal-linux#53): above this C library a file
+opened while another thread closed a socket had its reads and writes reach
+descriptor 0.
 
 Version 0.29.2 places further images with openkal-ld ^0.6 (openkal-image 0.6.0,
 whose members share one version); the loader itself is unchanged.
