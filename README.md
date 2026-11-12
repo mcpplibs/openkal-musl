@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.29.3"
+openkal-musl = "0.29.4"
 ```
 
 The package states compatible ranges for the packages beneath it: OpenKal ^0.25,
@@ -1009,6 +1009,13 @@ The port is Apache-2.0. The vendored musl sources under `musl/` are MIT, and
 `musl/COPYRIGHT` is unchanged.
 
 ## OpenKal 0.25 dependency group
+
+Version 0.29.4 names openkal-windows ^0.21.1. 0.29.3 named ^0.22.1, the first
+release with the handle correction, and so left the line the rest of the family
+is on: openkal-run names openkal-windows ^0.21.0 and mcpplibs.os bounds it below
+0.22, and a build that held either beside this C library on Windows was refused.
+The correction is released on the 0.21 line as 0.21.1, and this version names
+it. Nothing else differs from 0.29.3.
 
 Version 0.29.3 delivers what a readiness enquiry held together with what else has
 arrived, for every call that delivers it. `poll` and `select` answer for a
