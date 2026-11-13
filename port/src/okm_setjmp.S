@@ -28,18 +28,15 @@
  * writes into it --- but they do not have to be told the same way, only to
  * answer the same question the same way for the same target.
  *
- * `bits/setjmp.h` is installed, so it cannot read `OKM_TARGET_WINDOWS` ---
- * this package's own private build define (mcpp.toml) --- and reads
- * `__CYGWIN__` instead, which mcpp defines target-wide, an application's
- * compile included. THIS FILE IS NOT INSTALLED; it is compiled only by this
- * package's own build, exactly like `okm_start.c` and `okm_format.c`, which
- * already read `OKM_TARGET_WINDOWS` for the same reason. It reads that here
- * too, and not `__CYGWIN__`: measured, mcpp's `[c-abi]` realization --- the
- * `--target=` substitution that defines `__CYGWIN__` and leaves `_WIN32`
- * undefined --- reaches a `.c` or `.cpp` compile and does not reach a `.S`
- * one, so `__CYGWIN__` is not in fact defined when this file is assembled,
- * only when `bits/setjmp.h` is read. `OKM_TARGET_WINDOWS` is, on both sides
- * of that gap, which is why it is the one this file reads.
+ * `bits/setjmp.h` is installed, so it cannot read `OKM_TARGET_PE` ---
+ * this package's own private build define (mcpp.toml). It reads no macro: the
+ * PE rows' record is musl-generated/x86_64-pe/bits/setjmp.h, a directory the
+ * manifest puts on those rows' include line alone (0.29.6), and every other row
+ * reads musl's own. THIS FILE IS NOT INSTALLED; it is compiled only by this
+ * package's own build, exactly like `okm_start.c` and `okm_format.c`, and
+ * reads `OKM_TARGET_PE`, which the manifest defines under the same container
+ * (`cfg(object-format = "pe")`): the header and this file are selected by one
+ * statement of the target.
  */
 
 /* --- object format ---------------------------------------------------------- */
@@ -47,7 +44,7 @@
 #  define OKM_NAME(x) _##x
 #  define OKM_DECL(x) .globl OKM_NAME(x)
 #  define OKM_SIZE(x)
-#elif defined(OKM_TARGET_WINDOWS)
+#elif defined(OKM_TARGET_PE)
 #  define OKM_NAME(x) x
 #  define OKM_DECL(x) .globl x; .def x; .scl 2; .type 32; .endef
 #  define OKM_SIZE(x)
@@ -64,7 +61,7 @@
 	.text
 
 /* --- x86_64, the convention this port meets on two of its three targets ----- */
-#if defined(__x86_64__) && !defined(OKM_TARGET_WINDOWS)
+#if defined(__x86_64__) && !defined(OKM_TARGET_PE)
 
 OKM_DECL(__setjmp)
 OKM_DECL(_setjmp)
@@ -116,7 +113,7 @@ OKM_NAME(longjmp):
  * none, and a longjmp here that saved none would restore eight registers a
  * function between the two calls was entitled to have changed.
  */
-#elif defined(__x86_64__) && defined(OKM_TARGET_WINDOWS)
+#elif defined(__x86_64__) && defined(OKM_TARGET_PE)
 
 OKM_DECL(__setjmp)
 OKM_DECL(_setjmp)

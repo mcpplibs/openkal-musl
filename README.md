@@ -1004,6 +1004,25 @@ allocator's memory is backed whole at once, so an arena is 16 MiB rather than
 mimalloc's gibibyte (`okm_mimalloc_prim.c`). The libraries built for a known
 implementation are unchanged.
 
+### UEFI, and the PE container (0.29.6)
+
+`x86_64-uefi` (a platform's row, PE) is served as Windows is: what the port needs
+for the container --- the Microsoft x64 convention's `jmp_buf`, the initialisers'
+list, the object-format shims, the compiler-rt requirement --- is selected by
+`cfg(object-format = "pe")` (mcpp 2026.11.13.1), the record in
+`musl-generated/x86_64-pe` and the private define `OKM_TARGET_PE`. Windows's own
+parts (openkal-windows, its entry `okw_start`, the `.exe` retry, its link words)
+stay under `cfg(windows)`. On UEFI the implementation is openkal-uefi with
+`standalone`, whose `efi_main` hands the program to `__libc_start_main`.
+
+Where the implementation beneath states the interfaces it provides, the optional
+ones are taken from it: `cfg(not(interface = "openkal.fs"))` and its two
+siblings define `OKM_HAS_FS=0`, `OKM_HAS_PROCESS=0` and `OKM_HAS_TASK=0`
+(openkal-uefi provides none of the three). Measured: `import std` with
+`std::println` and `std::ranges::sort`, built for `x86_64-uefi` with
+openkal-llvm-runtime 0.20.3, is a 1.2 MB EFI application that prints and returns
+its status under OVMF in 0.8 s.
+
 ## What runs above it
 
 | | |
@@ -1058,8 +1077,9 @@ The port is Apache-2.0. The vendored musl sources under `musl/` are MIT, and
 ## OpenKal 0.25 dependency group
 
 Version 0.29.6 asks for `openkal.fs`, `openkal.process` and `openkal.task` at run
-time in an ok image, and sizes the allocator's arenas for memory that is backed
-at once (above).
+time in an ok image, sizes the allocator's arenas for memory that is backed at
+once, takes the optional interfaces from the implementation's statement, and
+serves UEFI by the PE container (above); it requires mcpp 2026.11.13.1.
 
 Version 0.29.5 names openkal-linux ^0.26.3, whose processor time on i386 is read
 through the sixty-four bit clock, and adds i386 (above).

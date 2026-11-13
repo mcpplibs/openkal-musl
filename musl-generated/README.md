@@ -17,7 +17,7 @@ printf '#define VERSION "1.2.5"\n' > musl-generated/internal/version.h
 
 ## The Windows variant, and why it is no longer a variant
 
-`x86_64-windows/` used to differ from `x86_64/` in three lines:
+`x86_64-pe/` (named `x86_64-windows/` before 0.29.6, when Windows was the one PE row) used to differ from `x86_64/` in three lines:
 
 ```
 -#define _Addr long          +#define _Addr long long

@@ -349,6 +349,7 @@ extern __typeof(kal_process_wait) kal_process_wait __attribute__((__weak__));
 #define okm_task_yield kal_task_yield
 #define okm_task_wait  kal_task_wait
 #define okm_task_wake  kal_task_wake
+#define okm_task_stack kal_task_stack
 
 /* WEAK, BECAUSE openkal 0.10 ADDED IT AND A BACKEND MAY NOT HAVE FOLLOWED.
  * Every route in this port that reaches an optional operation tests the
@@ -409,6 +410,9 @@ static inline int okm_task_wait(const kal_u32*, kal_u32,
  * did not. */
 static inline int okm_task_wake(const kal_u32*, kal_uintptr,
                                 kal_uintptr* woken) { if (woken) *woken = 0; return kal_ok; }
+/* Where the stack is, which only an implementation with contexts measures: the
+ * enquiry fails, and `pthread_getattr_np' reports ENOSYS (okm_thread.c). */
+static inline int okm_task_stack(void**, kal_uintptr*) { return kal_err_not_supported; }
 
 /* One context, and its identity is a constant. Not a placeholder: it is the
  * accurate answer for a machine that has one, and it keeps okm_context.c's
@@ -429,6 +433,8 @@ extern __typeof(kal_task_start) kal_task_start __attribute__((__weak__));
 extern __typeof(kal_task_wait) kal_task_wait __attribute__((__weak__));
 extern __typeof(kal_task_wake) kal_task_wake __attribute__((__weak__));
 extern __typeof(kal_task_yield) kal_task_yield __attribute__((__weak__));
+extern __typeof(kal_task_stack) kal_task_stack __attribute__((__weak__));
+#define okm_task_stack(...) (kal_task_stack ? kal_task_stack : okm_task_stack)(__VA_ARGS__)
 #define okm_task_join(...) (kal_task_join ? kal_task_join : okm_task_join)(__VA_ARGS__)
 #define okm_task_start(...) (kal_task_start ? kal_task_start : okm_task_start)(__VA_ARGS__)
 #define okm_task_wait(...) (kal_task_wait ? kal_task_wait : okm_task_wait)(__VA_ARGS__)

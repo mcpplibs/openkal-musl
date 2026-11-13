@@ -5,7 +5,9 @@ version     = "0.29.6"
 # `embed' and `exclude' on a dependency edge (the allocator, below) are mcpp
 # 2026.11.2.1's; an older engine refuses the edge rather than building a C
 # library without its allocator.
-mcpp        = ">=2026.11.2.1"
+# 2026.11.13.1: `cfg(object-format = "pe")`, which selects what this port
+# needs on every PE row (Windows, UEFI) rather than on Windows alone.
+mcpp        = ">=2026.11.13.1"
 description = "musl 1.2.5 redirected onto openkal: one C library, ported once, above every implementation of the specification rather than above one kernel."
 license     = "Apache-2.0"
 
@@ -242,6 +244,22 @@ openkal-opensbi = { version = "^0.9.0", features = ["standalone"] }
 [target.'cfg(os = "none")'.build]
 defines = ["OKM_HAS_FS=0", "OKM_HAS_PROCESS=0", "OKM_HAS_TASK=0"]
 
+# AND WHERE THE IMPLEMENTATION BENEATH STATES WHAT IT PROVIDES, IT IS ASKED
+# (0.29.6, mcpp 2026.11.13.1 `cfg(interface = ...)'): the proxy above is
+# replaced by the implementation's own `[kernel-abi] provides-interfaces'. A
+# firmware's implementation (openkal-uefi) provides no files, programs or
+# contexts; one that states no list provides every interface, and these do not
+# apply. An ok image is excluded: its implementation is bound at run time
+# (`cfg(os = "openkal")', mode 2, below).
+[target.'cfg(all(not(os = "openkal"), not(interface = "openkal.fs")))'.build]
+defines = ["OKM_HAS_FS=0"]
+
+[target.'cfg(all(not(os = "openkal"), not(interface = "openkal.process")))'.build]
+defines = ["OKM_HAS_PROCESS=0"]
+
+[target.'cfg(all(not(os = "openkal"), not(interface = "openkal.task")))'.build]
+defines = ["OKM_HAS_TASK=0"]
+
 # AN OK IMAGE (`<arch>-openkal`, openkal SPEC clause 12) HOLDS NO IMPLEMENTATION.
 # Its `kal_*' names are bound by the loader that runs it, to the one
 # implementation of that process; this library is above them as it is above any
@@ -294,11 +312,18 @@ sources = [
 # A graph without it is refused here, naming the layer, rather than at the link
 # with `___chkstk_ms' undefined (measured: a Linux host cross-building for
 # x86_64-windows with this package alone).
-[target.'cfg(all(windows, compiler = "llvm"))']
+[target.'cfg(all(object-format = "pe", compiler = "llvm"))']
 requires = ["mcpp:compiler-runtime=compiler-rt"]
 
 [target.'cfg(windows)'.dependencies]
 openkal-windows = { version = "^0.21.1", features = ["standalone"] }
+
+# UEFI (0.29.6): the implementation on the firmware's Boot Services, standalone:
+# its entry hands the program to this library (`__libc_start_main'). The row is
+# a platform's (`x86_64-uefi', PE); what this port needs for the container is
+# selected by `object-format = "pe"', as on Windows.
+[target.'cfg(os = "uefi")'.dependencies]
+openkal-uefi = { version = "^0.10.0", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #
@@ -846,18 +871,18 @@ ldflags = ["-nostdlib", "-lSystem",
 # musl states its data model in three lines of bits/alltypes.h, and every
 # architecture it supports states LP64 or ILP32. This package's own [c-abi]
 # block above now states LP64 for Windows too — the same three lines this
-# architecture states everywhere else — so `musl-generated/x86_64-windows`
+# architecture states everywhere else — so `musl-generated/x86_64-pe`
 # and `musl-generated/x86_64` carry the same three lines; they are kept as
-# two directories because the row below still names its own target and
-# because a target-specific generated header is the seam a future divergence
-# would land in, not because the content differs today.
+# two directories because the PE rows' setjmp record (the Microsoft x64
+# convention's, bits/setjmp.h) is in the first. The directory serves every
+# x86_64 PE row (0.29.6: Windows and UEFI), selected by the container.
 # musl-generated/README.md records the three lines and how they are
 # produced.
-[target.'cfg(all(arch = "x86_64", not(windows), not(os = "macos"), not(os = "openkal"), not(os = "freebsd")))'.build]
+[target.'cfg(all(arch = "x86_64", not(object-format = "pe"), not(os = "macos"), not(os = "openkal"), not(os = "freebsd")))'.build]
 include_dirs = ["musl-generated/x86_64", "musl/arch/x86_64", "musl/arch/generic"]
 
-[target.'cfg(all(arch = "x86_64", windows))'.build]
-include_dirs = ["musl-generated/x86_64-windows", "musl/arch/x86_64", "musl/arch/generic"]
+[target.'cfg(all(arch = "x86_64", object-format = "pe"))'.build]
+include_dirs = ["musl-generated/x86_64-pe", "musl/arch/x86_64", "musl/arch/generic"]
 
 # THREE ROWS FOR ONE ARCHITECTURE NOW, NOT TWO — found by
 # `port/src/okm_type_identity.c`, which checks every one of these generated
@@ -934,7 +959,7 @@ include_dirs = ["musl-generated/i386", "musl/arch/i386", "musl/arch/generic"]
 # archive of compiler support routines to add: the entry point is this
 # library's, and the implementation beneath it names the libraries its own
 # interfaces live in.
-[target.'cfg(windows)'.build]
+[target.'cfg(object-format = "pe")'.build]
 # WHICH TARGET THIS IS, STATED BY THE MANIFEST RATHER THAN READ OFF THE
 # COMPILER.
 #
@@ -956,7 +981,13 @@ include_dirs = ["musl-generated/i386", "musl/arch/i386", "musl/arch/generic"]
 # openkal's own `[target.'cfg(windows)']`, as every other consumer of this
 # port already does; it does not read this macro, which is why it is not
 # named `OKM_WINDOWS` or anything a program might reach for.
-defines = ["OKM_TARGET_WINDOWS=1"]
+# 0.29.6: THE CONTAINER, AND THE SYSTEM BESIDE IT. Three of the four sites
+# ask about the container --- the object-format shims in okm_format.c, the
+# initialisers' list in okm_start.c, the weak_alias fallback in features.h ---
+# and port/src/okm_setjmp.S writes the Microsoft x64 convention's record; they
+# read OKM_TARGET_PE, defined on every PE row (Windows, UEFI). The `.exe' retry
+# in okm_spawn.c is Windows's alone and reads OKM_TARGET_WINDOWS (below).
+defines = ["OKM_TARGET_PE=1"]
 
 # The port's own dl_iterate_phdr is for ELF and is excluded here, as musl's was:
 # this format has no program headers.
@@ -1001,4 +1032,11 @@ sources = [
 # ⇒ Measured after removing them, with `openkal-llvm-runtime` in the graph
 # (which now builds compiler-rt's builtins AND `emutls.c` for this format):
 # `examples/same-source` links and the program runs, printing `unwound: true`.
+# The link words are Windows's (below): a PE row a platform defines states its
+# own link, as UEFI's does through ld.lld.
+
+# Windows's own: the entry point openkal-windows supplies (`okw_start', its
+# standalone feature) and the `.exe' retry of a program's name.
+[target.'cfg(windows)'.build]
+defines = ["OKM_TARGET_WINDOWS=1"]
 ldflags = ["-nostdlib", "-static", "-Wl,--gc-sections", "-Wl,-e,okw_start"]

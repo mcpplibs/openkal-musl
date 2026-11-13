@@ -246,7 +246,7 @@ int pthread_getattr_np(pthread_t t, pthread_attr_t* a)
 
 	void* base = 0;
 	kal_uintptr size = 0;
-	if (kal_task_stack(&base, &size) != kal_ok) return ENOSYS;
+	if (okm_task_stack(&base, &size) != kal_ok) return ENOSYS;
 	if (base == 0 || size == 0) return ENOSYS;
 
 	*a = (pthread_attr_t){0};
