@@ -138,6 +138,12 @@ and on that triple the compiler's `__WINT_TYPE__` is `int` (clang 23, both
 architectures); `port/src/okm_type_identity.c` checks the header against it.
 Every other line is the architecture's, as the image convention fixes it.
 
+## i386 for no operating system (0.29.6)
+
+`i386-none/` is `i386/` with the same one line changed, `typedef int wint_t;`: the rows compiled
+for `i386-unknown-none-elf` --- DOS through openkal-dos (technical experiment only) and the i386
+ok image --- see `__WINT_TYPE__` as `int` there (clang 23).
+
 ## FreeBSD (0.29.1)
 
 `x86_64-freebsd/` and `aarch64-freebsd/` are `x86_64/` and `aarch64/` with one

@@ -325,6 +325,12 @@ openkal-windows = { version = "^0.21.1", features = ["standalone"] }
 [target.'cfg(os = "uefi")'.dependencies]
 openkal-uefi = { version = "^0.10.0", features = ["standalone"] }
 
+# DOS (0.29.6; technical experiment only): openkal-dos through DPMI, standalone: its entry hands
+# the program to this library (`__libc_start_main'). The row is a platform's (`i686-dos-musl',
+# an ELF32 executable behind openkal-dos's stub).
+[target.'cfg(os = "dos")'.dependencies]
+openkal-dos = { version = "^0.1.0", features = ["standalone"] }
+
 # The feature macros musl's own build establishes.
 #
 # musl's <features.h> turns on the POSIX and BSD declarations when a program
@@ -954,6 +960,12 @@ include_dirs = ["musl-generated/riscv64", "musl/arch/riscv64", "musl/arch/generi
 # port's one change to it (no PAGESIZE), and the headers generated from it.
 [target.'cfg(all(arch = "i686", os = "linux"))'.build]
 include_dirs = ["musl-generated/i386", "musl/arch/i386", "musl/arch/generic"]
+
+# i386 compiled for no operating system (`i386-unknown-none-elf'): DOS (0.29.6, openkal-dos;
+# technical experiment only) and the i386 ok image. On that triple `wint_t' is `int', as on the
+# other ok-image architectures (musl-generated/README.md).
+[target.'cfg(all(arch = "i686", any(os = "dos", os = "openkal")))'.build]
+include_dirs = ["musl-generated/i386-none", "musl/arch/i386", "musl/arch/generic"]
 
 # The link line on this environment. There is no separate loader to name and no
 # archive of compiler support routines to add: the entry point is this

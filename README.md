@@ -1036,6 +1036,23 @@ than the size; one that is not is asked at the page, and mimalloc aligns within
 a larger part. Measured: an ok image carried by a UEFI application (two
 allocators, each with one arena) runs under OVMF with 1 GiB or more.
 
+### DOS (0.29.6; technical experiment only)
+
+`i686-dos-musl` (a platform's row, an ELF32 i386 executable behind the stub of
+openkal-dos) is served on openkal-dos with `standalone`, whose `okdos_entry`
+hands the program to `__libc_start_main`. The row is compiled for
+`i386-unknown-none-elf`, where `wint_t` is `int`, so its record is
+`musl-generated/i386-none` (shared with the i386 ok image), and the allocator is
+musl's own (`malloc-mallocng`): DPMI memory is a machine's few megabytes, which
+mimalloc's arenas do not fit. openkal-dos provides `openkal.fs` and neither
+`openkal.process` nor `openkal.task`, so files are the C library's
+(`OKM_HAS_FS=1`) and processes and threads are absent, as on UEFI. Measured under
+DOSBox Staging with CWSDPMI: a C++23 program with `import std`,
+`std::ranges::sort`, `std::println`, an exception crossing a frame,
+`std::this_thread::sleep_for` and `getenv` prints and returns its status, and one
+with `std::filesystem` and `std::fstream` writes, appends, reads, renames, lists,
+resizes and removes files and directories.
+
 ## What runs above it
 
 | | |
