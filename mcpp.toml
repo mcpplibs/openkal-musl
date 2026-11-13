@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.29.5"
+version     = "0.29.6"
 # `embed' and `exclude' on a dependency edge (the allocator, below) are mcpp
 # 2026.11.2.1's; an older engine refuses the edge rather than building a C
 # library without its allocator.
@@ -268,6 +268,12 @@ llvm.compiler-rt-builtins = "22.1.8.6"
 # before the entry. musl's own `dl*' sources are for a program linked
 # statically and are replaced.
 [target.'cfg(os = "openkal")'.build]
+# THE OPTIONAL INTERFACES ARE ASKED AT RUN TIME (0.29.6): an image is run by a loader on the
+# implementation of whatever machine runs it, which a firmware or a single-task system may be.
+# openkal.fs, .process and .task are imported weakly and called where bound (port/src/okm_opt.h,
+# mode 2); where they are not, the C library answers as it does on a bare machine (ENOSYS, one
+# context), and the image's requirements note names only what it needs to start.
+defines = ["OKM_HAS_FS=2", "OKM_HAS_PROCESS=2", "OKM_HAS_TASK=2"]
 sources = [
   "!port/src/okm_phdr.c",
   "!port/src/okm_prof_hosted.c",

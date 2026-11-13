@@ -342,6 +342,17 @@ static void okm_malloc_preference(void)
 	}
 }
 
+/* AN ARENA'S SIZE, IN KiB (0.29.6). With regions, mimalloc's own: a gibibyte
+ * reserved and backed part by part. Without them memory is `kal_alloc' and is
+ * backed whole at once, which is a firmware's pool on a machine of some hundred
+ * mebibytes: an arena is then 16 MiB (mimalloc takes a quarter of it, 4 MiB,
+ * where it cannot reserve without backing, arena.c) and grows as mimalloc grows
+ * it, by doubling every eighth arena. */
+static long okm_arena_reserve(void)
+{
+	return regions() ? 1024 * 1024 : 16 * 1024;
+}
+
 __attribute__((__visibility__("hidden"))) void __okm_malloc_init(void)
 {
 	/* Not while a snapshot's initialisers run: the start supplies it (below). */
@@ -350,15 +361,16 @@ __attribute__((__visibility__("hidden"))) void __okm_malloc_init(void)
 	 * program started from it reserves all of it again: mimalloc reserves a
 	 * gibibyte at a time, so it is asked for little while they run. */
 	if (sealing()) mi_option_set(mi_option_arena_reserve, 4 * 1024);   /* KiB */
+	else mi_option_set_default(mi_option_arena_reserve, okm_arena_reserve());
 	_mi_auto_process_init();
 }
 
 /* A PROGRAM STARTED FROM A SNAPSHOT (0.27.0, okm_start.c): the randomness the
  * initialisers ran without is drawn now, as mimalloc draws it again where it
- * started weakly, and the arena is reserved at mimalloc's own size again. */
+ * started weakly, and the arena is reserved at its own size again. */
 __attribute__((__visibility__("hidden"))) void __okm_malloc_start(void)
 {
-	mi_option_set(mi_option_arena_reserve, 1024 * 1024);   /* KiB: mimalloc's own, a gibibyte */
+	mi_option_set(mi_option_arena_reserve, okm_arena_reserve());
 	okm_malloc_preference();
 	mi_theap_t* theap = _mi_theap_default();
 	if (theap != NULL) {

@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.29.5"
+openkal-musl = "0.29.6"
 ```
 
 The package states compatible ranges for the packages beneath it: OpenKal ^0.25,
@@ -987,6 +987,23 @@ supplies the layer itself (`openkal-llvm-runtime`) depends on this one with
 `examples/image-early-constructor` are built once on Linux for both
 architectures and run through `okrun` on four systems in CI.
 
+### Optional interfaces asked at run time (0.29.6)
+
+An image is built once and run by a loader on the implementation of whatever
+machine runs it, a firmware among them. In the image form `openkal.fs`,
+`openkal.process` and `openkal.task` are therefore asked at run time
+(`OKM_HAS_FS=2`, `OKM_HAS_PROCESS=2`, `OKM_HAS_TASK=2`, `port/src/okm_opt.h`):
+each of their names is imported weakly (SPEC 12.4), the call reaches it where it
+is bound and the answer of the build without the interface where it is not ---
+`ENOSYS`-class errors, one execution context, no files. The image's requirements
+then name only what it calls unconditionally. An image of `import std` that uses
+neither files nor processes nor threads requires `openkal.abort`, `openkal.env`,
+`openkal.memory`, `openkal.stream` and `openkal.time` (with openkal-llvm-runtime
+0.20.3; measured: 21 strong imports, 84 weak). Without `openkal.region` the
+allocator's memory is backed whole at once, so an arena is 16 MiB rather than
+mimalloc's gibibyte (`okm_mimalloc_prim.c`). The libraries built for a known
+implementation are unchanged.
+
 ## What runs above it
 
 | | |
@@ -1039,6 +1056,10 @@ The port is Apache-2.0. The vendored musl sources under `musl/` are MIT, and
 `musl/COPYRIGHT` is unchanged.
 
 ## OpenKal 0.25 dependency group
+
+Version 0.29.6 asks for `openkal.fs`, `openkal.process` and `openkal.task` at run
+time in an ok image, and sizes the allocator's arenas for memory that is backed
+at once (above).
 
 Version 0.29.5 names openkal-linux ^0.26.3, whose processor time on i386 is read
 through the sixty-four bit clock, and adds i386 (above).
