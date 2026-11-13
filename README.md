@@ -1023,6 +1023,19 @@ siblings define `OKM_HAS_FS=0`, `OKM_HAS_PROCESS=0` and `OKM_HAS_TASK=0`
 openkal-llvm-runtime 0.20.3, is a 1.2 MB EFI application that prints and returns
 its status under OVMF in 0.8 s.
 
+Without `openkal.region` the allocator's memory is backed when it is reserved,
+and the operating-system layer of mimalloc (port/src/mimalloc) states three
+consequences. A reservation is cleared when it is made, because mimalloc reads
+reserved memory as zero on its first commit (its page map stores into it
+unread; under OVMF, whose pool holds a fill pattern, the first page registered
+faulted). An arena is the smallest mimalloc admits, 32 MiB, rather than a
+quarter of 1 GiB. The alignment mimalloc states (256 MiB for an arena) is passed
+to `kal_alloc` and recorded for `kal_free`, so that an implementation able to
+place memory at an alignment (openkal-uefi 0.10.0 places pages) takes no more
+than the size; one that is not is asked at the page, and mimalloc aligns within
+a larger part. Measured: an ok image carried by a UEFI application (two
+allocators, each with one arena) runs under OVMF with 1 GiB or more.
+
 ## What runs above it
 
 | | |
