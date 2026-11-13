@@ -36,9 +36,10 @@ env:
   # openkal images, whose platform version group is selected by the engine;
   # use the release that selects the corrected 0.23.2 group. Until it is
   # published, MCPP_SOURCE_REF builds the same candidate from source.
-  MCPP_VERSION: 2026.11.5.1
+  # 0.29.6: 2026.11.13.1, which selects by `cfg(object-format)' and `cfg(interface)'.
+  MCPP_VERSION: 2026.11.13.1
   # okrun is built from openkal-image, whose openkal-run states its own floor.
-  OKRUN_MCPP_VERSION: 2026.11.10.1
+  OKRUN_MCPP_VERSION: 2026.11.13.1
   XLINGS_VERSION: v2026.10.26.1
   # The mtest engine the probes and the bench are run under and reported with
   # (tools/run-probe.sh with MTEST set; tests/mtest_protocol.h is what they
