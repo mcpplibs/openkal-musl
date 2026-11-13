@@ -8,11 +8,11 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.29.4"
+openkal-musl = "0.29.5"
 ```
 
 The package states compatible ranges for the packages beneath it: OpenKal ^0.25,
-Linux ^0.26, macOS ^0.23, Windows ^0.21, FreeBSD ^0.1, OpenSBI ^0.9 and image
+Linux ^0.26.3, macOS ^0.23, Windows ^0.21, FreeBSD ^0.1, OpenSBI ^0.9 and image
 bindings ^0.5. A target that
 selects openkal-platform receives the exact versions of its version group; any
 other build receives the newest compatible release, recorded in `mcpp.lock`.
@@ -647,6 +647,36 @@ rather than beneath because openkal is deliberately literal about names: it
 passes on the name it was given and does not know that a program is a kind of
 file.
 
+## i386 (0.29.5)
+
+**The target `i686-linux-musl`** (openkal 0.25.1, clause 5.5; openkal-linux
+0.26.2). musl's `arch/i386` is vendored from 1.2.5 without `PAGESIZE`, and its
+generated headers are `musl-generated/i386`. musl's `time_t` and `off_t` are
+sixty-four bits there and its word is thirty-two, so three things changed in the
+port:
+
+- **The argument word is sixty-four bits** (`port/include/syscall_arch.h`) wherever
+  `long` is narrower than that. A position or a size passed whole reaches the
+  dispatcher whole; musl's public `syscall()` reads its arguments at the width
+  they were passed and widens them (musl/PATCHES.md).
+- **A time is read at the width its number states** (`okm_wide`). musl passes a
+  time under the old numbers as two words whenever it fits and under the
+  `_time64` numbers otherwise; a 20 ms sleep read in the wrong width slept for
+  sixteen billion seconds. `clock_gettime` of a clock other than the two read
+  directly asks the `_time64` number, whose record is musl's `struct timespec`.
+- **The thirty-two bit table's forms of the calls are answered**: `_llseek`,
+  `mmap2` (a position in pages), `truncate64`, `fstat64`, `fcntl64`, the
+  `getuid32` family, `_newselect`; the futex bound is read only for a wait.
+
+`setjmp` saves the six registers i386 preserves. Measured with openkal-linux
+0.26.3 and openkal-llvm-runtime 0.20.2: a C program (a file past 4 GiB, threads,
+the clocks, `posix_spawn`) and a C++23 program (`import std`, exceptions,
+`std::jthread`, `std::format`, file streams); the examples `posix`, `link-stubs`,
+`threads-cxx`, `threads-detached`, `stack-bounds`, `mmap`, `long-names`, `locks`,
+`grants`, `process-identity`, `malloc-threads`, `strings`, `subprocess`
+(Linux's arguments) and `net` with no failure, and `wordcount` agreeing with
+`wc`.
+
 ## A program's identifier, and its claim on the processors (0.24.0)
 
 **`getpid` is the identifier the environment gives the program** (`kal_process_info`,
@@ -1009,6 +1039,9 @@ The port is Apache-2.0. The vendored musl sources under `musl/` are MIT, and
 `musl/COPYRIGHT` is unchanged.
 
 ## OpenKal 0.25 dependency group
+
+Version 0.29.5 names openkal-linux ^0.26.3, whose processor time on i386 is read
+through the sixty-four bit clock, and adds i386 (above).
 
 Version 0.29.4 names openkal-windows ^0.21.1. 0.29.3 named ^0.22.1, the first
 release with the handle correction, and so left the line the rest of the family

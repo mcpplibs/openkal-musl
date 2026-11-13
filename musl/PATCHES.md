@@ -830,3 +830,23 @@ granularity, while this library maps and releases memory in that granularity
 65536, a program that mapped two pages and released the second was refused.
 Without the constant the page is `libc.page_size`, as musl already has it on
 aarch64.
+
+## i386 (0.29.5)
+
+### `arch/i386/`, vendored from musl 1.2.5, and `bits/limits.h`, the one line removed
+
+The architecture's directory as musl 1.2.5 ships it (the release archive's
+sha256 `a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4`),
+without `arch.mak`, and without `PAGESIZE` for the reason the x86_64 entry
+above gives. The generated headers are `musl-generated/i386/`, made by the
+commands of `musl-generated/README.md`.
+
+### `src/misc/syscall.c`, the arguments read at the caller's width
+
+`syscall(long n, ...)` read its six arguments as `syscall_arg_t`. This port's
+argument word is sixty-four bits wherever `long` is narrower
+(`port/include/syscall_arch.h`): on i386 a position passed whole is otherwise cut
+to its low half. A caller of `syscall` passes `long`s and pointers, four bytes
+each on i386, so reading the wider word took two arguments as one (measured: a
+`syscall(SYS_renameat2, ...)` reached the dispatcher with its directory as its
+name). Each is read as `intptr_t`, the width of what was passed, and widened.

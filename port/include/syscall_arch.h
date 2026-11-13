@@ -27,8 +27,14 @@
  * assumed, and on a target where the two agree these definitions are what musl
  * would have used anyway.
  */
+/* A THIRTY-TWO BIT `long' TAKES THE WIDER WORD TOO (i386; openkal 0.25.1, clause
+ * 5.5). There a `long' holds a pointer and not a position: with `long' as the
+ * argument word, `__SYSCALL_LL_E' below passed a file position of five gibibytes
+ * as one gibibyte (measured: a `pwrite' at 5 GiB landed at 1 GiB). The word is
+ * the port's to choose, since the call it reaches is this library's and not the
+ * kernel's, and the wider one is what keeps every argument whole. */
 #if defined(__SIZEOF_LONG__) && defined(__SIZEOF_POINTER__) \
-    && __SIZEOF_LONG__ < __SIZEOF_POINTER__
+    && (__SIZEOF_LONG__ < __SIZEOF_POINTER__ || __SIZEOF_LONG__ < 8)
 typedef long long          syscall_arg_t;
 typedef unsigned long long syscall_uret_t;
 #define __scc(X) ((long long)(X))
@@ -38,9 +44,9 @@ typedef unsigned long syscall_uret_t;
 #define __scc(X) ((long)(X))
 #endif
 
-/* Both data models this port builds for pass every argument in one word and
- * split none across two. The definitions exist because musl's generic code
- * refers to them. */
+/* Every data model this port builds for passes every argument in one word of
+ * at least sixty-four bits and splits none across two. The definitions exist
+ * because musl's generic code refers to them. */
 #define __SYSCALL_LL_E(x) (x)
 #define __SYSCALL_LL_O(x) (x)
 

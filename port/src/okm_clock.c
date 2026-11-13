@@ -36,7 +36,14 @@ int __clock_gettime(clockid_t clk, struct timespec* ts)
 		put(kal_time_wall(), ts);
 		return 0;
 	default:
+		/* The number whose record is musl's `struct timespec': on a thirty-two
+		 * bit word musl names the old number SYS_clock_gettime, whose record is
+		 * two words (okm_syscall.c, okm_wide). */
+#ifdef SYS_clock_gettime64
+		return __syscall_ret(__syscall(SYS_clock_gettime64, clk, ts));
+#else
 		return __syscall_ret(__syscall(SYS_clock_gettime, clk, ts));
+#endif
 	}
 }
 

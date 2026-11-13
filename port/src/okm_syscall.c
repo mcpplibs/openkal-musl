@@ -948,6 +948,76 @@ static void to_timespec(kal_duration ns, struct timespec* ts)
 	ts->tv_nsec = (long)(ns % 1000000000u);
 }
 
+/* A TIME AS A CALL'S ARGUMENT CARRIES IT, WHOSE WIDTH THE NUMBER STATES.
+ *
+ * On a thirty-two bit word (i386; openkal 0.25.1, clause 5.5) musl passes a time
+ * to the kernel in two forms: two words (`long[2]', seconds and the fraction)
+ * under the old numbers, whenever the value fits a word, and two sixty-four bit
+ * values (`long long[2]') under the `_time64' numbers only when it does not ---
+ * and `clock_getres' asks the old number first and never the other. On a
+ * sixty-four bit word the two forms are the same record. A record read in the
+ * wrong width misplaces the fraction in silence, so the width is decided once,
+ * here, from the number. */
+#if __SIZEOF_LONG__ == 4
+static int okm_wide(syscall_arg_t n)
+{
+	switch (n) {
+#ifdef SYS_clock_gettime64
+	case SYS_clock_gettime64: case SYS_clock_getres_time64: case SYS_clock_nanosleep_time64:
+	case SYS_futex_time64: case SYS_ppoll_time64: case SYS_pselect6_time64:
+	case SYS_utimensat_time64:
+		return 1;
+#endif
+	default:
+		return 0;
+	}
+}
+#else
+#define okm_wide(n) 0
+#endif
+
+static struct timespec okm_time_in(const void* p, int i, int wide)
+{
+	struct timespec t;
+	if (wide) {
+		const long long* q = (const long long*)p;
+		t.tv_sec = (time_t)q[2 * i]; t.tv_nsec = (long)q[2 * i + 1];
+	} else {
+		const long* q = (const long*)p;
+		t.tv_sec = (time_t)q[2 * i]; t.tv_nsec = q[2 * i + 1];
+	}
+	return t;
+}
+
+static void okm_time_out(void* p, int wide, kal_duration ns)
+{
+	if (wide) {
+		long long* q = (long long*)p;
+		q[0] = (long long)(ns / 1000000000u); q[1] = (long long)(ns % 1000000000u);
+	} else {
+		long* q = (long*)p;
+		q[0] = (long)(ns / 1000000000u); q[1] = (long)(ns % 1000000000u);
+	}
+}
+
+
+/* THE NUMBERS A THIRTY-TWO BIT TABLE GIVES THESE CALLS. The cases below are
+ * written with the names a sixty-four bit table has; where this architecture's
+ * table lacks one, the name stands for the form musl reaches it by here: the
+ * sixty-four bit time form (whose width okm_wide states), `fstatat64'. */
+#if !defined(SYS_clock_gettime) && defined(SYS_clock_gettime64)
+#define SYS_clock_gettime SYS_clock_gettime64
+#endif
+#if !defined(SYS_clock_getres) && defined(SYS_clock_getres_time64)
+#define SYS_clock_getres SYS_clock_getres_time64
+#endif
+#if !defined(SYS_clock_nanosleep) && defined(SYS_clock_nanosleep_time64)
+#define SYS_clock_nanosleep SYS_clock_nanosleep_time64
+#endif
+#if !defined(SYS_newfstatat) && defined(SYS_fstatat64)
+#define SYS_newfstatat SYS_fstatat64
+#endif
+
 /* --- processes -------------------------------------------------------------- */
 
 /* THE BOUND IS PART OF THE CONTRACT, AND IT WAS NOT.
@@ -1268,15 +1338,23 @@ static syscall_arg_t signal_self(int sig)
 static kal_u64 g_children_cpu_ns;
 static kal_u64 g_children_peak;
 
-static void usage_of(kal_u64 cpu_ns, kal_u64 peak, struct rusage* ru)
+/* THE KERNEL'S RECORD OF USE, as `getrusage' and `wait4' write it: every field a
+ * word, the times as seconds and microseconds. musl hands these calls a pointer
+ * to that record and, where its own `struct rusage' has sixty-four bit times
+ * (i386), converts it afterwards; on a sixty-four bit word the two records are
+ * the same. Writing musl's record there overran it on i386. */
+struct okm_krusage { long utime_s, utime_us, stime_s, stime_us, maxrss, rest[13]; };
+
+static void usage_of(kal_u64 cpu_ns, kal_u64 peak, void* out)
 {
-	*ru = (struct rusage){ 0 };
-	ru->ru_utime.tv_sec  = (time_t)(cpu_ns / 1000000000u);
-	ru->ru_utime.tv_usec = (suseconds_t)(cpu_ns % 1000000000u / 1000u);
-	ru->ru_maxrss = (long)(peak / 1024u);
+	struct okm_krusage k = { 0 };
+	k.utime_s  = (long)(cpu_ns / 1000000000u);
+	k.utime_us = (long)(cpu_ns % 1000000000u / 1000u);
+	k.maxrss   = (long)(peak / 1024u);
+	__builtin_memcpy(out, &k, sizeof k);
 }
 
-static void child_usage(struct kal_process h, struct rusage* ru)
+static void child_usage(struct kal_process h, void* ru)
 {
 	kal_u64 cpu = 0, peak = 0;
 	if (kal_process_info) {
@@ -1293,7 +1371,7 @@ static void child_usage(struct kal_process h, struct rusage* ru)
 	if (ru) usage_of(cpu, peak, ru);
 }
 
-static syscall_arg_t do_getrusage(int who, struct rusage* ru)
+static syscall_arg_t do_getrusage(int who, void* ru)
 {
 	if (!ru) return -EFAULT;
 	if (who == RUSAGE_CHILDREN) {
@@ -1619,14 +1697,18 @@ static __attribute__((__noinline__)) syscall_arg_t do_scratch_call(
 	 * Only the modification time is set. openkal reports one time for a file
 	 * and offers to set that one; a request that leaves it alone therefore
 	 * succeeds and does nothing, which is what it asked for. */
+#ifdef SYS_utimensat_time64
+	case SYS_utimensat_time64:
+#endif
 	case SYS_utimensat: {
-		const struct timespec* times = (const struct timespec*)a3;
-		if (times && times[1].tv_nsec == UTIME_OMIT) return 0;
+		struct timespec modified = { 0, UTIME_NOW };
+		if (a3) modified = okm_time_in((const void*)a3, 1, okm_wide(n));
+		if (modified.tv_nsec == UTIME_OMIT) return 0;
 
 		uint64_t when;
-		if (!times || times[1].tv_nsec == UTIME_NOW) when = kal_time_wall();
-		else when = (uint64_t)times[1].tv_sec * 1000000000u
-		          + (uint64_t)times[1].tv_nsec;
+		if (modified.tv_nsec == UTIME_NOW) when = kal_time_wall();
+		else when = (uint64_t)modified.tv_sec * 1000000000u
+		          + (uint64_t)modified.tv_nsec;
 
 		/* A null name means the descriptor itself, which is how this
 		 * library expresses `futimens'. Then the file is already open and is
@@ -1718,7 +1800,11 @@ static __attribute__((__noinline__)) syscall_arg_t do_scratch_call(
 	 * `SYS_utimensat' above opens the way it does. The divergence this produces
 	 * from POSIX, which asks for write permission and not for read, is the one
 	 * already recorded there. */
+#if defined(SYS_truncate64)
+	case SYS_truncate64: {   /* i386's number; the length whole, as every argument here */
+#else
 	case SYS_truncate: {
+#endif
 		struct okm_at* const at = &scratch.one;
 		{
 			const long r = okm_resolve(AT_FDCWD, (const char*)a1, at, 0);
@@ -1728,7 +1814,7 @@ static __attribute__((__noinline__)) syscall_arg_t do_scratch_call(
 		int e = okm_fs_open(at->base, at->rel, slen(at->rel),
 		                    KAL_OPEN_READ | KAL_OPEN_WRITE, &f);
 		if (e != kal_ok) return -okm_errno(e);
-		e = okm_fs_truncate(f, (uint64_t)a2);
+		e = okm_fs_truncate(f, (uint64_t)(int64_t)a2);
 		okm_fs_close_file(f);
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
@@ -2130,6 +2216,23 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	}
 	case SYS_copy_file_range:
 		return do_scratch_call(n, a1, a2, a3, a4, a5, a6);
+#ifdef SYS__llseek
+	/* A position in two words and the result written through a pointer (i386):
+	 * (descriptor, high, low, result, whence). */
+	case SYS__llseek: {
+		struct okm_desc* d = okm_desc_of((int)a1);
+		if (!d) return -EBADF;
+		kal_u64 at = 0;
+		if (d->kind != OKM_NULL) {
+			if (d->kind != OKM_FILE) return -ESPIPE;
+			const int64_t to = (int64_t)(((uint64_t)(uint32_t)a2 << 32) | (uint32_t)a3);
+			const int e = okm_fs_seek(d->file, to, (int)a5, &at);
+			if (e != kal_ok) return -okm_errno(e);
+		}
+		if (a4) *(int64_t*)a4 = (int64_t)at;
+		return 0;
+	}
+#endif
 	case SYS_lseek: {
 		struct okm_desc* d = okm_desc_of((int)a1);
 		if (!d) return -EBADF;
@@ -2140,15 +2243,26 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		if (e != kal_ok) return -okm_errno(e);
 		return (syscall_arg_t)at;
 	}
+#ifdef SYS_utimensat_time64
+	case SYS_utimensat_time64:
+#endif
 	case SYS_utimensat:
 		return do_scratch_call(n, a1, a2, a3, a4, a5, a6);
+#if defined(SYS_truncate64)
+	case SYS_truncate64:
+#else
 	case SYS_truncate:
+#endif
 		return do_scratch_call(n, a1, a2, a3, a4, a5, a6);
+#if defined(SYS_ftruncate64)
+	case SYS_ftruncate64: {   /* i386's number; the length whole, as every argument here */
+#else
 	case SYS_ftruncate: {
+#endif
 		struct okm_desc* d = okm_desc_of((int)a1);
 		if (d && d->kind == OKM_NULL) return -EINVAL;
 		if (!d || d->kind != OKM_FILE) return -EBADF;
-		const int e = okm_fs_truncate(d->file, (uint64_t)a2);
+		const int e = okm_fs_truncate(d->file, (uint64_t)(int64_t)a2);
 		return e == kal_ok ? 0 : -okm_errno(e);
 	}
 	case SYS_fsync:
@@ -2201,12 +2315,21 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		return 0;
 	}
 #endif
-	case SYS_fstat:    return do_fstat((int)a1, (struct kstat*)a2);
+#if defined(SYS_fstat64)
+	case SYS_fstat64:  /* this architecture's `struct kstat' is the `stat64' record */
+#else
+	case SYS_fstat:
+#endif
+	                   return do_fstat((int)a1, (struct kstat*)a2);
 	case SYS_newfstatat: return do_fstatat((int)a1, (const char*)a2, (struct kstat*)a3, (int)a4);
-#ifdef SYS_stat
+#if defined(SYS_stat64)
+	case SYS_stat64:   return do_fstatat(AT_FDCWD, (const char*)a1, (struct kstat*)a2, 0);
+#elif defined(SYS_stat)
 	case SYS_stat:     return do_fstatat(AT_FDCWD, (const char*)a1, (struct kstat*)a2, 0);
 #endif
-#ifdef SYS_lstat
+#if defined(SYS_lstat64)
+	case SYS_lstat64:
+#elif defined(SYS_lstat)
 	case SYS_lstat:    return do_fstatat(AT_FDCWD, (const char*)a1, (struct kstat*)a2,
 	                                     AT_SYMLINK_NOFOLLOW);
 #endif
@@ -2305,7 +2428,11 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	                 okm_unlock(); return r; }
 	case SYS_dup:  { okm_lock(); const syscall_arg_t r = okm_fd_dup((int)a1, -1, 0); okm_unlock(); return r; }
 
+#if defined(SYS_fcntl64)
+	case SYS_fcntl64: {   /* the record locks' positions are sixty-four bits (i386) */
+#else
 	case SYS_fcntl: {
+#endif
 		struct okm_desc* d = okm_desc_of((int)a1);
 		if (!d) return -EBADF;
 		switch ((int)a2) {
@@ -2507,6 +2634,11 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 
 	/* --- memory ----------------------------------------------------------- */
 	case SYS_mmap:   return do_mmap((void*)a1, (size_t)a2, (int)a3, (int)a4, (int)a5, (off_t)a6);
+#ifdef SYS_mmap2
+	/* The offset in units of 4096 bytes, whatever the page is (i386). */
+	case SYS_mmap2:  return do_mmap((void*)a1, (size_t)a2, (int)a3, (int)a4, (int)a5,
+	                                (off_t)((uint64_t)(unsigned long)a6 * 4096u));
+#endif
 	case SYS_munmap: {
 		long r = 0;
 		if (okm_map_unmap((void*)a1, (size_t)a2, &r)) return r;
@@ -2554,28 +2686,35 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * this port, a program idle for a second reported a second of processor
 	 * time. The program's is kal_program_info's; a context's own is not in the
 	 * interface, and is refused rather than invented. */
+#ifdef SYS_clock_gettime32
+	case SYS_clock_gettime32:
+#endif
 	case SYS_clock_gettime: {
-		struct timespec* ts = (struct timespec*)a2;
+		void* ts = (void*)a2;
+		const int wide = okm_wide(n);
 		switch ((int)a1) {
 		case CLOCK_REALTIME:
 		case CLOCK_REALTIME_COARSE:
-			to_timespec(kal_time_wall(), ts);
+			okm_time_out(ts, wide, kal_time_wall());
 			return 0;
 		case CLOCK_PROCESS_CPUTIME_ID: {
 			const long long ns = okm_self_cpu_ns();
 			if (ns < 0) return -EINVAL;
-			to_timespec((kal_duration)ns, ts);
+			okm_time_out(ts, wide, (kal_duration)ns);
 			return 0;
 		}
 		case CLOCK_THREAD_CPUTIME_ID:
 			return -EINVAL;
 		default:
-			to_timespec(kal_time_monotonic(), ts);
+			okm_time_out(ts, wide, kal_time_monotonic());
 			return 0;
 		}
 	}
+#ifdef SYS_clock_getres_time32
+	case SYS_clock_getres_time32:
+#endif
 	case SYS_clock_getres:
-		if (a2) to_timespec(kal_time_monotonic_granularity(), (struct timespec*)a2);
+		if (a2) okm_time_out((void*)a2, okm_wide(n), kal_time_monotonic_granularity());
 		return 0;
 #ifdef SYS_gettimeofday
 	case SYS_gettimeofday: {
@@ -2590,16 +2729,23 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 #endif
 #ifdef SYS_nanosleep
 	case SYS_nanosleep: {
-		const struct timespec* t = (const struct timespec*)a1;
-		if (!t) return -EFAULT;
-		kal_time_sleep((kal_duration)t->tv_sec * 1000000000u + (kal_duration)t->tv_nsec);
-		if (a2) { struct timespec* rem = (struct timespec*)a2; rem->tv_sec = 0; rem->tv_nsec = 0; }
+		/* Two words on i386, where musl's `nanosleep' of a value that fits one
+		 * reaches this number (measured: the record read as this C library's
+		 * sixty-four bit `struct timespec' slept 16105435217 seconds). */
+		if (!a1) return -EFAULT;
+		const struct timespec t = okm_time_in((const void*)a1, 0, okm_wide(n));
+		kal_time_sleep((kal_duration)t.tv_sec * 1000000000u + (kal_duration)t.tv_nsec);
+		if (a2) okm_time_out((void*)a2, okm_wide(n), 0);
 		return 0;
 	}
 #endif
+#ifdef SYS_clock_nanosleep_time32
+	case SYS_clock_nanosleep_time32:
+#endif
 	case SYS_clock_nanosleep: {
-		const struct timespec* t = (const struct timespec*)a3;
-		if (!t) return -EFAULT;
+		if (!a3) return -EFAULT;
+		const struct timespec at = okm_time_in((const void*)a3, 0, okm_wide(n));
+		const struct timespec* t = &at;
 		kal_duration ns = (kal_duration)t->tv_sec * 1000000000u + (kal_duration)t->tv_nsec;
 		if ((int)a2 & TIMER_ABSTIME) {
 			const kal_duration now = ((int)a1 == CLOCK_REALTIME)
@@ -2611,8 +2757,21 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	}
 
 	/* --- execution contexts ------------------------------------------------ */
-	case SYS_futex:
-		return __okm_futex((const int*)a1, (int)a2, (int)a3, (const struct timespec*)a4);
+#ifdef SYS_futex_time64
+	case SYS_futex_time64:
+#endif
+	case SYS_futex: {
+		/* The fourth argument is a bound only for a wait; a requeue states a
+		 * count there (measured: read as a time, `pthread_cond_wait' faulted). */
+		const int op = (int)a2 & 127;   /* without FUTEX_PRIVATE_FLAG and the clock */
+		const struct timespec* arg = (const struct timespec*)a4;
+		struct timespec bound;
+		if (a4 && (op == 0 /* FUTEX_WAIT */ || op == 9 /* FUTEX_WAIT_BITSET */)) {
+			bound = okm_time_in((const void*)a4, 0, okm_wide(n));
+			arg = &bound;
+		}
+		return __okm_futex((const int*)a1, (int)a2, (int)a3, arg);
+	}
 	/* THROUGH THE INTERFACE, NOT THROUGH THE PLATFORM.
 	 *
 	 * musl's own `src/linux/getrandom.c` issues SYS_getrandom directly, which
@@ -2734,7 +2893,7 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 
 	/* --- programs ---------------------------------------------------------- */
 	case SYS_wait4: return do_wait4((int)a1, (int*)a2, (int)a3, (void*)a4);
-	case SYS_getrusage: return do_getrusage((int)a1, (struct rusage*)a2);
+	case SYS_getrusage: return do_getrusage((int)a1, (void*)a2);
 
 	/* Replacing the calling program with another.
 	 *
@@ -2924,7 +3083,9 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	case SYS_socket:  return okm_sock_open((int)a1, (int)a2, (int)a3);
 	case SYS_bind:    return okm_sock_bind((int)a1, (const void*)a2, (unsigned)a3);
 	case SYS_listen:  return okm_sock_listen((int)a1, (int)a2);
+#ifdef SYS_accept
 	case SYS_accept:  return okm_sock_accept((int)a1, (void*)a2, (unsigned*)a3, 0);
+#endif
 	case SYS_accept4: return okm_sock_accept((int)a1, (void*)a2, (unsigned*)a3, (int)a4);
 	case SYS_connect: return okm_sock_connect((int)a1, (const void*)a2, (unsigned)a3);
 	case SYS_getsockname: return okm_sock_name((int)a1, (void*)a2, (unsigned*)a3, 0);
@@ -3020,15 +3181,26 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 #ifdef SYS_poll
 	case SYS_poll: return okm_poll((void*)a1, (unsigned long)a2, (int)a3);
 #endif
-	case SYS_ppoll:
-		return okm_poll((void*)a1, (unsigned long)a2,
-		                ms_of_timespec((const struct timespec*)a3));
+#ifdef SYS_ppoll_time64
+	case SYS_ppoll_time64:
+#endif
+	case SYS_ppoll: {
+		struct timespec bound;
+		if (a3) bound = okm_time_in((const void*)a3, 0, okm_wide(n));
+		return okm_poll((void*)a1, (unsigned long)a2, ms_of_timespec(a3 ? &bound : 0));
+	}
 
 	/* `select', which musl expresses as this call and this port expresses as
 	 * `poll'. The two describe the same question in two shapes and openkal
 	 * answers one of them. */
 #ifdef SYS_select
 	case SYS_select:
+#endif
+#ifdef SYS__newselect
+	case SYS__newselect:
+#endif
+#ifdef SYS_pselect6_time64
+	case SYS_pselect6_time64:
 #endif
 	case SYS_pselect6: {
 		const int nfds = (int)a1;
@@ -3066,19 +3238,19 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 		 * as the other would misread the fractional field by a factor of a
 		 * thousand, in silence. */
 		int ms;
+		int micro = 0;   /* `select' states the fraction in microseconds, as two words */
 #ifdef SYS_select
-		if (n == SYS_select) {
-			const struct timeval* tv = (const struct timeval*)a5;
-			struct timespec conv;
-			if (!tv) ms = -1;
-			else {
-				conv.tv_sec  = tv->tv_sec;
-				conv.tv_nsec = (long)tv->tv_usec * 1000;
-				ms = ms_of_timespec(&conv);
-			}
-		} else
+		micro = micro || n == SYS_select;
 #endif
-		ms = ms_of_timespec((const struct timespec*)a5);
+#ifdef SYS__newselect
+		micro = micro || n == SYS__newselect;
+#endif
+		if (!a5) ms = -1;
+		else {
+			struct timespec conv = okm_time_in((const void*)a5, 0, okm_wide(n));
+			if (micro) conv.tv_nsec *= 1000;
+			ms = ms_of_timespec(&conv);
+		}
 
 		const long r = okm_poll(p, (unsigned long)watched, ms);
 		if (r < 0) return r;
@@ -3102,6 +3274,9 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * notion of a user has no answer to give, and one answer must be given.
 	 * A value that is not the privileged one is chosen, so that a program
 	 * which takes a different path when privileged takes the ordinary one. */
+#ifdef SYS_getuid32
+	case SYS_getuid32: case SYS_geteuid32: case SYS_getgid32: case SYS_getegid32:
+#endif
 	case SYS_getuid: case SYS_geteuid: case SYS_getgid: case SYS_getegid:
 		return 1000;
 
