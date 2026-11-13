@@ -677,6 +677,14 @@ the clocks, `posix_spawn`) and a C++23 program (`import std`, exceptions,
 (Linux's arguments) and `net` with no failure, and `wordcount` agreeing with
 `wc`.
 
+**The i386 ok image (0.29.6)**, `i686-openkal` (openkal-platform 0.28.0,
+openkal-image 0.6.3), is the image arrangement of `port/src/image` over the same
+`arch/i386`. Its triple, `i386-unknown-none-elf`, has `int` as `wint_t`, so its
+generated headers are `musl-generated/i386-none`. That record is shared with the
+DOS row; the `alltypes.h` record of `musl-generated/i386` (Linux's `long`) was
+not used. Measured: a C++23 image with `import std`, an exception across a frame
+and `getenv` runs under an okrun built for `i686-linux-musl` on x86_64 Linux.
+
 ## A program's identifier, and its claim on the processors (0.24.0)
 
 **`getpid` is the identifier the environment gives the program** (`kal_process_info`,
