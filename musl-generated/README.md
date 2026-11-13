@@ -63,6 +63,12 @@ musl 1.2.5 release the rest of this tree is, and its absence — not any propert
 of the C++ runtime above — was what stopped this package building for a machine
 with no operating system.
 
+## i386
+
+Added 2026-11-13 by the same three commands, with `ARCH=i386`, from the
+`musl/arch/i386/` of the same musl 1.2.5 release (musl/PATCHES.md, "i386
+(0.29.5)").
+
 ## The macOS variants
 
 `aarch64-macos/` and `x86_64-macos/` each differ from the generic architecture

@@ -325,8 +325,54 @@ OKM_NAME(longjmp):
 	ret
 	OKM_SIZE(OKM_NAME(longjmp))
 
+/* --- i386 ---------------------------------------------------------------------
+ *
+ * The System V i386 convention: the record is the argument on the stack, four
+ * registers are the callee's (ebx, esi, edi, ebp), and the stack pointer and the
+ * resumption address complete it. musl's own sequence, src/setjmp/i386. */
+#elif defined(__i386__)
+
+OKM_DECL(__setjmp)
+OKM_DECL(_setjmp)
+OKM_DECL(setjmp)
+OKM_DECL(sigsetjmp)
+OKM_DECL(__sigsetjmp)
+OKM_NAME(__setjmp):
+OKM_NAME(_setjmp):
+OKM_NAME(setjmp):
+OKM_NAME(sigsetjmp):
+OKM_NAME(__sigsetjmp):
+	mov 4(%esp),%eax
+	mov %ebx,(%eax)
+	mov %esi,4(%eax)
+	mov %edi,8(%eax)
+	mov %ebp,12(%eax)
+	lea 4(%esp),%ecx        /* the stack pointer without this call's own return address */
+	mov %ecx,16(%eax)
+	mov (%esp),%ecx
+	mov %ecx,20(%eax)
+	xor %eax,%eax
+	ret
+	OKM_SIZE(OKM_NAME(setjmp))
+
+OKM_DECL(_longjmp)
+OKM_DECL(longjmp)
+OKM_NAME(_longjmp):
+OKM_NAME(longjmp):
+	mov 4(%esp),%edx
+	mov 8(%esp),%eax
+	cmp $1,%eax             /* a value of zero is reported as one */
+	adc $0,%al
+	mov (%edx),%ebx
+	mov 4(%edx),%esi
+	mov 8(%edx),%edi
+	mov 12(%edx),%ebp
+	mov 16(%edx),%esp
+	jmp *20(%edx)
+	OKM_SIZE(OKM_NAME(longjmp))
+
 #else
-#error "openkal-musl provides setjmp for x86_64, aarch64 and riscv64"
+#error "openkal-musl provides setjmp for x86_64, aarch64, riscv64 and i386"
 #endif
 
 /* An executable stack is not required by anything above, and the linker assumes
