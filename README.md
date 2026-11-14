@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.29.5"
+openkal-musl = "0.29.6"
 ```
 
 The package states compatible ranges for the packages beneath it: OpenKal ^0.25,
@@ -677,6 +677,14 @@ the clocks, `posix_spawn`) and a C++23 program (`import std`, exceptions,
 (Linux's arguments) and `net` with no failure, and `wordcount` agreeing with
 `wc`.
 
+**The i386 ok image (0.29.6)**, `i686-openkal` (openkal-platform 0.28.0,
+openkal-image 0.6.3), is the image arrangement of `port/src/image` over the same
+`arch/i386`. Its triple, `i386-unknown-none-elf`, has `int` as `wint_t`, so its
+generated headers are `musl-generated/i386-none`. That record is shared with the
+DOS row; the `alltypes.h` record of `musl-generated/i386` (Linux's `long`) was
+not used. Measured: a C++23 image with `import std`, an exception across a frame
+and `getenv` runs under an okrun built for `i686-linux-musl` on x86_64 Linux.
+
 ## A program's identifier, and its claim on the processors (0.24.0)
 
 **`getpid` is the identifier the environment gives the program** (`kal_process_info`,
@@ -987,6 +995,72 @@ supplies the layer itself (`openkal-llvm-runtime`) depends on this one with
 `examples/image-early-constructor` are built once on Linux for both
 architectures and run through `okrun` on four systems in CI.
 
+### Optional interfaces asked at run time (0.29.6)
+
+An image is built once and run by a loader on the implementation of whatever
+machine runs it, a firmware among them. In the image form `openkal.fs`,
+`openkal.process` and `openkal.task` are therefore asked at run time
+(`OKM_HAS_FS=2`, `OKM_HAS_PROCESS=2`, `OKM_HAS_TASK=2`, `port/src/okm_opt.h`):
+each of their names is imported weakly (SPEC 12.4), the call reaches it where it
+is bound and the answer of the build without the interface where it is not ---
+`ENOSYS`-class errors, one execution context, no files. The image's requirements
+then name only what it calls unconditionally. An image of `import std` that uses
+neither files nor processes nor threads requires `openkal.abort`, `openkal.env`,
+`openkal.memory`, `openkal.stream` and `openkal.time` (with openkal-llvm-runtime
+0.20.3; measured: 21 strong imports, 84 weak). Without `openkal.region` the
+allocator's memory is backed whole at once, so an arena is 16 MiB rather than
+mimalloc's gibibyte (`okm_mimalloc_prim.c`). The libraries built for a known
+implementation are unchanged.
+
+### UEFI, and the PE container (0.29.6)
+
+`x86_64-uefi` (a platform's row, PE) is served as Windows is: what the port needs
+for the container --- the Microsoft x64 convention's `jmp_buf`, the initialisers'
+list, the object-format shims, the compiler-rt requirement --- is selected by
+`cfg(object-format = "pe")` (mcpp 2026.11.13.1), the record in
+`musl-generated/x86_64-pe` and the private define `OKM_TARGET_PE`. Windows's own
+parts (openkal-windows, its entry `okw_start`, the `.exe` retry, its link words)
+stay under `cfg(windows)`. On UEFI the implementation is openkal-uefi with
+`standalone`, whose `efi_main` hands the program to `__libc_start_main`.
+
+Where the implementation beneath states the interfaces it provides, the optional
+ones are taken from it: `cfg(not(interface = "openkal.fs"))` and its two
+siblings define `OKM_HAS_FS=0`, `OKM_HAS_PROCESS=0` and `OKM_HAS_TASK=0`
+(openkal-uefi provides none of the three). Measured: `import std` with
+`std::println` and `std::ranges::sort`, built for `x86_64-uefi` with
+openkal-llvm-runtime 0.20.3, is a 1.2 MB EFI application that prints and returns
+its status under OVMF in 0.8 s.
+
+Without `openkal.region` the allocator's memory is backed when it is reserved,
+and the operating-system layer of mimalloc (port/src/mimalloc) states three
+consequences. A reservation is cleared when it is made, because mimalloc reads
+reserved memory as zero on its first commit (its page map stores into it
+unread; under OVMF, whose pool holds a fill pattern, the first page registered
+faulted). An arena is the smallest mimalloc admits, 32 MiB, rather than a
+quarter of 1 GiB. The alignment mimalloc states (256 MiB for an arena) is passed
+to `kal_alloc` and recorded for `kal_free`, so that an implementation able to
+place memory at an alignment (openkal-uefi 0.10.0 places pages) takes no more
+than the size; one that is not is asked at the page, and mimalloc aligns within
+a larger part. Measured: an ok image carried by a UEFI application (two
+allocators, each with one arena) runs under OVMF with 1 GiB or more.
+
+### DOS (0.29.6; technical experiment only)
+
+`i686-dos-musl` (a platform's row, an ELF32 i386 executable behind the stub of
+openkal-dos) is served on openkal-dos with `standalone`, whose `okdos_entry`
+hands the program to `__libc_start_main`. The row is compiled for
+`i386-unknown-none-elf`, where `wint_t` is `int`, so its record is
+`musl-generated/i386-none` (shared with the i386 ok image), and the allocator is
+musl's own (`malloc-mallocng`): DPMI memory is a machine's few megabytes, which
+mimalloc's arenas do not fit. openkal-dos provides `openkal.fs` and neither
+`openkal.process` nor `openkal.task`, so files are the C library's
+(`OKM_HAS_FS=1`) and processes and threads are absent, as on UEFI. Measured under
+DOSBox Staging with CWSDPMI: a C++23 program with `import std`,
+`std::ranges::sort`, `std::println`, an exception crossing a frame,
+`std::this_thread::sleep_for` and `getenv` prints and returns its status, and one
+with `std::filesystem` and `std::fstream` writes, appends, reads, renames, lists,
+resizes and removes files and directories.
+
 ## What runs above it
 
 | | |
@@ -1039,6 +1113,11 @@ The port is Apache-2.0. The vendored musl sources under `musl/` are MIT, and
 `musl/COPYRIGHT` is unchanged.
 
 ## OpenKal 0.25 dependency group
+
+Version 0.29.6 asks for `openkal.fs`, `openkal.process` and `openkal.task` at run
+time in an ok image, sizes the allocator's arenas for memory that is backed at
+once, takes the optional interfaces from the implementation's statement, and
+serves UEFI by the PE container (above); it requires mcpp 2026.11.13.1.
 
 Version 0.29.5 names openkal-linux ^0.26.3, whose processor time on i386 is read
 through the sixty-four bit clock, and adds i386 (above).

@@ -40,7 +40,7 @@
 
 #include "okm.h"
 
-#if OKM_HAS_FS
+#if OKM_HAS_FS == 1
 
 #define okm_fs_preopen_count kal_fs_preopen_count
 #define okm_fs_preopen       kal_fs_preopen
@@ -203,7 +203,80 @@ static inline kal_intptr okm_fs_write_at(struct kal_file, const void*, kal_uintp
 
 #endif  /* OKM_HAS_FS */
 
-#if OKM_HAS_PROCESS
+/* ASKED AT RUN TIME (OKM_HAS_<X> == 2, 0.29.6): an ok image. The image is built once and run by a
+ * loader on whatever implementation the machine has (SPEC 12.2), which may provide the interface or
+ * not: a hosted system does, firmware and a single-task system do not. Each name of the interface
+ * is imported weakly --- bound where it is provided, zero otherwise, and kept out of the image's
+ * requirements note (SPEC 12.4, clause 11 entry 36) --- and each call takes the interface where it
+ * is bound and the answer above where it is not. Inside its own expansion the macro's name is the
+ * answer (a macro does not expand within itself), so the answer is written once, above, for both
+ * configurations that need it. */
+#if OKM_HAS_FS == 2
+extern __typeof(kal_fs_capacity) kal_fs_capacity __attribute__((__weak__));
+extern __typeof(kal_fs_close_dir) kal_fs_close_dir __attribute__((__weak__));
+extern __typeof(kal_fs_close_file) kal_fs_close_file __attribute__((__weak__));
+extern __typeof(kal_fs_file_info) kal_fs_file_info __attribute__((__weak__));
+extern __typeof(kal_fs_hard_link) kal_fs_hard_link __attribute__((__weak__));
+extern __typeof(kal_fs_info) kal_fs_info __attribute__((__weak__));
+extern __typeof(kal_fs_link_create) kal_fs_link_create __attribute__((__weak__));
+extern __typeof(kal_fs_link_read) kal_fs_link_read __attribute__((__weak__));
+extern __typeof(kal_fs_list_begin) kal_fs_list_begin __attribute__((__weak__));
+extern __typeof(kal_fs_list_next) kal_fs_list_next __attribute__((__weak__));
+extern __typeof(kal_fs_lock) kal_fs_lock __attribute__((__weak__));
+extern __typeof(kal_fs_max_name) kal_fs_max_name __attribute__((__weak__));
+extern __typeof(kal_fs_mkdir) kal_fs_mkdir __attribute__((__weak__));
+extern __typeof(kal_fs_open) kal_fs_open __attribute__((__weak__));
+extern __typeof(kal_fs_open_dir) kal_fs_open_dir __attribute__((__weak__));
+extern __typeof(kal_fs_preopen) kal_fs_preopen __attribute__((__weak__));
+extern __typeof(kal_fs_preopen_count) kal_fs_preopen_count __attribute__((__weak__));
+extern __typeof(kal_fs_props) kal_fs_props __attribute__((__weak__));
+extern __typeof(kal_fs_read_at) kal_fs_read_at __attribute__((__weak__));
+extern __typeof(kal_fs_remove) kal_fs_remove __attribute__((__weak__));
+extern __typeof(kal_fs_rename) kal_fs_rename __attribute__((__weak__));
+extern __typeof(kal_fs_rename_flags) kal_fs_rename_flags __attribute__((__weak__));
+extern __typeof(kal_fs_seek) kal_fs_seek __attribute__((__weak__));
+extern __typeof(kal_fs_set_executable_at) kal_fs_set_executable_at __attribute__((__weak__));
+extern __typeof(kal_fs_set_modified) kal_fs_set_modified __attribute__((__weak__));
+extern __typeof(kal_fs_set_modified_at) kal_fs_set_modified_at __attribute__((__weak__));
+extern __typeof(kal_fs_stream) kal_fs_stream __attribute__((__weak__));
+extern __typeof(kal_fs_truncate) kal_fs_truncate __attribute__((__weak__));
+extern __typeof(kal_fs_unlock) kal_fs_unlock __attribute__((__weak__));
+extern __typeof(kal_fs_write_at) kal_fs_write_at __attribute__((__weak__));
+#define okm_fs_capacity(...) (kal_fs_capacity ? kal_fs_capacity : okm_fs_capacity)(__VA_ARGS__)
+#define okm_fs_close_dir(...) (kal_fs_close_dir ? kal_fs_close_dir : okm_fs_close_dir)(__VA_ARGS__)
+#define okm_fs_close_file(...) (kal_fs_close_file ? kal_fs_close_file : okm_fs_close_file)(__VA_ARGS__)
+#define okm_fs_file_info(...) (kal_fs_file_info ? kal_fs_file_info : okm_fs_file_info)(__VA_ARGS__)
+#define okm_fs_hard_link(...) (kal_fs_hard_link ? kal_fs_hard_link : okm_fs_hard_link)(__VA_ARGS__)
+#define okm_fs_info(...) (kal_fs_info ? kal_fs_info : okm_fs_info)(__VA_ARGS__)
+#define okm_fs_link_create(...) (kal_fs_link_create ? kal_fs_link_create : okm_fs_link_create)(__VA_ARGS__)
+#define okm_fs_link_read(...) (kal_fs_link_read ? kal_fs_link_read : okm_fs_link_read)(__VA_ARGS__)
+#define okm_fs_list_begin(...) (kal_fs_list_begin ? kal_fs_list_begin : okm_fs_list_begin)(__VA_ARGS__)
+#define okm_fs_list_next(...) (kal_fs_list_next ? kal_fs_list_next : okm_fs_list_next)(__VA_ARGS__)
+#define okm_fs_lock(...) (kal_fs_lock ? kal_fs_lock : okm_fs_lock)(__VA_ARGS__)
+#define okm_fs_max_name(...) (kal_fs_max_name ? kal_fs_max_name : okm_fs_max_name)(__VA_ARGS__)
+#define okm_fs_mkdir(...) (kal_fs_mkdir ? kal_fs_mkdir : okm_fs_mkdir)(__VA_ARGS__)
+#define okm_fs_open(...) (kal_fs_open ? kal_fs_open : okm_fs_open)(__VA_ARGS__)
+#define okm_fs_open_dir(...) (kal_fs_open_dir ? kal_fs_open_dir : okm_fs_open_dir)(__VA_ARGS__)
+#define okm_fs_preopen(...) (kal_fs_preopen ? kal_fs_preopen : okm_fs_preopen)(__VA_ARGS__)
+#define okm_fs_preopen_count(...) (kal_fs_preopen_count ? kal_fs_preopen_count : okm_fs_preopen_count)(__VA_ARGS__)
+#define okm_fs_props(...) (kal_fs_props ? kal_fs_props : okm_fs_props)(__VA_ARGS__)
+#define okm_fs_read_at(...) (kal_fs_read_at ? kal_fs_read_at : okm_fs_read_at)(__VA_ARGS__)
+#define okm_fs_remove(...) (kal_fs_remove ? kal_fs_remove : okm_fs_remove)(__VA_ARGS__)
+#define okm_fs_rename(...) (kal_fs_rename ? kal_fs_rename : okm_fs_rename)(__VA_ARGS__)
+#define okm_fs_rename_flags(...) (kal_fs_rename_flags ? kal_fs_rename_flags : okm_fs_rename_flags)(__VA_ARGS__)
+#define okm_fs_seek(...) (kal_fs_seek ? kal_fs_seek : okm_fs_seek)(__VA_ARGS__)
+#define okm_fs_set_executable_at(...) (kal_fs_set_executable_at ? kal_fs_set_executable_at : okm_fs_set_executable_at)(__VA_ARGS__)
+#define okm_fs_set_modified(...) (kal_fs_set_modified ? kal_fs_set_modified : okm_fs_set_modified)(__VA_ARGS__)
+#define okm_fs_set_modified_at(...) (kal_fs_set_modified_at ? kal_fs_set_modified_at : okm_fs_set_modified_at)(__VA_ARGS__)
+#define okm_fs_stream(...) (kal_fs_stream ? kal_fs_stream : okm_fs_stream)(__VA_ARGS__)
+#define okm_fs_truncate(...) (kal_fs_truncate ? kal_fs_truncate : okm_fs_truncate)(__VA_ARGS__)
+#define okm_fs_unlock(...) (kal_fs_unlock ? kal_fs_unlock : okm_fs_unlock)(__VA_ARGS__)
+#define okm_fs_write_at(...) (kal_fs_write_at ? kal_fs_write_at : okm_fs_write_at)(__VA_ARGS__)
+#undef okm_fs_at_available
+#define okm_fs_at_available() (kal_fs_read_at && kal_fs_write_at)
+#endif  /* OKM_HAS_FS == 2 */
+
+#if OKM_HAS_PROCESS == 1
 
 #define okm_process_spawn     kal_process_spawn
 #define okm_process_job_enter kal_process_job_enter
@@ -252,13 +325,31 @@ static inline void okm_process_close(struct kal_process) {}
 
 #endif  /* OKM_HAS_PROCESS */
 
-#if OKM_HAS_TASK
+#if OKM_HAS_PROCESS == 2
+extern __typeof(kal_process_close) kal_process_close __attribute__((__weak__));
+extern __typeof(kal_process_job_enter) kal_process_job_enter __attribute__((__weak__));
+extern __typeof(kal_process_job_terminate) kal_process_job_terminate __attribute__((__weak__));
+extern __typeof(kal_process_props) kal_process_props __attribute__((__weak__));
+extern __typeof(kal_process_spawn) kal_process_spawn __attribute__((__weak__));
+extern __typeof(kal_process_terminate) kal_process_terminate __attribute__((__weak__));
+extern __typeof(kal_process_wait) kal_process_wait __attribute__((__weak__));
+#define okm_process_close(...) (kal_process_close ? kal_process_close : okm_process_close)(__VA_ARGS__)
+#define okm_process_job_enter(...) (kal_process_job_enter ? kal_process_job_enter : okm_process_job_enter)(__VA_ARGS__)
+#define okm_process_job_terminate(...) (kal_process_job_terminate ? kal_process_job_terminate : okm_process_job_terminate)(__VA_ARGS__)
+#define okm_process_props(...) (kal_process_props ? kal_process_props : okm_process_props)(__VA_ARGS__)
+#define okm_process_spawn(...) (kal_process_spawn ? kal_process_spawn : okm_process_spawn)(__VA_ARGS__)
+#define okm_process_terminate(...) (kal_process_terminate ? kal_process_terminate : okm_process_terminate)(__VA_ARGS__)
+#define okm_process_wait(...) (kal_process_wait ? kal_process_wait : okm_process_wait)(__VA_ARGS__)
+#endif  /* OKM_HAS_PROCESS == 2 */
+
+#if OKM_HAS_TASK == 1
 
 #define okm_task_start kal_task_start
 #define okm_task_join  kal_task_join
 #define okm_task_yield kal_task_yield
 #define okm_task_wait  kal_task_wait
 #define okm_task_wake  kal_task_wake
+#define okm_task_stack kal_task_stack
 
 /* WEAK, BECAUSE openkal 0.10 ADDED IT AND A BACKEND MAY NOT HAVE FOLLOWED.
  * Every route in this port that reaches an optional operation tests the
@@ -319,6 +410,9 @@ static inline int okm_task_wait(const kal_u32*, kal_u32,
  * did not. */
 static inline int okm_task_wake(const kal_u32*, kal_uintptr,
                                 kal_uintptr* woken) { if (woken) *woken = 0; return kal_ok; }
+/* Where the stack is, which only an implementation with contexts measures: the
+ * enquiry fails, and `pthread_getattr_np' reports ENOSYS (okm_thread.c). */
+static inline int okm_task_stack(void**, kal_uintptr*) { return kal_err_not_supported; }
 
 /* One context, and its identity is a constant. Not a placeholder: it is the
  * accurate answer for a machine that has one, and it keeps okm_context.c's
@@ -332,5 +426,35 @@ static inline kal_uintptr okm_task_parallelism_absent(void) { return 1; }
 #define okm_task_parallelism okm_task_parallelism_absent
 
 #endif  /* OKM_HAS_TASK */
+
+#if OKM_HAS_TASK == 2
+extern __typeof(kal_task_join) kal_task_join __attribute__((__weak__));
+extern __typeof(kal_task_start) kal_task_start __attribute__((__weak__));
+extern __typeof(kal_task_wait) kal_task_wait __attribute__((__weak__));
+extern __typeof(kal_task_wake) kal_task_wake __attribute__((__weak__));
+extern __typeof(kal_task_yield) kal_task_yield __attribute__((__weak__));
+extern __typeof(kal_task_stack) kal_task_stack __attribute__((__weak__));
+#define okm_task_stack(...) (kal_task_stack ? kal_task_stack : okm_task_stack)(__VA_ARGS__)
+#define okm_task_join(...) (kal_task_join ? kal_task_join : okm_task_join)(__VA_ARGS__)
+#define okm_task_start(...) (kal_task_start ? kal_task_start : okm_task_start)(__VA_ARGS__)
+#define okm_task_wait(...) (kal_task_wait ? kal_task_wait : okm_task_wait)(__VA_ARGS__)
+#define okm_task_wake(...) (kal_task_wake ? kal_task_wake : okm_task_wake)(__VA_ARGS__)
+#define okm_task_yield(...) (kal_task_yield ? kal_task_yield : okm_task_yield)(__VA_ARGS__)
+extern __typeof(kal_task_start_sized) kal_task_start_sized __attribute__((__weak__));
+extern __typeof(kal_task_parallelism) kal_task_parallelism __attribute__((__weak__));
+extern __typeof(kal_task_current) kal_task_current __attribute__((__weak__));
+#define okm_task_start_sized(entry, arg, size, out)                                            \
+	(kal_task_start_sized ? kal_task_start_sized(entry, arg, size, out)                    \
+	 : kal_task_start ? kal_task_start(entry, arg, out) : kal_err_not_supported)
+/* An object-like name, as in the other two configurations: a caller tests it before calling. */
+static inline kal_uintptr okm_task_parallelism_asked(void)
+{
+	return kal_task_parallelism ? kal_task_parallelism() : (kal_uintptr)1;
+}
+#undef okm_task_parallelism
+#define okm_task_parallelism okm_task_parallelism_asked
+#undef OKM_CONTEXT_ID
+#define OKM_CONTEXT_ID() (kal_task_current ? kal_task_current() : (kal_uintptr)1)
+#endif  /* OKM_HAS_TASK == 2 */
 
 #endif /* OKM_OPT_H */

@@ -71,8 +71,16 @@ static unsigned start_at(kal_uintptr key)
 {
 	/* Any dispersal will do: the identities an implementation hands out are
 	 * consecutive on one and pointer-shaped on another, and a table indexed by
-	 * either directly would cluster on one of them. */
-	kal_uintptr h = key * (kal_uintptr)0x9E3779B97F4A7C15ull;
+	 * either directly would cluster on one of them.
+	 *
+	 * THE PRODUCT IS SIXTY-FOUR BITS ON EVERY WORD (0.29.6). It was taken in
+	 * `kal_uintptr', and the shift by thirty-two is undefined where that is
+	 * thirty-two bits (i386): an unoptimised build's shift happened to leave the
+	 * word as it was, and an optimised one's index was anything at all, so a
+	 * program of i686-dos-musl built for release ended before main (measured:
+	 * status 1 under DOSBox Staging; the same program unoptimised returned 7).
+	 * Where the word is sixty-four bits the value is the one it always was. */
+	const uint64_t h = (uint64_t)key * 0x9E3779B97F4A7C15ull;
 	return (unsigned)((h >> 32) & (OKM_CONTEXTS - 1));
 }
 

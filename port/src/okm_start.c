@@ -196,7 +196,7 @@ int    __okm_argc(void) { return g_argc; }
 
 /* --- the hand-over ----------------------------------------------------------- */
 
-#if !defined(OKM_TARGET_WINDOWS)
+#if !defined(OKM_TARGET_PE)
 static void dummy(void) { }
 weak_alias(dummy, _init);
 weak_alias(dummy, _fini);
@@ -213,7 +213,7 @@ static void libc_start_init(void)
 	 * where this format puts what ELF puts in an array. Elsewhere the array is
 	 * walked here and _init does nothing. The order is each format's own. */
 	_init();
-#if !defined(OKM_TARGET_WINDOWS)
+#if !defined(OKM_TARGET_PE)
 	uintptr_t a = (uintptr_t)&__init_array_start;
 	for (; a < (uintptr_t)&__init_array_end; a += sizeof(void (*)()))
 		(*(void (**)(void))a)();

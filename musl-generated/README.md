@@ -17,7 +17,7 @@ printf '#define VERSION "1.2.5"\n' > musl-generated/internal/version.h
 
 ## The Windows variant, and why it is no longer a variant
 
-`x86_64-windows/` used to differ from `x86_64/` in three lines:
+`x86_64-pe/` (named `x86_64-windows/` before 0.29.6, when Windows was the one PE row) used to differ from `x86_64/` in three lines:
 
 ```
 -#define _Addr long          +#define _Addr long long
@@ -137,6 +137,12 @@ and one line changed: `typedef int wint_t;` where the generic header has
 and on that triple the compiler's `__WINT_TYPE__` is `int` (clang 23, both
 architectures); `port/src/okm_type_identity.c` checks the header against it.
 Every other line is the architecture's, as the image convention fixes it.
+
+## i386 for no operating system (0.29.6)
+
+`i386-none/` is `i386/` with the same one line changed, `typedef int wint_t;`: the rows compiled
+for `i386-unknown-none-elf` --- DOS through openkal-dos (technical experiment only) and the i386
+ok image --- see `__WINT_TYPE__` as `int` there (clang 23).
 
 ## FreeBSD (0.29.1)
 

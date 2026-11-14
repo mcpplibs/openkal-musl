@@ -34,6 +34,7 @@
 #include <sched.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include "../okm_stat.h"
 
 /* THE SNAPSHOT'S RECORD (port/src/okm.h, whose internal names this file does
@@ -95,6 +96,21 @@ void _mi_prim_mem_init(mi_os_mem_config_t* config)
 	pthread_key_t k;
 	if (pthread_key_create(&k, 0) == 0 && k != 0) pthread_key_delete(k);
 #endif
+	/* WITHOUT REGIONS AN ARENA IS BACKED WHEN IT IS RESERVED. Where it cannot
+	 * reserve without backing, mimalloc reserves a quarter of its arena size
+	 * (1 GiB on a 64-bit machine), and falls back to 128 MiB. A firmware pool
+	 * does not hold that twice: measured under OVMF with 512 MiB, a carrier's
+	 * allocator and its image's each reserve one, the second and its fallback
+	 * failed, and every allocation the first arena did not hold failed with
+	 * them. So an arena here is the smallest mimalloc admits
+	 * (MI_ARENA_MIN_SIZE, after the quarter); a larger request reserves an
+	 * arena of its own size, and later arenas grow as mimalloc grows them. A
+	 * size the program states (MIMALLOC_ARENA_RESERVE) is kept. */
+	if (!g_regions) {
+		char stated[64];
+		if (_mi_prim_getenv("MIMALLOC_ARENA_RESERVE", stated, sizeof stated) != 1)
+			mi_option_set(mi_option_arena_reserve, (long)(4 * MI_ARENA_MIN_SIZE / MI_KiB));
+	}
 	config->page_size = g_grain;
 	config->alloc_granularity = g_grain;
 	config->large_page_size = 0;
@@ -106,16 +122,79 @@ void _mi_prim_mem_init(mi_os_mem_config_t* config)
 
 static size_t whole(size_t n) { return (n + g_grain - 1) & ~(g_grain - 1); }
 
+/* THE ALIGNMENT A PART WAS TAKEN AT, without regions. `kal_free' is told the
+ * alignment `kal_alloc' was, and mimalloc frees with the address and the size
+ * only; a part taken at an alignment other than the grain is recorded here
+ * until it is freed. There are few: mimalloc states an alignment for an arena
+ * (256 MiB, where its page information is aligned) and for a block too large
+ * for one. */
+struct okm_aligned_part {
+	void *addr;
+	size_t align;
+	struct okm_aligned_part *next;
+};
+static struct okm_aligned_part *g_aligned_parts;
+static char g_aligned_lock;
+
+static void aligned_parts_lock(void)
+{
+	while (__atomic_test_and_set(&g_aligned_lock, __ATOMIC_ACQUIRE)) sched_yield();
+}
+static void aligned_parts_unlock(void) { __atomic_clear(&g_aligned_lock, __ATOMIC_RELEASE); }
+
+/* Memory of `size' at `align', recorded where `align' is not the grain. An
+ * implementation that cannot place it at that alignment is asked at the grain,
+ * and mimalloc then aligns within a larger part, as it does wherever an
+ * alignment is not honoured. */
+static void *backed_part(size_t size, size_t align)
+{
+	if (align != g_grain) {
+		struct okm_aligned_part *part = kal_alloc(sizeof *part, _Alignof(struct okm_aligned_part));
+		void *p = part ? kal_alloc(size, align) : 0;
+		if (p) {
+			part->addr = p;
+			part->align = align;
+			aligned_parts_lock();
+			part->next = g_aligned_parts;
+			g_aligned_parts = part;
+			aligned_parts_unlock();
+			return p;
+		}
+		if (part) kal_free(part, sizeof *part, _Alignof(struct okm_aligned_part));
+	}
+	return kal_alloc(size, g_grain);
+}
+
+static void backed_part_free(void *addr, size_t size)
+{
+	struct okm_aligned_part *found = 0;
+	aligned_parts_lock();
+	for (struct okm_aligned_part **at = &g_aligned_parts; *at; at = &(*at)->next)
+		if ((*at)->addr == addr) {
+			found = *at;
+			*at = found->next;
+			break;
+		}
+	aligned_parts_unlock();
+	if (!found) {
+		kal_free(addr, size, g_grain);
+		return;
+	}
+	kal_free(addr, size, found->align);
+	kal_free(found, sizeof *found, _Alignof(struct okm_aligned_part));
+}
+
 int _mi_prim_alloc(void* hint_addr, size_t size, size_t try_alignment, bool commit,
                    bool allow_large, bool* is_large, bool* is_zero, void** addr)
 {
 	(void)hint_addr; (void)allow_large;
 	*is_large = false;
 	size = whole(size);
+	/* The alignment is honoured exactly where the implementation can: a region
+	 * is reserved at one, and so is a part of memory that is backed at once. */
+	size_t align = g_grain;
+	if (try_alignment > align && (try_alignment & (try_alignment - 1)) == 0) align = try_alignment;
 	if (g_regions) {
-		/* The alignment is honoured exactly: a region is reserved at one. */
-		size_t align = g_grain;
-		if (try_alignment > align && (try_alignment & (try_alignment - 1)) == 0) align = try_alignment;
 		*addr = kal_region_reserve(size, align, commit ? KAL_REGION_COMMIT : 0);
 		*is_zero = true;
 		if (!*addr) return ENOMEM;
@@ -123,10 +202,20 @@ int _mi_prim_alloc(void* hint_addr, size_t size, size_t try_alignment, bool comm
 		okm_stat_add(OKM_STAT_REGION_RESERVED, size);
 		return 0;
 	}
-	/* Backed at once and of unstated contents; mimalloc clears what it must. */
-	*addr = kal_alloc(size, g_grain);
-	*is_zero = false;
-	return *addr ? 0 : ENOMEM;
+	/* Backed at once and of unstated contents. A request to commit receives
+	 * them as they are, and mimalloc clears what it must. A request NOT to
+	 * commit is a reservation, which mimalloc reads as memory that is zero
+	 * when it is first committed --- its page map commits parts of one and
+	 * stores into them unread --- and nothing here commits later
+	 * (`_mi_prim_commit' has nothing to do), so the reservation is cleared
+	 * now. Measured under OVMF, whose pool is filled with a pattern: the
+	 * page map's entries were the pattern, and the first page registered
+	 * faulted. */
+	*addr = backed_part(size, align);
+	if (!*addr) return ENOMEM;
+	if (!commit) memset(*addr, 0, size);
+	*is_zero = !commit;
+	return 0;
 }
 
 int _mi_prim_free(void* addr, size_t size)
@@ -138,7 +227,7 @@ int _mi_prim_free(void* addr, size_t size)
 		okm_stat_add(OKM_STAT_REGION_RELEASES, 1);
 		okm_stat_sub(OKM_STAT_REGION_RESERVED, size);
 	}
-	else kal_free(addr, size, g_grain);
+	else backed_part_free(addr, size);
 	return 0;
 }
 
@@ -342,6 +431,17 @@ static void okm_malloc_preference(void)
 	}
 }
 
+/* AN ARENA'S SIZE, IN KiB (0.29.6). With regions, mimalloc's own: a gibibyte
+ * reserved and backed part by part. Without them memory is `kal_alloc' and is
+ * backed whole at once, which is a firmware's pool on a machine of some hundred
+ * mebibytes: an arena is then 16 MiB (mimalloc takes a quarter of it, 4 MiB,
+ * where it cannot reserve without backing, arena.c) and grows as mimalloc grows
+ * it, by doubling every eighth arena. */
+static long okm_arena_reserve(void)
+{
+	return regions() ? 1024 * 1024 : 16 * 1024;
+}
+
 __attribute__((__visibility__("hidden"))) void __okm_malloc_init(void)
 {
 	/* Not while a snapshot's initialisers run: the start supplies it (below). */
@@ -350,15 +450,16 @@ __attribute__((__visibility__("hidden"))) void __okm_malloc_init(void)
 	 * program started from it reserves all of it again: mimalloc reserves a
 	 * gibibyte at a time, so it is asked for little while they run. */
 	if (sealing()) mi_option_set(mi_option_arena_reserve, 4 * 1024);   /* KiB */
+	else mi_option_set_default(mi_option_arena_reserve, okm_arena_reserve());
 	_mi_auto_process_init();
 }
 
 /* A PROGRAM STARTED FROM A SNAPSHOT (0.27.0, okm_start.c): the randomness the
  * initialisers ran without is drawn now, as mimalloc draws it again where it
- * started weakly, and the arena is reserved at mimalloc's own size again. */
+ * started weakly, and the arena is reserved at its own size again. */
 __attribute__((__visibility__("hidden"))) void __okm_malloc_start(void)
 {
-	mi_option_set(mi_option_arena_reserve, 1024 * 1024);   /* KiB: mimalloc's own, a gibibyte */
+	mi_option_set(mi_option_arena_reserve, okm_arena_reserve());
 	okm_malloc_preference();
 	mi_theap_t* theap = _mi_theap_default();
 	if (theap != NULL) {
