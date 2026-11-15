@@ -132,6 +132,23 @@ int main() {
         mcpp::cflag(("-DOKM_VERSION=\\\"" + v + "\\\"").c_str());
     }
 
+    // THE SYSTEM `uname' REPORTS (0.29.7). Over a system's implementation
+    // (the hosted arrangement) a program asks the system it runs on, and it was
+    // told "openkal" on every one: a program on FreeBSD that branched on
+    // `uname().sysname' took no FreeBSD branch. The name is each system's own
+    // spelling of itself, the one its own `uname -s' prints; a system with no
+    // `uname' of its own is given the name its toolchains report. An ok image
+    // (`openkal') and a system not listed keep "openkal".
+    {
+        static const std::pair<const char*, const char*> kSystemNames[] = {
+            {"linux", "Linux"}, {"freebsd", "FreeBSD"}, {"macos", "Darwin"},
+            {"windows", "Windows_NT"}, {"uefi", "UEFI"}, {"dos", "MS-DOS"},
+        };
+        for (const auto& [target, name] : kSystemNames)
+            if (os == target)
+                mcpp::cflag((std::string("-DOKM_SYSNAME=\\\"") + name + "\\\"").c_str());
+    }
+
     // AN OK IMAGE'S `dlopen' BINDS A PLACED IMAGE'S `kal_*' IMPORTS BY NAME
     // (port/src/image), so the names are the specification's own list, read
     // from the openkal this package is built against at every build: a table
