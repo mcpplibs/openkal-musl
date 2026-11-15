@@ -1507,6 +1507,9 @@ static int trace_wanted(void)
 #define OKM_VERSION "unknown"
 #endif
 const char okm_version[] = OKM_VERSION;
+#ifndef OKM_SYSNAME
+#define OKM_SYSNAME "openkal"
+#endif
 
 /* THE VERSION IS ANNOUNCED WHEN THE TRACE IS ASKED FOR, NOT WHEN SOMETHING IS
  * MISSING, AND THE DIFFERENCE IS THE WHOLE POINT.
@@ -3483,9 +3486,12 @@ syscall_arg_t __okm_syscall(syscall_arg_t n, syscall_arg_t a1, syscall_arg_t a2,
 	 * README.md records that beside the other divergences. `sysname` is
 	 * "openkal" and not "Linux", so nothing can have been reading this as a
 	 * kernel version. */
+	/* `sysname' is the system the program runs on where this library is built
+	 * over a system's implementation (OKM_SYSNAME, from build.mcpp; 0.29.7),
+	 * and "openkal" for an ok image, which runs on whichever system loads it. */
 	case SYS_uname: {
 		struct utsname* u = (struct utsname*)a1;
-		static const char* const parts[] = { "openkal", "openkal", okm_version, "openkal", 0 };
+		static const char* const parts[] = { OKM_SYSNAME, "openkal", okm_version, "openkal", 0 };
 		char* fields[] = { u->sysname, u->nodename, u->release, u->version, u->machine };
 		for (int f = 0; f < 5; f++) {
 			const char* v = parts[f] ? parts[f] : "unknown";

@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.29.6"
+openkal-musl = "0.29.7"
 ```
 
 The package states compatible ranges for the packages beneath it: OpenKal ^0.25,
@@ -646,6 +646,17 @@ second, which is what every C library for that environment does. It is here
 rather than beneath because openkal is deliberately literal about names: it
 passes on the name it was given and does not know that a program is a kind of
 file.
+
+## The system `uname` reports (0.29.7)
+
+Built over a system's implementation (the hosted arrangement), `uname` reports
+in `sysname` the system the program runs on, in that system's own spelling:
+`Linux`, `FreeBSD`, `Darwin`, and, for systems with no `uname` of their own,
+`Windows_NT`, `UEFI` and `MS-DOS`. It reported `openkal` on every system, so a
+program that branched on the system's name took the wrong branch on FreeBSD. An
+ok image reports `openkal`, since it runs on whichever system loads it. The
+build program states the name from `MCPP_TARGET_OS` (`OKM_SYSNAME`); the posix
+probe checks it on every row.
 
 ## i386 (0.29.5)
 

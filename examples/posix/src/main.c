@@ -634,6 +634,22 @@ int main(int argc, char **argv, char **envp) {
 			printf("note: release=%s\n", un.release);
 			check(un.release[0] != '\0' && strcmp(un.release, "unknown") != 0,
 			      "the C library reports a version rather than a placeholder");
+			/* The system it runs on, in that system's own spelling (0.29.7);
+			 * an ok image, which runs on whichever system loads it, is told
+			 * "openkal". */
+#if defined(__FreeBSD__)
+			const char* system = "FreeBSD";
+#elif defined(__linux__)
+			const char* system = "Linux";
+#elif defined(__APPLE__)
+			const char* system = "Darwin";
+#elif defined(_WIN32)
+			const char* system = "Windows_NT";
+#else
+			const char* system = "openkal";
+#endif
+			printf("note: sysname=%s\n", un.sysname);
+			check(strcmp(un.sysname, system) == 0, "the system reports its own name");
 		}
 	}
 
