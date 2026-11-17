@@ -95,6 +95,28 @@ int main(int argc, char **argv, char **envp) {
 	check(rooted, "the working directory is an absolute name");
 	printf("   cwd=%s\n", cwd);
 
+	/* A change of working directory releases the handle of the one before
+	 * (0.29.9): 4096 changes, more than any system here gives a program
+	 * descriptors or directories, and a directory still opens afterwards. */
+	{
+		int moved = 1;
+		for (int i = 0; i < 4096 && moved; i++) moved = chdir(".") == 0;
+		DIR* still = opendir(".");
+		check(moved && still != NULL, "4096 changes of working directory leave directories to open");
+		if (still) closedir(still);
+	}
+	/* A name that starts at a separator is the root of the working directory's
+	 * volume where names are beneath volumes (0.29.9), and the root elsewhere. */
+	{
+		char before[4096], after[4096];
+		const int back = getcwd(before, sizeof before) != NULL;
+		if (back && before[1] == ':') {
+			const int at_root = chdir("/") == 0 && getcwd(after, sizeof after) != NULL;
+			check(at_root && after[1] == ':' && after[0] == before[0], "a name that starts at a separator reaches the root of the volume");
+			check(chdir(before) == 0, "and the working directory is restored by its own name");
+		}
+	}
+
 	/* files: create, write, seek, read, stat, remove */
 	const char *name = "okm-probe.tmp";
 	int fd = open(name, O_RDWR | O_CREAT | O_TRUNC, 0644);

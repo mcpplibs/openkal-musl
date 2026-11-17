@@ -416,6 +416,13 @@ static struct { struct kal_dir dir; char name[256]; size_t len; } g_pre[16];
 static int g_npre;
 
 struct kal_dir okm_cwd_dir;
+/* Whether the working directory's handle was opened by `chdir' and is released
+ * when the working directory changes (0.29.9). The first is a supplied
+ * directory's, and one taken from a description is the description's. Measured:
+ * a shell that changes directory around each listing left one handle open per
+ * change; on i686 Linux 20 after a script of 20 lines, and under DOS, whose
+ * implementation has 32 directories, `opendir' then failed. */
+static int g_cwd_owned;
 static char    g_cwd[OKM_MAX_PATH] = "/";
 
 const char* okm_cwd_path(void) { return g_cwd; }
@@ -660,6 +667,42 @@ static size_t already_normal(const char* path)
 	return n < OKM_MAX_PATH ? n : 0;
 }
 
+/* The supplied directory whose name is the longest prefix of an absolute name.
+ * Longest rather than first: a program given both the whole file system and
+ * one directory beneath it should reach the second through the handle that
+ * names it, so that a confinement expressed by supplying fewer directories is
+ * the only thing that changes. */
+static int best_preopen(const char* abs, size_t* len)
+{
+	int best = -1; size_t best_len = 0;
+	for (int i = 0; i < g_npre; i++) {
+		if (!is_prefix_at_boundary(g_pre[i].name, g_pre[i].len, abs)) continue;
+		if (best < 0 || g_pre[i].len > best_len) { best = i; best_len = g_pre[i].len; }
+	}
+	*len = best_len;
+	return best;
+}
+
+/* A NAME THAT STARTS AT A SEPARATOR, WHERE NO SUPPLIED DIRECTORY IS NAMED SO
+ * AND THE CURRENT DIRECTORY IS BENEATH A VOLUME, STARTS AT THE ROOT OF THAT
+ * VOLUME (0.29.9), as the environments that write a volume first read it:
+ * `/work' is `C:/work' while the current directory is on `C:'. Measured under
+ * DOS: `opendir("/okd")' and `chdir("/")' reached no directory, where `C:/okd'
+ * and `C:\' did. The name is rewritten in place, so the current directory a
+ * `chdir' records carries its volume and the names relative to it resolve. */
+static int on_current_volume(char* abs, size_t cap)
+{
+	size_t len;
+	if (abs[0] != '/' || root_length(g_cwd) != 3 || g_cwd[1] != ':') return 0;
+	if (best_preopen(abs, &len) >= 0) return 0;
+	const size_t n = __builtin_strlen(abs);
+	if (n + 3 > cap) return -ENAMETOOLONG;
+	__builtin_memmove(abs + 2, abs, n + 1);
+	abs[0] = g_cwd[0];
+	abs[1] = ':';
+	return 0;
+}
+
 int okm_resolve(int dirfd, const char* path, struct okm_at* at, int empty_ok)
 {
 	if (!path) return -EFAULT;
@@ -709,15 +752,18 @@ int okm_resolve(int dirfd, const char* path, struct okm_at* at, int empty_ok)
 
 	if (!have_abs) return -EINVAL;
 
-	/* The supplied directory whose name is the longest prefix of the path.
-	 * Longest rather than first: a program given both the whole file system
-	 * and one directory beneath it should reach the second through the
-	 * handle that names it, so that a confinement expressed by supplying
-	 * fewer directories is the only thing that changes. */
-	int best = -1; size_t best_len = 0;
-	for (int i = 0; i < g_npre; i++) {
-		if (!is_prefix_at_boundary(g_pre[i].name, g_pre[i].len, abs)) continue;
-		if (best < 0 || g_pre[i].len > best_len) { best = i; best_len = g_pre[i].len; }
+	size_t best_len = 0;
+	int best = best_preopen(abs, &best_len);
+	char onvol[OKM_MAX_PATH];
+	if (best < 0 && abs[0] == '/') {
+		const size_t n = abs_len ? abs_len : __builtin_strlen(abs);
+		if (n + 1 > sizeof onvol) return -ENAMETOOLONG;
+		__builtin_memcpy(onvol, abs, n + 1);
+		const int r = on_current_volume(onvol, sizeof onvol);
+		if (r) return r;
+		abs = onvol;
+		abs_len = __builtin_strlen(onvol);
+		best = best_preopen(abs, &best_len);
 	}
 	if (best < 0) return -ENOENT;
 
@@ -753,6 +799,7 @@ int okm_chdir(int dirfd, const char* path)
 {
 	struct kal_dir target;
 	char abs[OKM_MAX_PATH];
+	int owned = 0;
 
 	if (path) {
 		struct okm_at at;
@@ -760,8 +807,10 @@ int okm_chdir(int dirfd, const char* path)
 		if (r) return r;
 		const int e = okm_fs_open_dir(at.base, at.rel, __builtin_strlen(at.rel), &target);
 		if (e != kal_ok) return -okm_errno(e);
+		owned = 1;
 		if (root_length(path)) { if (join("", path, abs, sizeof abs)) return -ENAMETOOLONG; }
 		else                   { if (join(g_cwd, path, abs, sizeof abs)) return -ENAMETOOLONG; }
+		if (on_current_volume(abs, sizeof abs)) return -ENAMETOOLONG;
 	} else {
 		struct okm_desc* d = okm_desc_of(dirfd);
 		if (!d || d->kind != OKM_DIR) return -ENOTDIR;
@@ -776,9 +825,11 @@ int okm_chdir(int dirfd, const char* path)
 		 * own handle and the working directory takes another by opening it
 		 * through itself. */
 		struct kal_dir own;
-		if (okm_fs_open_dir(d->dir, ".", 1, &own) == kal_ok) target = own;
+		if (okm_fs_open_dir(d->dir, ".", 1, &own) == kal_ok) { target = own; owned = 1; }
 	}
 
+	if (g_cwd_owned && okm_cwd_dir.h != target.h) okm_fs_close_dir(okm_cwd_dir);
+	g_cwd_owned = owned;
 	okm_cwd_dir = target;
 	copy_str(g_cwd, abs, __builtin_strlen(abs), sizeof g_cwd);
 	if (!g_cwd[0]) copy_str(g_cwd, "/", 1, sizeof g_cwd);
