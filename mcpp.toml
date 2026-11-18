@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.29.9"
+version     = "0.29.10"
 # `embed' and `exclude' on a dependency edge (the allocator, below) are mcpp
 # 2026.11.2.1's; an older engine refuses the edge rather than building a C
 # library without its allocator.
@@ -964,10 +964,13 @@ include_dirs = ["musl-generated/riscv64", "musl/arch/riscv64", "musl/arch/generi
 [target.'cfg(all(arch = "i686", os = "linux"))'.build]
 include_dirs = ["musl-generated/i386", "musl/arch/i386", "musl/arch/generic"]
 
-# i386 compiled for no operating system (`i386-unknown-none-elf'): DOS (0.29.6, openkal-dos;
-# technical experiment only) and the i386 ok image. On that triple `wint_t' is `int', as on the
-# other ok-image architectures (musl-generated/README.md).
-[target.'cfg(all(arch = "i686", any(os = "dos", os = "openkal")))'.build]
+# i386 compiled for no operating system (`i386-unknown-none-elf'): every i386 row but Linux's
+# --- the i386 ok image, DOS (0.29.6, openkal-dos; technical experiment only), and a row a
+# platform defines over an implementation this package does not name (0.29.10). On that triple
+# `wint_t' is `int', as on the other ok-image architectures (musl-generated/README.md). The
+# condition names the one system whose headers differ, not the systems that share these: a
+# new system is then a platform's statement and no line here.
+[target.'cfg(all(arch = "i686", not(os = "linux")))'.build]
 include_dirs = ["musl-generated/i386-none", "musl/arch/i386", "musl/arch/generic"]
 
 # The link line on this environment. There is no separate loader to name and no
