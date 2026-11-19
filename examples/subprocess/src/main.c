@@ -1229,6 +1229,43 @@ int main(int argc, char** argv)
 		}
 	}
 
+	/* --- the size of a start (openkal 0.26, clause 7.6) ------------------------
+	 *
+	 * Bounded by the environment beneath and by no count of this port's. 2,000
+	 * arguments start (the port refused 512 as E2BIG before asking, and a
+	 * compiler given 520 defines could not start, mcpp-community/mcpp#958); an
+	 * argument larger than the environment admits (Linux takes 128 KiB in one,
+	 * macOS 1 MiB in all) is E2BIG, which it read as ENOSPC. */
+	{
+		enum { many = 2000 };
+		char** av = calloc(many + 1, sizeof *av);
+		const size_t big = 4u << 20;
+		char* huge = malloc(big + 1);
+		if (!av || !huge) {
+			check(0, "the vectors of a large start can be made");
+		} else {
+			av[0] = (char*)self;
+			av[1] = (char*)"--child-exit";
+			av[2] = (char*)"0";
+			for (int i = 3; i < many; i++) av[i] = (char*)"x";
+			pid_t c = -1;
+			int e = posix_spawn(&c, self, NULL, NULL, av, environ);
+			int s = 0;
+			if (e == 0) waitpid(c, &s, 0);
+			errno = e;
+			check(e == 0 && WIFEXITED(s) && WEXITSTATUS(s) == 0, "a start with 2,000 arguments");
+			memset(huge, 'y', big);
+			huge[big] = 0;
+			char* hv[] = { (char*)self, huge, NULL };
+			e = posix_spawn(&c, self, NULL, NULL, hv, environ);
+			if (e == 0) waitpid(c, &s, 0);
+			errno = e;
+			check(e == E2BIG, "a start larger than the environment admits is E2BIG");
+		}
+		free(huge);
+		free(av);
+	}
+
 	printf("-- failures: %d --\n", failures);
 	return failures ? 1 : 0;
 }

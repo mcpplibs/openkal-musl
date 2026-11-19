@@ -421,6 +421,13 @@ the ones that caused it: measured, the sixty-fifth `posix_spawn` of a program
 that waited for none, and of one that polled each once with `WNOHANG` and did
 not come back.
 
+**A start is bounded by the environment alone** (openkal 0.26, clause 7.6). Its
+argument and environment vectors are as long as the caller's, and a start the
+environment refuses for its size is `E2BIG`. Through 0.29 the port refused 512
+entries itself, before the environment was asked, and reported the environment's
+own refusal as `ENOSPC`: a compiler given 520 defines could not be started
+(mcpp-community/mcpp#958).
+
 ## Asking which operation was missing
 
 `ENOSYS` says that a facility is not here. It does not say which one, and until
