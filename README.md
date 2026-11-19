@@ -8,12 +8,12 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.29.10"
+openkal-musl = "0.30.0"
 ```
 
-The package states compatible ranges for the packages beneath it: OpenKal ^0.25,
-Linux ^0.26.3, macOS ^0.23, Windows ^0.21, FreeBSD ^0.1, OpenSBI ^0.9 and image
-bindings ^0.5. A target that
+The package states compatible ranges for the packages beneath it: OpenKal ^0.26,
+Linux ^0.27, macOS ^0.24, Windows ^0.23, FreeBSD ^0.2, UEFI ^0.12, DOS ^0.2,
+OpenSBI ^0.10 and the image loader (openkal-ld) ^0.7. A target that
 selects openkal-platform receives the exact versions of its version group; any
 other build receives the newest compatible release, recorded in `mcpp.lock`.
 
@@ -420,6 +420,13 @@ a caller that met it saw a failure on an operation with no evident relation to
 the ones that caused it: measured, the sixty-fifth `posix_spawn` of a program
 that waited for none, and of one that polled each once with `WNOHANG` and did
 not come back.
+
+**A start is bounded by the environment alone** (openkal 0.26, clause 7.6). Its
+argument and environment vectors are as long as the caller's, and a start the
+environment refuses for its size is `E2BIG`. Through 0.29 the port refused 512
+entries itself, before the environment was asked, and reported the environment's
+own refusal as `ENOSPC`: a compiler given 520 defines could not be started
+(mcpp-community/mcpp#958).
 
 ## Asking which operation was missing
 
@@ -1127,6 +1134,14 @@ is not one this package can ask.
 
 The port is Apache-2.0. The vendored musl sources under `musl/` are MIT, and
 `musl/COPYRIGHT` is unchanged.
+
+## OpenKal 0.26 dependency group
+
+Version 0.30.0 selects OpenKal 0.26 and its implementations: Linux 0.27, macOS
+0.24, Windows 0.23, FreeBSD 0.2, UEFI 0.12, DOS 0.2 and OpenSBI 0.10, and places
+further images with openkal-ld ^0.7 (openkal-image 0.7.0). OpenKal 0.26 bounds a
+start by the environment alone and states what an observation of a unit answers;
+the C library is unchanged.
 
 ## OpenKal 0.25 dependency group
 

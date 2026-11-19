@@ -71,7 +71,6 @@
 #undef realloc
 #undef free
 
-#define OKM_SPAWN_MAX 512
 /* How many files one set of file actions may open. Eight rather than three: a
  * caller may name one position more than once, and every file it opened has to
  * be released whether or not its stream ended up being the one placed. */
@@ -83,6 +82,25 @@ int __okm_child_record_job(struct kal_process h, struct kal_job j);
 static size_t slen(const char* s) { size_t n = 0; while (s && s[n]) n++; return n; }
 
 static int count(char* const* v) { int n = 0; while (v && v[n]) n++; return n; }
+
+/* Room for `n' entries in a vector and its lengths: what it holds when it
+ * holds enough, or both grown together. A failure leaves both as they were. */
+static int reserve(const char*** ptr, kal_uintptr** len, int* cap, int n)
+{
+	/* At least one entry: an empty environment is still a vector. */
+	if (n < 1) n = 1;
+	if (n <= *cap) return 1;
+	int want = *cap ? *cap : 64;
+	while (want < n) want *= 2;
+	const char** p = realloc(*ptr, (size_t)want * sizeof **ptr);
+	if (!p) return 0;
+	*ptr = p;
+	kal_uintptr* l = realloc(*len, (size_t)want * sizeof **len);
+	if (!l) return 0;
+	*len = l;
+	*cap = want;
+	return 1;
+}
 
 /* --- can this name be started at all? --------------------------------------
  *
@@ -428,14 +446,22 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 
 	const int argc = count(argv);
 	const int envc = count(envp);
-	if (argc >= OKM_SPAWN_MAX || envc >= OKM_SPAWN_MAX) return E2BIG;
 
-	static const char* a_ptr[OKM_SPAWN_MAX];
-	static kal_uintptr  a_len[OKM_SPAWN_MAX];
-	static const char* e_ptr[OKM_SPAWN_MAX];
-	static kal_uintptr  e_len[OKM_SPAWN_MAX];
+	/* THE VECTORS ARE AS LONG AS THE CALLER'S. openkal 0.26, clause 7.6: a
+	 * start is bounded by the environment alone, and one the environment
+	 * refuses for its size is `kal_err_no_space', which is E2BIG here. This
+	 * port kept a bound of its own, 512 entries, refused as E2BIG before the
+	 * environment was asked: 520 defines on a compiler's command line could
+	 * not start it (mcpp-community/mcpp#958). The vectors are this file's,
+	 * under its lock, and grow to the longest start so far. */
+	static const char** a_ptr; static kal_uintptr* a_len; static int a_cap;
+	static const char** e_ptr; static kal_uintptr* e_len; static int e_cap;
 
 	okm_lock();
+	if (!reserve(&a_ptr, &a_len, &a_cap, argc) || !reserve(&e_ptr, &e_len, &e_cap, envc)) {
+		okm_unlock();
+		return ENOMEM;
+	}
 	for (int i = 0; i < argc; i++) { a_ptr[i] = argv[i]; a_len[i] = slen(argv[i]); }
 	for (int i = 0; i < envc; i++) { e_ptr[i] = envp[i]; e_len[i] = slen(envp[i]); }
 
@@ -688,6 +714,8 @@ int __okm_spawn_common(pid_t* restrict res, const char* restrict path,
 	if (where_held) okm_fs_close_dir(where);
 
 	okm_unlock();
+	/* A start the environment refuses for its size (clause 7.6). */
+	if (e == kal_err_no_space) return E2BIG;
 	if (e != kal_ok) return okm_errno(e);
 
 	const int pid = __okm_child_record_job(child, unit);
