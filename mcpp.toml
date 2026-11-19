@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.29.10"
+version     = "0.30.0"
 # `embed' and `exclude' on a dependency edge (the allocator, below) are mcpp
 # 2026.11.2.1's; an older engine refuses the edge rather than building a C
 # library without its allocator.
@@ -177,7 +177,7 @@ lchown    = { form = "enosys", note = "as chown" }
 tcsetattr = { form = "accepted-no-effect", note = "openkal names four positions of the terminal mode word, the fourth covering ICRNL, INLCR, IGNCR and ISTRIP together; a request that alters output post-processing, the line speed, the control characters or VMIN/VTIME is accepted and that part has no effect" }
 
 [dependencies]
-openkal = "^0.25.0"
+openkal = "^0.26.0"
 
 # An ordinary consumer of openkal declares the specification and leaves the
 # choice of implementation to whoever builds the program, which is what the
@@ -192,14 +192,14 @@ openkal = "^0.25.0"
 #
 # The consequence for a program is that it names this package and nothing else.
 [target.'cfg(os = "linux")'.dependencies]
-openkal-linux = { version = "^0.26.3", features = ["standalone"] }
+openkal-linux = { version = "^0.27.0", features = ["standalone"] }
 
 # FreeBSD (0.29.1): the kernel-level implementation, standalone, as Linux's is.
 # This C library is written above openkal, so the implementation beneath it is
 # the whole of the program's environment: the rows `x86_64-freebsd-musl' and
 # `aarch64-freebsd-musl'.
 [target.'cfg(os = "freebsd")'.dependencies]
-openkal-freebsd = { version = "^0.1.0", features = ["standalone"] }
+openkal-freebsd = { version = "^0.2.0", features = ["standalone"] }
 
 [target.'cfg(os = "macos")'.dependencies]
 # 0.12.0 is the first release of this implementation that declares which
@@ -209,7 +209,7 @@ openkal-freebsd = { version = "^0.1.0", features = ["standalone"] }
 # is the shape of a check that silently does not run --- while the same
 # consumer was answered on Linux and Windows, whose implementations have
 # carried the array since openkal-linux 0.15.0 and openkal-windows 0.10.0.
-openkal-macos = { version = "^0.23.1", features = ["standalone"] }
+openkal-macos = { version = "^0.24.0", features = ["standalone"] }
 
 # FIRST STEP TOWARD A BARE MACHINE, AND NOT THE WHOLE OF IT.
 #
@@ -220,7 +220,7 @@ openkal-macos = { version = "^0.23.1", features = ["standalone"] }
 # runtime that receives control, and a C library configured for an environment
 # with no process to exit from. So this declares the implementation and stops.
 [target.'cfg(os = "none")'.dependencies]
-openkal-opensbi = { version = "^0.9.0", features = ["standalone"] }
+openkal-opensbi = { version = "^0.10.0", features = ["standalone"] }
 
 # WHICH OPENKAL INTERFACES THE IMPLEMENTATION BENEATH IS EXPECTED TO PROVIDE.
 #
@@ -266,7 +266,7 @@ defines = ["OKM_HAS_TASK=0"]
 # other. What the image form adds is libokld --- the loader the image format
 # defines --- for `dlopen', which places further images the same way.
 [target.'cfg(os = "openkal")'.dependencies]
-openkal-ld = "^0.6.0"
+openkal-ld = "^0.7.0"
 
 # The routines a compiler emits calls to and no C library defines --- on
 # AArch64, every arithmetic operation on a 128-bit `long double`, which
@@ -316,7 +316,7 @@ sources = [
 requires = ["mcpp:compiler-runtime=compiler-rt"]
 
 [target.'cfg(windows)'.dependencies]
-openkal-windows = { version = "^0.21.1", features = ["standalone"] }
+openkal-windows = { version = "^0.23.0", features = ["standalone"] }
 
 # UEFI (0.29.6): the implementation on the firmware's Boot Services, standalone:
 # its entry hands the program to this library (`__libc_start_main'). The row is
@@ -324,15 +324,16 @@ openkal-windows = { version = "^0.21.1", features = ["standalone"] }
 # selected by `object-format = "pe"', as on Windows. 0.29.8 admits openkal-uefi
 # 0.11, which adds openkal.fs over the firmware's file system and openkal.random
 # over its RNG protocol; this port reads the interfaces the implementation
-# provides, so the same sources take them where 0.11 is resolved.
+# provides, so the same sources take them where 0.11 is resolved. 0.30.0 names
+# 0.12, the release of openkal 0.26.
 [target.'cfg(os = "uefi")'.dependencies]
-openkal-uefi = { version = ">=0.10.0, <0.12.0", features = ["standalone"] }
+openkal-uefi = { version = "^0.12.0", features = ["standalone"] }
 
 # DOS (0.29.6; technical experiment only): openkal-dos through DPMI, standalone: its entry hands
 # the program to this library (`__libc_start_main'). The row is a platform's (`i686-dos-musl',
 # an ELF32 executable behind openkal-dos's stub).
 [target.'cfg(os = "dos")'.dependencies]
-openkal-dos = { version = "^0.1.0", features = ["standalone"] }
+openkal-dos = { version = "^0.2.0", features = ["standalone"] }
 
 # The feature macros musl's own build establishes.
 #
