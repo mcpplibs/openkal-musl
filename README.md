@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.30.0"
+openkal-musl = "0.30.1"
 ```
 
 The package states compatible ranges for the packages beneath it: OpenKal ^0.26,
@@ -1136,6 +1136,13 @@ The port is Apache-2.0. The vendored musl sources under `musl/` are MIT, and
 `musl/COPYRIGHT` is unchanged.
 
 ## OpenKal 0.26 dependency group
+
+Version 0.30.1 names UEFI 0.13 and DOS 0.3, which provide `openkal.process`: a
+started program runs to its end before the start returns (OpenKal clause 7.19),
+through `LoadImage` and `StartImage` on the firmware and EXEC on DOS. The port
+takes the interface from the implementation's statement, so `posix_spawn` and
+`waitpid` start and wait for a program on both rows with the same sources; the
+C library is unchanged.
 
 Version 0.30.0 selects OpenKal 0.26 and its implementations: Linux 0.27, macOS
 0.24, Windows 0.23, FreeBSD 0.2, UEFI 0.12, DOS 0.2 and OpenSBI 0.10, and places
