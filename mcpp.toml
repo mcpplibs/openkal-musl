@@ -1,7 +1,7 @@
 [package]
 namespace   = "mcpplibs"
 name        = "openkal-musl"
-version     = "0.30.1"
+version     = "0.30.2"
 # `embed' and `exclude' on a dependency edge (the allocator, below) are mcpp
 # 2026.11.2.1's; an older engine refuses the edge rather than building a C
 # library without its allocator.
@@ -502,8 +502,10 @@ sources = [
   # target that has nothing to fall back on — which is the reason §8.2 makes
   # bare metal the acceptance environment.
   #
-  # What the file provides is `__riscv_flush_icache`, which a program above
-  # openkal reaches through openkal.exec instead.
+  # What the file provides is `__riscv_flush_icache`, the call the compiler makes
+  # for `__builtin___clear_cache' on riscv64 Linux: port/src/okm_cache.c supplies
+  # it (0.30.2), since instructions run only from memory openkal.exec published,
+  # and the implementation performs the maintenance at publication.
   "!musl/src/linux/cache.c",
 
   # --- FACILITIES WITHHELD SO THAT THEIR ABSENCE IS A LINK ERROR -----------
