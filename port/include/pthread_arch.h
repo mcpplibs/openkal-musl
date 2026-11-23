@@ -40,4 +40,12 @@ static inline uintptr_t __get_tp(void) { return __okm_get_tp(); }
 #define MC_PC gregs[0]
 #endif
 
+/* The bias of the offset the linker writes for a general-dynamic access, which
+ * musl's own header for the architecture states and this one replaces: 0x800 on
+ * riscv64 (its psABI), 0 elsewhere (pthread_impl.h). port/src/okm_tls.c reads it;
+ * without it the address was 0x800 bytes below the variable. */
+#if defined(__riscv)
+#define DTP_OFFSET 0x800
+#endif
+
 #endif
