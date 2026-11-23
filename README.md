@@ -8,7 +8,7 @@ the claim can be checked rather than repeated.
 
 ```toml
 [dependencies]
-openkal-musl = "0.30.2"
+openkal-musl = "0.30.3"
 ```
 
 The package states compatible ranges for the packages beneath it: OpenKal ^0.26,
